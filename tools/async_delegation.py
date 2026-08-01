@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Async (background) delegation registry behind ``delegate_task(background=true)``.
+"""Background delegation with durable child identities and ready-set delivery.
 
-The parent dispatches a subagent on a module-level daemon executor and returns a handle
-immediately. On completion a ``type="async_delegation"`` event (self-contained task-source
-block) is pushed onto the SHARED ``process_registry.completion_queue`` the CLI/gateway drain
-while idle, so results surface as a NEW turn (never mid-turn) and inherit its de-dup and
-crash-recovery wiring. Only the async lifecycle lives here; the child run is an injected ``runner``."""
+Each finished child is persisted and published before waiting for slower siblings.
+Existing between-turn consumers coalesce the children ready at their boundary;
+there is no active-loop carrier at this layer. Parent rows remain execution and
+recovery bookkeeping, and every result uses the shared completion queue and ledger.
+"""
 
 from __future__ import annotations
 

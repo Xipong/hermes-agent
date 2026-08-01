@@ -31,8 +31,8 @@ _IMAGE_EXTS = {'.jpg', '.jpeg', '.png', '.webp', '.gif'}
 
 # Durable async-delegation claim transitions: kind -> (tools.async_delegation function, failure log).
 _DURABLE_CLAIM_OPS = {
-    "drop": ("drop_completion_delivery", "Could not drop durable completion claim"),
-    "release": ("release_completion_delivery", "Could not release durable completion claim"),
+    "drop": ("drop_event_delivery", "Could not drop durable completion claim"),
+    "release": ("release_event_delivery", "Could not release durable completion claim"),
 }
 
 
@@ -950,7 +950,10 @@ class GatewayNotificationsMixin:
         evt_type = str(evt.get("type") or "")
         if evt_type == "async_delegation":
             producer_id = str(evt.get("delegation_id") or "")
-            return (evt_type, producer_id, "") if producer_id else None
+            raw_keys = evt.get("delivery_event_keys")
+            event_identity = (tuple(str(key) for key in raw_keys if key)
+                              if isinstance(raw_keys, (list, tuple)) else str(evt.get("delivery_event_key") or ""))
+            return (evt_type, producer_id, event_identity) if producer_id else None
         if evt_type == "completion":
             producer_id = str(evt.get("session_id") or "")
             started_at = evt.get("started_at")
@@ -1017,12 +1020,12 @@ class GatewayNotificationsMixin:
         return "deliver"
 
     @staticmethod
-    def _settle_durable_claim(kind: str, delegation_id: str, claim_id: str) -> None:
+    def _settle_durable_claim(kind: str, evt: dict, claim_id: str) -> None:
         """Best-effort ``drop``/``release`` of a durable completion claim."""
         fn_name, fail_msg = _DURABLE_CLAIM_OPS[kind]
         try:
             import tools.async_delegation as _ad
-            getattr(_ad, fn_name)(delegation_id, claim_id)
+            getattr(_ad, fn_name)(evt, claim_id)
         except Exception:
             logger.debug(fail_msg, exc_info=True)
 
@@ -1039,9 +1042,11 @@ class GatewayNotificationsMixin:
             claim.delegation_id = str(evt.get("delegation_id") or "")
             if claim.delegation_id:
                 try:
-                    from tools.async_delegation import claim_completion_delivery
-                    claim.claim_id = f"gateway:{id(self)}:{__import__('uuid').uuid4().hex}"
-                    if not claim_completion_delivery(claim.delegation_id, claim.claim_id):
+                    from tools.async_delegation import claim_event_delivery
+                    claim.claim_id = claim_event_delivery(evt, f"gateway:{id(self)}") or ""
+                    if not claim.claim_id:
+                        from tools.process_registry import process_registry
+                        process_registry.defer_unclaimed_delivery(evt)
                         claim.proceed = False
                         return claim
                 except Exception as exc:
@@ -1068,7 +1073,7 @@ class GatewayNotificationsMixin:
                     claim.delegation_id or "<legacy>", parent_session_id,
                 )
                 if claim.claim_id:
-                    self._settle_durable_claim("drop", claim.delegation_id, claim.claim_id)
+                    self._settle_durable_claim("drop", evt, claim.claim_id)
             else:
                 logger.warning(
                     "Background process %s completion targets "
@@ -1080,7 +1085,7 @@ class GatewayNotificationsMixin:
         elif verdict == "retry":
             # Transient uncertainty: tell the watcher to re-poll rather than drop or misroute.
             if claim.claim_id:
-                self._settle_durable_claim("release", claim.delegation_id, claim.claim_id)
+                self._settle_durable_claim("release", evt, claim.claim_id)
             claim.proceed, claim.early_result = False, False
         return claim
 
@@ -1095,6 +1100,8 @@ class GatewayNotificationsMixin:
         if not claim.proceed:
             return claim.early_result
         if identity is not None and self._completion_identity_seen(identity, claim=True):
+            if claim.claim_id:
+                self._settle_durable_claim("release", evt, claim.claim_id)
             return None
         accepted = False
         try:
@@ -1108,8 +1115,8 @@ class GatewayNotificationsMixin:
             # The durable row is the authoritative replay state — ack it after adapter acceptance.
             if claim.claim_id:
                 try:
-                    from tools.async_delegation import complete_completion_delivery
-                    complete_completion_delivery(claim.delegation_id, claim.claim_id)
+                    from tools.async_delegation import complete_event_delivery
+                    complete_event_delivery(evt, claim.claim_id)
                 except Exception as exc:
                     logger.warning("Could not acknowledge durable async completion %s: %s", claim.delegation_id, exc)
             return True
@@ -1118,7 +1125,7 @@ class GatewayNotificationsMixin:
                 with self._completion_delivery_lock:
                     self._completion_deliveries_inflight.discard(identity)
             if claim.claim_id and not accepted:
-                self._settle_durable_claim("release", claim.delegation_id, claim.claim_id)
+                self._settle_durable_claim("release", evt, claim.claim_id)
 
     @staticmethod
     def _event_route_key(evt: dict, fields: tuple[str, ...]) -> tuple[str, ...]:
@@ -1304,7 +1311,8 @@ class GatewayNotificationsMixin:
         for evt, synth_text in deliverable[1:]:
             claim_id = claim_event_delivery(evt, f"gateway-batch:{id(self)}")
             if claim_id is None:
-                # Another consumer owns this row: keep it out of our text so it is never double-injected.
+                # Leave competing live leases eligible for retry, but not in our text.
+                _pr.defer_unclaimed_delivery(evt)
                 continue
             siblings.append((evt, claim_id))
             blocks.append(synth_text)
@@ -1346,24 +1354,28 @@ class GatewayNotificationsMixin:
         while self._running:
             with _log_suppressed(logging.DEBUG, "Async delegation watcher error: %s"):
                 # Take async-delegation events only; requeue watch/completion events for their own drains.
-                requeue = []
-                async_events = []
-                while not _pr.completion_queue.empty():
-                    try:
-                        evt = _pr.completion_queue.get_nowait()
-                    except Exception:
-                        break
-                    (async_events if evt.get("type") == "async_delegation" else requeue).append(evt)
-                for evt in requeue:
-                    _pr.completion_queue.put(evt)
-                # A fan-out finishing together yields N completions for one session; group by full route +
-                # parent session so each group becomes ONE consolidated turn.
-                # A same-tick drain often carries several completions for the SAME originating session (a
-                # fan-out of background subagents finishing together). Events for different sessions never
-                # coalesce. See #70300.
+                idle_events = []
+                with _pr.completion_routing_lock:
+                    requeue, async_events = [], []
+                    for _ in range(_pr.completion_queue.qsize()):
+                        try:
+                            evt = _pr.completion_queue.get_nowait()
+                        except Exception:
+                            break
+                        (async_events if evt.get("type") == "async_delegation" else requeue).append(evt)
+                    for evt in requeue:
+                        _pr.completion_queue.put(evt)
+                    from tools.async_delegation import coalesce_ready_after_turn_events
+                    for evt in coalesce_ready_after_turn_events(async_events):
+                        self._enrich_async_delegation_routing(evt)
+                        key = str(evt.get("session_key") or "").strip()
+                        if getattr(self, "_running_agents", {}).get(key) is not None:
+                            _pr.completion_queue.put(evt)
+                        else:
+                            idle_events.append(evt)
+                # Format and deliver after releasing the short queue reservation.
                 groups: dict[tuple[str, ...], list[dict]] = {}
-                for evt in async_events:
-                    self._enrich_async_delegation_routing(evt)
+                for evt in idle_events:
                     groups.setdefault(self._event_route_key(evt, self._ASYNC_GROUP_KEY_FIELDS), []).append(evt)
                 for group in groups.values():
                     try:

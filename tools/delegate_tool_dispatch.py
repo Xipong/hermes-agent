@@ -89,17 +89,17 @@ def _report_child_done(parent_agent, spinner_ref, entry, tag, task_labels, n_tas
         with _quiet("Spinner update_text failed: %s"):
             spinner_ref.update_text(f"🔀 {'[' + tag + '] ' if tag else ''}{remaining} task{'s' if remaining != 1 else ''} remaining")
 
-def _persist_ready_result(batch: _Batch, entry: Dict[str, Any]) -> None:
-    """Commit a finished child before joining its siblings; finalization is the retry safety net."""
+def _publish_ready_result(batch: _Batch, entry: Dict[str, Any]) -> None:
+    """Commit and publish a finished child without waiting for its siblings."""
     task_index = int(entry.get("task_index", 0))
     payload = dict(entry)
     if 0 <= task_index < len(batch.live_paths):
         payload.setdefault("live_transcript", batch.live_paths[task_index])
     try:
-        from tools.async_delegation import persist_batch_child_completion
-        persist_batch_child_completion(batch.live_deleg_id, task_index, payload)
+        from tools.async_delegation import publish_batch_child_completion
+        publish_batch_child_completion(batch.live_deleg_id, task_index, payload)
     except Exception:
-        logger.exception("Failed to persist ready child %s/%s", batch.live_deleg_id, task_index)
+        logger.exception("Failed to publish ready child %s/%s", batch.live_deleg_id, task_index)
 
 
 def _run_children_parallel(batch: _Batch, results: list, *, honor_parent_interrupt: bool) -> None:
@@ -136,14 +136,14 @@ def _run_children_parallel(batch: _Batch, results: list, *, honor_parent_interru
                     entry = _entry_of(future, futures[future])
                     results.append(entry)
                     if not honor_parent_interrupt:
-                        _persist_ready_result(batch, entry)
+                        _publish_ready_result(batch, entry)
                 break
             done, pending = _cf_wait(pending, timeout=0.5, return_when=FIRST_COMPLETED)
             for future in done:
                 entry = _entry_of(future, futures[future])
                 results.append(entry)
                 if not honor_parent_interrupt:
-                    _persist_ready_result(batch, entry)
+                    _publish_ready_result(batch, entry)
                 _report_child_done(parent_agent, spinner_ref, entry, _tag, task_labels, n_tasks, n_tasks - len(results))
     results.sort(key=lambda r: r["task_index"])  # match input order
 
@@ -157,7 +157,7 @@ def _execute_and_aggregate(batch: _Batch, *, honor_parent_interrupt: bool = True
     if len(batch.task_list) == 1:
         results.append(batch.run_child(*batch.children[0]))
         if not honor_parent_interrupt:
-            _persist_ready_result(batch, results[-1])
+            _publish_ready_result(batch, results[-1])
     else:
         _run_children_parallel(batch, results, honor_parent_interrupt=honor_parent_interrupt)
 
@@ -277,9 +277,9 @@ _BACKGROUND_NOTES = {
         "conversation as a new message when it finishes. Do not wait or poll — just continue."
     ),
     "many": (
-        "{n} subagents are running in parallel in the background. You and the user can keep working; they wait on "
-        "each other and their consolidated results re-enter the conversation as a single message once ALL of them "
-        "finish. Do not wait or poll — just continue."
+        "{n} subagents are running in parallel in the background. You and the user can keep working; completed "
+        "children are grouped at the next available turn boundary without waiting for unfinished siblings. "
+        "Do not wait or poll — just continue."
     ),
     "control_hint": (
         "While a child runs you can orchestrate it live with this same tool: delegate_task(action='list') to see live "
@@ -309,10 +309,9 @@ def _dispatched_payload(dispatch: dict, goals: List[str], child_agents: List[Any
     return payload
 
 def _dispatch_background(batch: _Batch) -> str:
-    """Dispatch the WHOLE batch as one async unit and return the tool result JSON. The runner joins on every child and
-    yields ONE consolidated results block that re-enters the conversation as a single message when ALL children
-    finish. Falls back to running synchronously (with an explanatory ``note``) when the session cannot receive
-    detached completions or the async pool is at capacity."""
+    """Dispatch one async execution unit; publish each ready child before the aggregate join.
+    The next between-turn consumer coalesces available children without waiting for siblings.
+    Fall back to sync when detached delivery is unsupported or the async pool is at capacity."""
     from tools.delegate_tool import _get_max_async_children
     from tools.async_delegation import dispatch_async_delegation_batch
     wake_sid = _resolve_async_wake_sid(batch.origin_wake_sid)

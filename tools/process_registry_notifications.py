@@ -116,14 +116,21 @@ def _preamble(evt: dict, title: str, intro: str, completed_at: float, *, with_go
 def _format_batch_delegation(evt: dict, deleg_id: str, completed_at: float) -> str:
     """Consolidated block for a delegate_task fan-out that finished as one unit."""
     results, goals = evt.get("results") or [], evt.get("goals") or []
-    n = len(results) if results else len(goals)
+    n = evt.get("batch_size") or len(goals) or len(results)
+    keys = evt.get("delivery_event_keys") or ([evt["delivery_event_key"]] if evt.get("delivery_event_key") else [])
+    ready_set = bool(keys) and all(str(key).startswith("task:") for key in keys)
+    ready_count = len(results)
+    title = (f"[ASYNC DELEGATION RESULTS READY — {deleg_id} — {ready_count}/{n}]"
+             if ready_set else f"[ASYNC DELEGATION BATCH COMPLETE — {deleg_id}]")
+    intro = (f"{ready_count}/{n} children of a background fan-out have results ready at this boundary. "
+             "The results below may be used now without waiting for other children. "
+             "Other results may have arrived earlier or may arrive at a later boundary."
+             if ready_set else f"A background fan-out of {n} subagent(s) you dispatched earlier "
+             "has finished. Its consolidated results are below. You may have moved on since "
+             "dispatching — act on these or re-dispatch if things have changed.")
     lines = _preamble(
         evt,
-        f"[ASYNC DELEGATION BATCH COMPLETE — {deleg_id}]",
-        f"A background fan-out of {n} subagent(s) you dispatched earlier "
-        "has finished. All ran in parallel and waited on each other; their "
-        "consolidated results are below. You may have moved on since "
-        "dispatching — act on these or re-dispatch if things have changed.",
+        title, intro,
         completed_at, with_goal=False)
     lines[-1] += f"   Total duration: {evt.get('total_duration_seconds', evt.get('duration_seconds', '?'))}s"
     if evt.get("error") and not results:
