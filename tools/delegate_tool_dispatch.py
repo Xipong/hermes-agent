@@ -89,6 +89,19 @@ def _report_child_done(parent_agent, spinner_ref, entry, tag, task_labels, n_tas
         with _quiet("Spinner update_text failed: %s"):
             spinner_ref.update_text(f"🔀 {'[' + tag + '] ' if tag else ''}{remaining} task{'s' if remaining != 1 else ''} remaining")
 
+def _persist_ready_result(batch: _Batch, entry: Dict[str, Any]) -> None:
+    """Commit a finished child before joining its siblings; finalization is the retry safety net."""
+    task_index = int(entry.get("task_index", 0))
+    payload = dict(entry)
+    if 0 <= task_index < len(batch.live_paths):
+        payload.setdefault("live_transcript", batch.live_paths[task_index])
+    try:
+        from tools.async_delegation import persist_batch_child_completion
+        persist_batch_child_completion(batch.live_deleg_id, task_index, payload)
+    except Exception:
+        logger.exception("Failed to persist ready child %s/%s", batch.live_deleg_id, task_index)
+
+
 def _run_children_parallel(batch: _Batch, results: list, *, honor_parent_interrupt: bool) -> None:
     """Run the batch's children in parallel, appending entries to ``results`` (sorted by task_index on return, one
     completion line printed per child). Polls futures with a short ``wait()`` timeout instead of ``as_completed()``
@@ -119,12 +132,18 @@ def _run_children_parallel(batch: _Batch, results: list, *, honor_parent_interru
         pending = set(futures)
         while pending:
             if honor_parent_interrupt and getattr(parent_agent, "_interrupt_requested", False) is True:
-                results.extend(_entry_of(f, futures[f]) for f in pending)
+                for future in pending:
+                    entry = _entry_of(future, futures[future])
+                    results.append(entry)
+                    if not honor_parent_interrupt:
+                        _persist_ready_result(batch, entry)
                 break
             done, pending = _cf_wait(pending, timeout=0.5, return_when=FIRST_COMPLETED)
             for future in done:
                 entry = _entry_of(future, futures[future])
                 results.append(entry)
+                if not honor_parent_interrupt:
+                    _persist_ready_result(batch, entry)
                 _report_child_done(parent_agent, spinner_ref, entry, _tag, task_labels, n_tasks, n_tasks - len(results))
     results.sort(key=lambda r: r["task_index"])  # match input order
 
@@ -137,6 +156,8 @@ def _execute_and_aggregate(batch: _Batch, *, honor_parent_interrupt: bool = True
     results: list = []
     if len(batch.task_list) == 1:
         results.append(batch.run_child(*batch.children[0]))
+        if not honor_parent_interrupt:
+            _persist_ready_result(batch, results[-1])
     else:
         _run_children_parallel(batch, results, honor_parent_interrupt=honor_parent_interrupt)
 
@@ -299,6 +320,9 @@ def _dispatch_background(batch: _Batch) -> str:
         logger.info("delegate_task: async delivery unsupported on this session runtime; running the batch synchronously instead.")
         return _run_sync_with_note(batch, "no_async")
 
+    if not batch.live_deleg_id:
+        from tools.async_delegation import _new_delegation_id
+        batch.live_deleg_id = _new_delegation_id()
     parent_agent = batch.parent_agent
     session_key, origin_ui_session_id = _resolve_async_session_key(parent_agent, batch.origin_ui_session_id)
     child_agents = [c for (_, _, c) in batch.children]

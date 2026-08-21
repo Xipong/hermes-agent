@@ -403,6 +403,7 @@ class ProcessRegistry:
         # process_loop and the gateway drain it after each agent turn to trigger new turns.
         import queue as _queue_mod
         self.completion_queue: _queue_mod.Queue = _queue_mod.Queue()
+        self.completion_routing_lock = threading.RLock()
         # Rehydrate durable delegation completions once, at registry startup.
         try:
             from tools.async_delegation import restore_undelivered_completions
