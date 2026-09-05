@@ -49,8 +49,8 @@ jobs:
               exit 1
             fi
 
-            # During a rebase, --ours is the new upstream base. Keep current upstream
-            # structure/helpers and re-apply only the behavior owned by this PR.
+            # During a rebase, --ours is the new upstream base. Preserve its new
+            # daemon/helper structure, then re-apply only this PR's output contract.
             git checkout --ours -- hermes_cli/banner.py
 
             python - <<'PY'
@@ -58,12 +58,10 @@ jobs:
 
           path = Path('hermes_cli/banner.py')
           text = path.read_text()
-          old = '''    def _wait_and_print() -> None:
-              if _update_check_done.wait(timeout=max_wait) and _update_result:
-                  console.print(_format_update_notice(_update_result))
-              _daemon("update-notice", _wait_and_print)  # never break the session over an update notice
-          '''
-          new = '''    def _wait_and_print() -> None:
+          outer = text.index('def _defer_update_notice(')
+          start = text.index('    def _wait_and_print() -> None:\n', outer)
+          end = text.index('\n\n# === Welcome banner ===', start)
+          replacement = '''    def _wait_and_print() -> None:
               if not _update_check_done.wait(timeout=max_wait):
                   return
               behind = _update_result
@@ -78,9 +76,7 @@ jobs:
 
               _daemon("update-notice", _wait_and_print)  # never break the session over an update notice
           '''
-          if old not in text:
-              raise SystemExit('expected upstream _defer_update_notice block not found')
-          path.write_text(text.replace(old, new, 1))
+          path.write_text(text[:start] + replacement + text[end:])
           PY
 
             git add hermes_cli/banner.py
