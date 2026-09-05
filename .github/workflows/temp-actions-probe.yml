@@ -1,38 +1,38 @@
 name: temp-actions-probe
-
 on:
   push:
-    branches:
-      - rebase/actions-probe-20260905
-
+    branches: [rebase/actions-probe-20260905]
+    paths: [.github/workflows/temp-actions-probe.yml]
 permissions:
-  contents: write
-
+  contents: read
 jobs:
-  inspect-76480:
+  export-context:
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 1
-
-      - name: Inspect PR 76480 conflict hunks
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Export repository graph for offline conflict resolution
         shell: bash
         run: |
           set -euo pipefail
-          branch='feat/subagent-cli-picker'
           git remote add upstream https://github.com/NousResearch/hermes-agent.git
-          git fetch --no-tags --depth=1 upstream main:refs/remotes/upstream/main
-          git fetch --no-tags --depth=50 origin "+refs/heads/$branch:refs/remotes/origin/$branch"
-          git checkout -B __probe "refs/remotes/origin/$branch"
-          set +e
-          GIT_EDITOR=true git rebase refs/remotes/upstream/main
-          rc=$?
-          set -e
-          echo "REBASE_RC=$rc"
-          if [ "$rc" -eq 0 ]; then exit 0; fi
-          for f in $(git diff --name-only --diff-filter=U | sort); do
-            echo "===== CONFLICT FILE: $f ====="
-            git diff --cc -- "$f" | sed -n '1,320p'
-          done
-          git rebase --abort
+          git fetch --no-tags upstream main:refs/heads/export-upstream
+          git branch export-picker origin/feat/subagent-cli-picker
+          git branch export-child-events origin/feat/delegation-child-events
+          git branch export-ready-set origin/feat/delegation-ready-set
+          git branch export-delivery origin/feat/subagent-result-delivery-v2-stack
+          git branch export-deepseek origin/pr/deepseek-thinking-third-party-proxy
+          mkdir -p /tmp/hermes-context
+          git show-ref --heads > /tmp/hermes-context/refs.txt
+          git bundle create /tmp/hermes-context/hermes.bundle refs/heads/export-upstream refs/heads/export-picker refs/heads/export-child-events refs/heads/export-ready-set refs/heads/export-delivery refs/heads/export-deepseek
+          git bundle verify /tmp/hermes-context/hermes.bundle
+          du -h /tmp/hermes-context/hermes.bundle
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hermes-rebase-context
+          path: /tmp/hermes-context/
+          retention-days: 1
+          compression-level: 0
