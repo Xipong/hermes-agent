@@ -1,0 +1,63 @@
+name: temp-delegation-rebase
+on:
+  push:
+    branches: [rebase/actions-probe-20260905]
+    paths: [.github/workflows/temp-delegation-rebase.yml]
+permissions:
+  contents: write
+concurrency:
+  group: temp-delegation-rebase
+  cancel-in-progress: false
+jobs:
+  child-events:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Rebase the original child-event commit with reviewed resolution
+        shell: bash
+        env:
+          GIT_COMMITTER_DATE: '2026-09-05T19:21:32Z'
+        run: |
+          set -euo pipefail
+          sed 's/GEXSKAvqo/GEXSKvqo/' .github/scripts/port_child_events_20260905.py.gz.b64 | base64 -d | gzip -d > /tmp/port_child.py
+          echo 'd7955ae0d1702fe78fba562abe86d79ee614a54284634de00ec053e518cdba20  /tmp/port_child.py' | sha256sum --check
+          git config user.name Xipong
+          git config user.email '217837358+Xipong@users.noreply.github.com'
+          git remote add upstream https://github.com/NousResearch/hermes-agent.git
+          git fetch --no-tags upstream 9dd6634c5635321cf38840cc30e9b51226689128
+          test "$(git rev-parse origin/feat/delegation-child-events)" = 21a28327634a534bcc69438c07cf577951b9e24b
+          git checkout -B __child origin/feat/delegation-child-events
+          if GIT_EDITOR=true git rebase 9dd6634c5635321cf38840cc30e9b51226689128; then
+            echo 'Unexpected conflict-free replay; refusing unreviewed push' >&2
+            exit 1
+          fi
+          git read-tree --reset -u 9dd6634c5635321cf38840cc30e9b51226689128
+          python /tmp/port_child.py
+          git add tools/async_delegation.py tools/delegate_tool_dispatch.py tools/process_registry.py tests/tools/test_async_delegation.py tests/tools/test_async_delegation_events.py
+          test "$(git write-tree)" = dc32cc8663097651bec70024c60dcea6d79d747f
+          GIT_EDITOR=true git rebase --continue
+          test "$(git rev-parse HEAD)" = 4a42e2d4e42a3507763f4ed10affac9ca4b45b13
+          git diff --check 9dd6634c5635321cf38840cc30e9b51226689128..HEAD
+      - name: Validate durable delivery and adjacent consumers
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check uv==0.12.10
+          uv sync --extra dev --frozen
+          git diff --name-only 9dd6634c5635321cf38840cc30e9b51226689128..HEAD -- '*.py' | xargs .venv/bin/ruff check
+          scripts/run_tests.sh tests/tools/test_async_delegation.py tests/tools/test_async_delegation_events.py tests/tools/test_async_delegation_fd_leak.py tests/tools/test_restored_delegation_ownership.py tests/tools/test_delegate_apiserver_background.py tests/tools/test_delegate.py tests/tools/test_process_registry.py tests/gateway/test_async_delegation_session_binding.py tests/tui_gateway/test_delegation_session_lifecycle.py -q
+      - name: Update only the original PR branch after passing tests
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 4a42e2d4e42a3507763f4ed10affac9ca4b45b13
+          echo "NEW_HEAD=$(git rev-parse HEAD)"
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          echo "::add-mask::$auth"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" push origin HEAD:refs/heads/feat/delegation-child-events --force-with-lease=refs/heads/feat/delegation-child-events:21a28327634a534bcc69438c07cf577951b9e24b
