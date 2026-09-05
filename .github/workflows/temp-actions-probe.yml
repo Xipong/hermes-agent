@@ -9,12 +9,73 @@ permissions:
   contents: write
 
 jobs:
-  probe:
+  probe-rebases:
     runs-on: ubuntu-latest
     steps:
-      - name: Confirm Actions are running
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Probe open PR branches against live upstream main
+        shell: bash
         run: |
-          echo "ACTIONS_OK=1"
-          echo "repo=${GITHUB_REPOSITORY}"
-          echo "ref=${GITHUB_REF}"
-          echo "sha=${GITHUB_SHA}"
+          set -u
+          git config user.name "Xipong rebase probe"
+          git config user.email "217837358+Xipong@users.noreply.github.com"
+          git remote remove upstream 2>/dev/null || true
+          git remote add upstream https://github.com/NousResearch/hermes-agent.git
+          git fetch --no-tags upstream main:refs/remotes/upstream/main
+          echo "UPSTREAM_MAIN=$(git rev-parse refs/remotes/upstream/main)"
+
+          branches=(
+            'pr/nim-reasoning'
+            'pr/defer-update-notice-plain'
+            'pr/deepseek-thinking-third-party-proxy'
+            'rebuild/codex'
+            'fix/aux-resourceexhausted-fallback'
+            'fix/fallback-picker-restore-errors'
+            'feat/subagent-cli-picker'
+            'feat/delegation-child-events'
+            'feat/delegation-ready-set'
+            'feat/subagent-result-delivery-v2-stack'
+          )
+
+          for b in "${branches[@]}"; do
+            echo
+            echo "===== $b ====="
+            git rebase --abort >/dev/null 2>&1 || true
+            git reset --hard >/dev/null
+            git clean -fd >/dev/null
+            if ! git fetch --no-tags origin "+refs/heads/$b:refs/remotes/origin/$b"; then
+              echo "RESULT=FETCH_FAILED"
+              continue
+            fi
+            git checkout -B __rebase_probe "refs/remotes/origin/$b" >/dev/null 2>&1
+            old_head=$(git rev-parse HEAD)
+            old_base=$(git merge-base refs/remotes/upstream/main HEAD)
+            echo "OLD_HEAD=$old_head"
+            echo "MERGE_BASE=$old_base"
+
+            set +e
+            git rebase refs/remotes/upstream/main >/tmp/rebase.log 2>&1
+            rc=$?
+            set -e
+
+            if [ "$rc" -eq 0 ]; then
+              echo "RESULT=CLEAN"
+              echo "NEW_HEAD=$(git rev-parse HEAD)"
+              echo "COMMITS_ON_TOP=$(git rev-list --count refs/remotes/upstream/main..HEAD)"
+            else
+              echo "RESULT=CONFLICT"
+              echo "UNMERGED_FILES_BEGIN"
+              git diff --name-only --diff-filter=U || true
+              echo "UNMERGED_FILES_END"
+              echo "REBASE_LOG_BEGIN"
+              sed -n '1,120p' /tmp/rebase.log
+              echo "REBASE_LOG_END"
+              echo "CONFLICT_DIFF_BEGIN"
+              git diff --cc | sed -n '1,220p' || true
+              echo "CONFLICT_DIFF_END"
+              git rebase --abort >/dev/null 2>&1 || true
+            fi
+          done
