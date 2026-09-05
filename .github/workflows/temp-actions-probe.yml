@@ -1,0 +1,20 @@
+name: temp-actions-probe
+
+on:
+  push:
+    branches:
+      - rebase/actions-probe-20260905
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm Actions are running
+        run: |
+          echo "ACTIONS_OK=1"
+          echo "repo=${GITHUB_REPOSITORY}"
+          echo "ref=${GITHUB_REF}"
+          echo "sha=${GITHUB_SHA}"
