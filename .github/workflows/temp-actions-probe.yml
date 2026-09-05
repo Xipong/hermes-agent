@@ -9,89 +9,36 @@ permissions:
   contents: write
 
 jobs:
-  rebase-92357:
+  probe-76480:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Rebase PR 92357 into split error-recovery architecture, test, push
+      - name: Probe PR 76480 rebase conflicts
         shell: bash
         run: |
           set -euo pipefail
-          branch='rebuild/codex'
-          cp .github/scripts/temp_semantic_rebase_92357.py /tmp/resolve_92357.py
-
-          git config user.name 'Xipong'
-          git config user.email '217837358+Xipong@users.noreply.github.com'
-          git remote remove upstream 2>/dev/null || true
+          branch='feat/subagent-cli-picker'
           git remote add upstream https://github.com/NousResearch/hermes-agent.git
           git fetch --no-tags upstream main:refs/remotes/upstream/main
           git fetch --no-tags origin "+refs/heads/$branch:refs/remotes/origin/$branch"
-
-          old_head=$(git rev-parse "refs/remotes/origin/$branch")
-          upstream_head=$(git rev-parse refs/remotes/upstream/main)
-          echo "OLD_HEAD=$old_head"
-          echo "UPSTREAM_MAIN=$upstream_head"
-          git checkout -B __rebase_92357 "refs/remotes/origin/$branch"
-
+          echo "UPSTREAM_MAIN=$(git rev-parse refs/remotes/upstream/main)"
+          echo "OLD_HEAD=$(git rev-parse refs/remotes/origin/$branch)"
+          git checkout -B __probe "refs/remotes/origin/$branch"
           set +e
           GIT_EDITOR=true git rebase refs/remotes/upstream/main
           rc=$?
           set -e
-
+          echo "REBASE_RC=$rc"
           if [ "$rc" -ne 0 ]; then
-            expected=$(printf '%s\n' \
-              'agent/conversation_loop.py' \
-              'agent/error_classifier.py' \
-              'tests/agent/test_error_classifier.py' \
-              'tests/run_agent/test_run_agent_codex_responses.py')
-            unmerged=$(git diff --name-only --diff-filter=U | sort)
-            if [ "$unmerged" != "$expected" ]; then
-              echo 'Unexpected conflict set:' >&2
-              printf '%s\n' "$unmerged" >&2
-              exit 1
-            fi
-
-            git checkout --ours -- \
-              agent/conversation_loop.py \
-              agent/error_classifier.py \
-              tests/agent/test_error_classifier.py \
-              tests/run_agent/test_run_agent_codex_responses.py
-            python /tmp/resolve_92357.py
-
-            git add \
-              agent/conversation_loop.py \
-              agent/error_classifier.py \
-              agent/turn_recovery.py \
-              tests/agent/test_error_classifier.py \
-              tests/run_agent/test_run_agent_codex_responses.py
-            GIT_EDITOR=true git rebase --continue
+            echo 'CONFLICTS:'
+            git diff --name-only --diff-filter=U | sort
+            echo 'STATUS:'
+            git status --short
+            git rebase --abort
+          else
+            echo "NEW_HEAD=$(git rev-parse HEAD)"
+            echo "COMMITS_AHEAD=$(git rev-list --count refs/remotes/upstream/main..HEAD)"
           fi
-
-          test "$(git merge-base refs/remotes/upstream/main HEAD)" = "$upstream_head"
-          test "$(git rev-list --count refs/remotes/upstream/main..HEAD)" -eq 1
-          git diff --check refs/remotes/upstream/main..HEAD
-          python -m py_compile agent/error_classifier.py agent/turn_recovery.py
-
-          if ! command -v uv >/dev/null 2>&1; then
-            python -m pip install --disable-pip-version-check uv
-          fi
-          uv sync --extra dev --frozen
-          scripts/run_tests.sh \
-            tests/agent/test_error_classifier.py \
-            tests/run_agent/test_run_agent_codex_responses.py \
-            -q
-
-          new_head=$(git rev-parse HEAD)
-          echo "NEW_HEAD=$new_head"
-          echo "NEW_TREE=$(git rev-parse HEAD^{tree})"
-          git show --stat --oneline HEAD
-
-          set +e
-          git push origin "HEAD:refs/heads/$branch" --force-with-lease="refs/heads/$branch:$old_head"
-          push_rc=$?
-          set -e
-          echo "PUSH_RC=$push_rc"
-          exit 0
