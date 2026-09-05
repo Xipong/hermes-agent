@@ -1,9 +1,8 @@
 name: Temporary rebase conflict probe
 
 on:
-  push:
-    paths:
-      - '.github/workflows/temp-rebase-probe.yml'
+  pull_request:
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
