@@ -6,49 +6,46 @@ on:
 permissions:
   contents: write
 jobs:
-  rebase-picker:
+  rebase-deepseek:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Rebase original PR with reviewed conflict resolution
+      - name: Rebase original DeepSeek PR and port detection to defining modules
         shell: bash
         run: |
           set -euo pipefail
-          base64 -d .github/scripts/port_picker.py.gz.b64 | gzip -d > /tmp/port_picker.py
-          echo '861af675db33c15dac5916981f42e318b79507aaffe04e9d779216f9d56c2a8f  /tmp/port_picker.py' | sha256sum --check
+          cp .github/scripts/port_deepseek.py /tmp/port_deepseek.py
           git config user.name Xipong
           git config user.email '217837358+Xipong@users.noreply.github.com'
           git remote add upstream https://github.com/NousResearch/hermes-agent.git
           git fetch --no-tags upstream 9dd6634c5635321cf38840cc30e9b51226689128
-          test "$(git rev-parse origin/feat/subagent-cli-picker)" = 7132a3a7f0fba08634f8e83c46c3de709e6c12a1
-          git checkout -B __picker origin/feat/subagent-cli-picker
+          test "$(git rev-parse origin/pr/deepseek-thinking-third-party-proxy)" = e44dbf5b9bcaba2533c1cdcb7e0e4b758d00f63f
+          git checkout -B __deepseek origin/pr/deepseek-thinking-third-party-proxy
           if GIT_EDITOR=true git rebase 9dd6634c5635321cf38840cc30e9b51226689128; then
             echo 'Unexpected conflict-free replay; refusing unreviewed push' >&2
             exit 1
           fi
-          expected=$(printf '%s\n' cli.py hermes_cli/auth.py hermes_cli/commands.py hermes_cli/main.py hermes_cli/model_setup_flows.py tui_gateway/methods_complete.py tui_gateway/methods_tools.py tui_gateway/server.py | sort)
-          test "$(git diff --name-only --diff-filter=U | sort)" = "$expected"
-          git checkout --ours -- cli.py hermes_cli/auth.py hermes_cli/commands.py hermes_cli/main.py hermes_cli/model_setup_flows.py tui_gateway/methods_complete.py tui_gateway/methods_tools.py tui_gateway/server.py
-          python /tmp/port_picker.py
+          test "$(git diff --name-only --diff-filter=U)" = agent/anthropic_adapter.py
+          git checkout --ours -- agent/anthropic_adapter.py
+          python /tmp/port_deepseek.py
           git add -u
-          test "$(git write-tree)" = a0965b33a71778a80a0dbff1f6d0acc67548d7f0
+          test "$(git write-tree)" = 99515013786744b5ddd2a77a43f21bbb362a8b58
           GIT_EDITOR=true git rebase --continue
           git diff --check 9dd6634c5635321cf38840cc30e9b51226689128..HEAD
           test "$(git rev-list --count 9dd6634c5635321cf38840cc30e9b51226689128..HEAD)" -eq 1
-      - name: Test new picker plus shared provider and TUI boundaries
+      - name: Verify native, DeepSeek relay, and Kimi replay contracts
         shell: bash
         run: |
           set -euo pipefail
           python -m pip install --disable-pip-version-check uv
           uv sync --extra dev --frozen
           git diff --name-only 9dd6634c5635321cf38840cc30e9b51226689128..HEAD -- '*.py' | xargs .venv/bin/ruff check
-          python scripts/check_compat_pointers.py
-          scripts/run_tests.sh tests/hermes_cli/test_subagent_model.py tests/cli/test_subagent_command.py tests/test_tui_gateway_server.py tests/cli/test_model_picker_filter.py tests/hermes_cli/test_custom_provider_model_switch.py tests/hermes_cli/test_setup_model_provider.py tests/hermes_cli/test_fallback_cmd.py -q
-      - name: Update PR branch with exact lease after tests
+          scripts/run_tests.sh tests/agent/test_anthropic_adapter.py tests/agent/test_deepseek_anthropic_thinking.py tests/agent/test_kimi_coding_anthropic_thinking.py -q
+      - name: Update original PR branch after passing checks
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -57,4 +54,4 @@ jobs:
           echo "NEW_HEAD=$(git rev-parse HEAD)"
           echo "NEW_TREE=$(git rev-parse HEAD^{tree})"
           auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
-          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" push origin HEAD:refs/heads/feat/subagent-cli-picker --force-with-lease=refs/heads/feat/subagent-cli-picker:7132a3a7f0fba08634f8e83c46c3de709e6c12a1
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" push origin HEAD:refs/heads/pr/deepseek-thinking-third-party-proxy --force-with-lease=refs/heads/pr/deepseek-thinking-third-party-proxy:e44dbf5b9bcaba2533c1cdcb7e0e4b758d00f63f
