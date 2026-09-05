@@ -4,9 +4,9 @@ on:
     branches: [rebase/actions-probe-20260905]
     paths: [.github/workflows/temp-actions-probe.yml]
 permissions:
-  contents: read
+  contents: write
 jobs:
-  export-context:
+  skills-cache-fix:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -14,39 +14,37 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Export split repository graph for offline conflict resolution
+      - name: Apply reviewed fix to pinned upstream
         shell: bash
         run: |
           set -euo pipefail
+          cp .github/scripts/fix_skills_runtime_cache.py /tmp/fix_skills_runtime_cache.py
           git remote add upstream https://github.com/NousResearch/hermes-agent.git
-          git fetch --no-tags upstream main:refs/heads/export-upstream
-          git branch export-picker origin/feat/subagent-cli-picker
-          git branch export-child-events origin/feat/delegation-child-events
-          git branch export-ready-set origin/feat/delegation-ready-set
-          git branch export-delivery origin/feat/subagent-result-delivery-v2-stack
-          git branch export-deepseek origin/pr/deepseek-thinking-third-party-proxy
-          mkdir -p /tmp/hermes-context
-          git show-ref --heads > /tmp/hermes-context/refs.txt
-          git bundle create /tmp/hermes-context/hermes.bundle refs/heads/export-upstream refs/heads/export-picker refs/heads/export-child-events refs/heads/export-ready-set refs/heads/export-delivery refs/heads/export-deepseek
-          git bundle verify /tmp/hermes-context/hermes.bundle
-          sha256sum /tmp/hermes-context/hermes.bundle
-          split -b 250M /tmp/hermes-context/hermes.bundle /tmp/hermes-context/part-
-          ls -lh /tmp/hermes-context/
-      - uses: actions/upload-artifact@v4
-        with:
-          name: hermes-context-aa
-          path: /tmp/hermes-context/part-aa
-          retention-days: 1
-          compression-level: 0
-      - uses: actions/upload-artifact@v4
-        with:
-          name: hermes-context-ab
-          path: /tmp/hermes-context/part-ab
-          retention-days: 1
-          compression-level: 0
-      - uses: actions/upload-artifact@v4
-        with:
-          name: hermes-context-ac
-          path: /tmp/hermes-context/part-ac
-          retention-days: 1
-          compression-level: 0
+          git fetch --no-tags upstream 9dd6634c5635321cf38840cc30e9b51226689128
+          git checkout -B __skills_cache 9dd6634c5635321cf38840cc30e9b51226689128
+          python /tmp/fix_skills_runtime_cache.py
+          git add tools/skills_sync.py tools/skills_sync_optional.py tools/skills_sync_bundled_ops.py tests/tools/test_skills_runtime_cache.py
+          git diff --cached --check
+          echo "TREE=$(git write-tree)"
+          test "$(git write-tree)" = 0635880d4ab12d43547485dc7b48a7623dbaa9e7
+      - name: Regression, adjacent sync and guard tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check uv
+          uv sync --extra dev --frozen
+          .venv/bin/ruff check tools/skills_sync.py tools/skills_sync_optional.py tools/skills_sync_bundled_ops.py tests/tools/test_skills_runtime_cache.py
+          scripts/run_tests.sh tests/tools/test_skills_runtime_cache.py tests/tools/test_skills_sync.py tests/tools/test_skills_list_modified_diff.py tests/tools/test_skills_sync_client.py tests/tools/test_skills_guard.py tests/tools/test_skills_hub.py -q
+      - name: Publish separate branch only after passing tests
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          branch=fix/skills-runtime-cache-hash
+          git config user.name Xipong
+          git config user.email '217837358+Xipong@users.noreply.github.com'
+          git commit -m 'fix(skills): exclude generated runtime caches from bundled ownership hashes'
+          echo "NEW_HEAD=$(git rev-parse HEAD)"
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" push origin "HEAD:refs/heads/$branch" --force-with-lease="refs/heads/$branch:"
