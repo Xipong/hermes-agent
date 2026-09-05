@@ -14,7 +14,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Export repository graph for offline conflict resolution
+      - name: Export split repository graph for offline conflict resolution
         shell: bash
         run: |
           set -euo pipefail
@@ -29,10 +29,24 @@ jobs:
           git show-ref --heads > /tmp/hermes-context/refs.txt
           git bundle create /tmp/hermes-context/hermes.bundle refs/heads/export-upstream refs/heads/export-picker refs/heads/export-child-events refs/heads/export-ready-set refs/heads/export-delivery refs/heads/export-deepseek
           git bundle verify /tmp/hermes-context/hermes.bundle
-          du -h /tmp/hermes-context/hermes.bundle
+          sha256sum /tmp/hermes-context/hermes.bundle
+          split -b 250M /tmp/hermes-context/hermes.bundle /tmp/hermes-context/part-
+          ls -lh /tmp/hermes-context/
       - uses: actions/upload-artifact@v4
         with:
-          name: hermes-rebase-context
-          path: /tmp/hermes-context/
+          name: hermes-context-aa
+          path: /tmp/hermes-context/part-aa
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hermes-context-ab
+          path: /tmp/hermes-context/part-ab
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hermes-context-ac
+          path: /tmp/hermes-context/part-ac
           retention-days: 1
           compression-level: 0
