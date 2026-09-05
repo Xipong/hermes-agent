@@ -9,7 +9,7 @@ concurrency:
   group: temp-delegation-rebase
   cancel-in-progress: false
 jobs:
-  child-events:
+  ready-set:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -17,47 +17,49 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Rebase the original child-event commit with reviewed resolution
+      - name: Rebase only the ready-set layer on the verified child foundation
         shell: bash
         env:
-          GIT_COMMITTER_DATE: '2026-09-05T19:21:32Z'
+          GIT_COMMITTER_DATE: '2026-09-05T19:40:00Z'
         run: |
           set -euo pipefail
-          sed 's/GEXSKAvqo/GEXSKvqo/' .github/scripts/port_child_events_20260905.py.gz.b64 | base64 -d | gzip -d > /tmp/port_child.py
-          echo 'd7955ae0d1702fe78fba562abe86d79ee614a54284634de00ec053e518cdba20  /tmp/port_child.py' | sha256sum --check
+          base64 -d .github/scripts/port_ready_set_20260905.py.gz.b64 | gzip -d > /tmp/port_ready.py
+          echo '344b2bee6be7bca33960f83d3acacfc7c3429c92a2cdcd569028843b9449d96e  /tmp/port_ready.py' | sha256sum --check
           git config user.name Xipong
           git config user.email '217837358+Xipong@users.noreply.github.com'
-          git remote add upstream https://github.com/NousResearch/hermes-agent.git
-          git fetch --no-tags upstream 9dd6634c5635321cf38840cc30e9b51226689128
-          test "$(git rev-parse origin/feat/delegation-child-events)" = 21a28327634a534bcc69438c07cf577951b9e24b
-          git checkout -B __child origin/feat/delegation-child-events
-          if GIT_EDITOR=true git rebase 9dd6634c5635321cf38840cc30e9b51226689128; then
+          test "$(git rev-parse origin/feat/delegation-child-events)" = 4a42e2d4e42a3507763f4ed10affac9ca4b45b13
+          test "$(git rev-parse origin/feat/delegation-ready-set)" = aa4038d03b63b651b709abd6d6d7c178094fa951
+          git checkout -B __ready origin/feat/delegation-ready-set
+          if GIT_EDITOR=true git rebase --onto 4a42e2d4e42a3507763f4ed10affac9ca4b45b13 21a28327634a534bcc69438c07cf577951b9e24b; then
             echo 'Unexpected conflict-free replay; refusing unreviewed push' >&2
             exit 1
           fi
-          git read-tree --reset -u 9dd6634c5635321cf38840cc30e9b51226689128
-          python /tmp/port_child.py
-          git add tools/async_delegation.py tools/delegate_tool_dispatch.py tools/process_registry.py tests/tools/test_async_delegation.py tests/tools/test_async_delegation_events.py
-          test "$(git write-tree)" = dc32cc8663097651bec70024c60dcea6d79d747f
+          git read-tree --reset -u 4a42e2d4e42a3507763f4ed10affac9ca4b45b13
+          python /tmp/port_ready.py
+          git add -u
+          git add tools/process_registry_delivery.py tests/tools/test_ready_set_port.py
+          test "$(git write-tree)" = 74d221c58b6409e6cc5b4159ec3cf8bd83c93ff1
           GIT_EDITOR=true git rebase --continue
-          test "$(git rev-parse HEAD)" = 4a42e2d4e42a3507763f4ed10affac9ca4b45b13
+          test "$(git rev-parse HEAD)" = f3047c6ef2c193ea94e5e3d0f8ff36c44b962c8c
+          test "$(git rev-list --count 9dd6634c5635321cf38840cc30e9b51226689128..HEAD)" -eq 2
           git diff --check 9dd6634c5635321cf38840cc30e9b51226689128..HEAD
-      - name: Validate durable delivery and adjacent consumers
+      - name: Verify ready delivery across CLI, gateway, TUI and API consumers
         shell: bash
         run: |
           set -euo pipefail
           python -m pip install --disable-pip-version-check uv==0.12.10
           uv sync --extra dev --frozen
-          git diff --name-only 9dd6634c5635321cf38840cc30e9b51226689128..HEAD -- '*.py' | xargs .venv/bin/ruff check
-          scripts/run_tests.sh tests/tools/test_async_delegation.py tests/tools/test_async_delegation_events.py tests/tools/test_async_delegation_fd_leak.py tests/tools/test_restored_delegation_ownership.py tests/tools/test_delegate_apiserver_background.py tests/tools/test_delegate.py tests/tools/test_process_registry.py tests/gateway/test_async_delegation_session_binding.py tests/tui_gateway/test_delegation_session_lifecycle.py -q
-      - name: Update only the original PR branch after passing tests
+          git diff --name-only 4a42e2d4e42a3507763f4ed10affac9ca4b45b13..HEAD -- '*.py' | xargs .venv/bin/ruff check
+          python scripts/check_compat_pointers.py
+          scripts/run_tests.sh tests/tools/test_async_delegation.py tests/tools/test_async_delegation_events.py tests/tools/test_delegate_apiserver_background.py tests/tools/test_process_registry.py tests/tools/test_restored_delegation_ownership.py tests/tools/test_ready_set_port.py tests/tools/test_delegate.py tests/tools/test_async_delegation_fd_leak.py tests/gateway/test_completion_delivery.py tests/gateway/test_async_delegation_session_binding.py tests/cli/test_cli_async_delegation_delivery.py tests/test_tui_gateway_server.py tests/tui_gateway/test_delegation_session_lifecycle.py -q
+      - name: Update the original ready-set PR only after green checks
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = 4a42e2d4e42a3507763f4ed10affac9ca4b45b13
+          test "$(git rev-parse HEAD)" = f3047c6ef2c193ea94e5e3d0f8ff36c44b962c8c
           echo "NEW_HEAD=$(git rev-parse HEAD)"
           auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
           echo "::add-mask::$auth"
-          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" push origin HEAD:refs/heads/feat/delegation-child-events --force-with-lease=refs/heads/feat/delegation-child-events:21a28327634a534bcc69438c07cf577951b9e24b
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" push origin HEAD:refs/heads/feat/delegation-ready-set --force-with-lease=refs/heads/feat/delegation-ready-set:aa4038d03b63b651b709abd6d6d7c178094fa951
