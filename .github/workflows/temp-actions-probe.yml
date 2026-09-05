@@ -9,18 +9,18 @@ permissions:
   contents: write
 
 jobs:
-  rebase-76497:
+  rebase-76370:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Rebase PR 76497, preserve picker route transactionally, test, push
+      - name: Rebase PR 76370 into centralized error classifier, test, push
         shell: bash
         run: |
           set -euo pipefail
-          branch='fix/fallback-picker-restore-errors'
+          branch='fix/aux-resourceexhausted-fallback'
 
           git config user.name 'Xipong'
           git config user.email '217837358+Xipong@users.noreply.github.com'
@@ -33,7 +33,7 @@ jobs:
           upstream_head=$(git rev-parse refs/remotes/upstream/main)
           echo "OLD_HEAD=$old_head"
           echo "UPSTREAM_MAIN=$upstream_head"
-          git checkout -B __rebase_76497 "refs/remotes/origin/$branch"
+          git checkout -B __rebase_76370 "refs/remotes/origin/$branch"
 
           set +e
           GIT_EDITOR=true git rebase refs/remotes/upstream/main
@@ -42,169 +42,68 @@ jobs:
 
           if [ "$rc" -ne 0 ]; then
             unmerged=$(git diff --name-only --diff-filter=U)
-            if [ "$unmerged" != 'hermes_cli/fallback_cmd.py' ]; then
+            if [ "$unmerged" != 'agent/auxiliary_client.py' ]; then
               echo 'Unexpected conflict set:' >&2
               printf '%s\n' "$unmerged" >&2
               exit 1
             fi
-            git checkout --ours -- hermes_cli/fallback_cmd.py
+
+            # The old payment classifier moved out of auxiliary_client.py. Keep
+            # the current runtime and port this PR's spelling normalization into
+            # the centralized classifier instead of resurrecting dead code.
+            git checkout --ours -- agent/auxiliary_client.py
+            git checkout refs/remotes/upstream/main -- tests/agent/test_auxiliary_client.py
 
             python - <<'PY'
           from pathlib import Path
 
-          p = Path('hermes_cli/fallback_cmd.py')
+          p = Path('agent/error_classifier.py')
           text = p.read_text()
+          old = '    "tokens per minute", "requests per day", "try again in", "please retry after", "resource_exhausted",\n'
+          new = (
+              '    "tokens per minute", "requests per day", "try again in", "please retry after",\n'
+              '    "resource exhausted", "resource_exhausted", "resource-exhausted", "resourceexhausted",\n'
+          )
+          if old not in text:
+              raise SystemExit('current _RATE_LIMIT_PATTERNS shape changed')
+          p.write_text(text.replace(old, new, 1))
 
-          # Preserve the distinction between a missing active_provider key and
-          # an explicitly stored null value.
-          marker = '_read_chain = get_fallback_chain\n'
+          p = Path('tests/agent/test_error_classifier.py')
+          text = p.read_text()
+          marker = '''    def test_anthropic_429_usage_limit_without_reset_is_billing(self):\n'''
           if marker not in text:
-              raise SystemExit('fallback chain marker changed')
-          if '_MISSING_ACTIVE_PROVIDER = object()' not in text:
-              text = text.replace(
-                  marker,
-                  marker + '\n\n_MISSING_ACTIVE_PROVIDER = object()\n',
-                  1,
-              )
-
-          # Auth snapshot/restore is part of the transaction: failures must be
-          # visible instead of silently stranding the picker-selected provider.
-          start = text.index('def _snapshot_auth_active_provider() -> Any:')
-          end = text.index('def _restore_model_cfg(model_before: Any) -> None:', start)
-          auth_helpers = '\n'.join([
-              'def _snapshot_auth_active_provider() -> Any:',
-              '    """Return the current ``active_provider`` in auth.json."""',
-              '    from hermes_cli.auth import _auth_store_lock, _load_auth_store',
-              '',
-              '    with _auth_store_lock():',
-              '        store = _load_auth_store()',
-              '        return store.get("active_provider", _MISSING_ACTIVE_PROVIDER)',
-              '',
-              '',
-              'def _restore_auth_active_provider(value: Any) -> None:',
-              '    """Write back a previously snapshotted ``active_provider`` value."""',
-              '    from hermes_cli.auth import _auth_store_lock, _load_auth_store, _save_auth_store',
-              '',
-              '    with _auth_store_lock():',
-              '        store = _load_auth_store()',
-              '        if value is _MISSING_ACTIVE_PROVIDER:',
-              '            store.pop("active_provider", None)',
-              '        else:',
-              '            store["active_provider"] = value',
-              '        _save_auth_store(store)',
-              '',
-              '',
-          ])
-          text = text[:start] + auth_helpers + text[end:]
-
-          # Add a two-store restore helper immediately before _entries. It tries
-          # both halves even when the first fails, then reports a single error.
-          entries_idx = text.index('def _entries(n: int) -> str:')
-          if 'def _restore_primary_route(' not in text:
-              route_helper = '\n'.join([
-                  'def _restore_primary_route(model_before: Any, active_provider_before: Any) -> None:',
-                  '    """Attempt both halves of temporary picker-route restoration."""',
-                  '    errors: list[BaseException] = []',
-                  '    try:',
-                  '        _restore_model_cfg(model_before)',
-                  '    except BaseException as exc:',
-                  '        errors.append(exc)',
-                  '    try:',
-                  '        _restore_auth_active_provider(active_provider_before)',
-                  '    except BaseException as exc:',
-                  '        errors.append(exc)',
-                  '    if errors:',
-                  '        details = "; ".join(str(exc) for exc in errors)',
-                  '        raise RuntimeError(f"Could not fully restore the primary route: {details}") from errors[0]',
-                  '',
-                  '',
-              ])
-              text = text[:entries_idx] + route_helper + text[entries_idx:]
-
-          # Rewrite only cmd_fallback_add around the current helper APIs. The
-          # selected route is restored immediately after extracting the fallback,
-          # before identity checks/imports/appends can fail.
-          start = text.index('def cmd_fallback_add(args) -> None:')
-          end = text.index('def cmd_fallback_remove(args) -> None:', start)
-          add_fn = '\n'.join([
-              'def cmd_fallback_add(args) -> None:',
-              '    """Launch the same picker as `hermes model`, then append the selection to the chain."""',
-              '    from hermes_cli.main import _require_tty, select_provider_and_model',
-              '    from hermes_cli.config import load_config, save_config',
-              '    _require_tty("fallback add")',
-              '',
-              '    # Snapshot BEFORE the picker runs; both route stores must be restored on every exit path.',
-              '    model_before = copy.deepcopy(load_config().get("model"))',
-              '    active_provider_before = _snapshot_auth_active_provider()',
-              '    print("\\n  Adding a fallback provider.  The picker below is the same one used by\\n"',
-              '          "  `hermes model` — select the provider + model you want as a fallback.\\n")',
-              '',
-              '    try:',
-              '        select_provider_and_model(args=args)',
-              '        after_cfg = load_config()',
-              '        model_after = after_cfg.get("model")',
-              '        new_entry = _extract_fallback_from_model_cfg(model_after)',
-              '    except BaseException as picker_error:',
-              '        try:',
-              '            _restore_primary_route(model_before, active_provider_before)',
-              '        except Exception as restore_error:',
-              '            picker_error.add_note(',
-              '                "Could not fully restore the primary route after fallback "',
-              '                f"selection failed: {restore_error}"',
-              '            )',
-              '        raise',
-              '',
-              '    # From here onward no identity/import/append failure can strand the temporary picker route.',
-              '    _restore_primary_route(model_before, active_provider_before)',
-              '',
-              '    if not new_entry:',
-              '        print("\\n  No fallback added.")',
-              '        return',
-              '',
-              '    from agent.backend_identity import same_deployment',
-              '    new_ident = _identity(new_entry)',
-              '    primary_entry = _extract_fallback_from_model_cfg(model_before)',
-              '    if primary_entry and same_deployment(_identity(primary_entry), new_ident):',
-              '        print(f"\\n  Selected model matches the current primary ({_format_entry(new_entry)}).")',
-              '        print("  A provider cannot be a fallback for itself — no change.")',
-              '        return',
-              '',
-              '    # Reload after primary restoration; picker-created providers/credentials remain.',
-              '    final_cfg = load_config()',
-              '    chain = _read_chain(final_cfg)',
-              '    if any(same_deployment(_identity(existing), new_ident) for existing in chain):',
-              '        print(f"\\n  {_format_entry(new_entry)} is already in the fallback chain — skipped.")',
-              '        return',
-              '    chain.append(new_entry)',
-              '    _write_chain(final_cfg, chain)',
-              '    save_config(final_cfg)',
-              '    print(f"\\n  Added fallback: {_format_entry(new_entry)}")',
-              '    print(f"  Chain is now {_entries(len(chain))} long.\\n")',
-              '    print("  Run `hermes fallback list` to view, or `hermes fallback remove` to delete.")',
-              '',
-              '',
-          ])
-          p.write_text(text[:start] + add_fn + text[end:])
+              raise SystemExit('rate-limit test insertion point changed')
+          test = '''    @pytest.mark.parametrize("spelling", [\n        "resource exhausted",\n        "RESOURCE_EXHAUSTED",\n        "ResourceExhausted",\n        "resource-exhausted",\n    ])\n    def test_resource_exhausted_separator_variants_without_status(self, spelling):\n        result = classify_api_error(\n            Exception(f"{spelling}: Worker local total request limit reached (32/32)"),\n            provider="nvidia",\n            model="nvidia/nemotron-3-ultra-550b-a55b",\n        )\n        assert result.reason == FailoverReason.rate_limit\n        assert result.retryable is True\n        assert result.should_rotate_credential is True\n        assert result.should_fallback is True\n\n'''
+          p.write_text(text.replace(marker, test + marker, 1))
           PY
 
-            git add hermes_cli/fallback_cmd.py
+            git add \
+              agent/auxiliary_client.py \
+              agent/error_classifier.py \
+              tests/agent/test_auxiliary_client.py \
+              tests/agent/test_error_classifier.py
             GIT_EDITOR=true git rebase --continue
           fi
 
           test "$(git merge-base refs/remotes/upstream/main HEAD)" = "$upstream_head"
           test "$(git rev-list --count refs/remotes/upstream/main..HEAD)" -eq 1
           git diff --check refs/remotes/upstream/main..HEAD
-          python -m py_compile hermes_cli/fallback_cmd.py
+          python -m py_compile agent/error_classifier.py agent/auxiliary_client.py
 
           if ! command -v uv >/dev/null 2>&1; then
             python -m pip install --disable-pip-version-check uv
           fi
           uv sync --extra dev --frozen
-          scripts/run_tests.sh tests/hermes_cli/test_fallback_cmd.py -q
+          scripts/run_tests.sh \
+            tests/agent/test_error_classifier.py \
+            tests/agent/test_auxiliary_client.py \
+            -q
 
           new_head=$(git rev-parse HEAD)
           echo "NEW_HEAD=$new_head"
           echo "NEW_TREE=$(git rev-parse HEAD^{tree})"
+          git show --stat --oneline HEAD
+
           set +e
           git push origin "HEAD:refs/heads/$branch" --force-with-lease="refs/heads/$branch:$old_head"
           push_rc=$?
