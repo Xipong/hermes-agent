@@ -9,36 +9,30 @@ permissions:
   contents: write
 
 jobs:
-  probe-76480:
+  inspect-76480:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
-      - name: Probe PR 76480 rebase conflicts
+      - name: Inspect PR 76480 conflict hunks
         shell: bash
         run: |
           set -euo pipefail
           branch='feat/subagent-cli-picker'
           git remote add upstream https://github.com/NousResearch/hermes-agent.git
-          git fetch --no-tags upstream main:refs/remotes/upstream/main
-          git fetch --no-tags origin "+refs/heads/$branch:refs/remotes/origin/$branch"
-          echo "UPSTREAM_MAIN=$(git rev-parse refs/remotes/upstream/main)"
-          echo "OLD_HEAD=$(git rev-parse refs/remotes/origin/$branch)"
+          git fetch --no-tags --depth=1 upstream main:refs/remotes/upstream/main
+          git fetch --no-tags --depth=50 origin "+refs/heads/$branch:refs/remotes/origin/$branch"
           git checkout -B __probe "refs/remotes/origin/$branch"
           set +e
           GIT_EDITOR=true git rebase refs/remotes/upstream/main
           rc=$?
           set -e
           echo "REBASE_RC=$rc"
-          if [ "$rc" -ne 0 ]; then
-            echo 'CONFLICTS:'
-            git diff --name-only --diff-filter=U | sort
-            echo 'STATUS:'
-            git status --short
-            git rebase --abort
-          else
-            echo "NEW_HEAD=$(git rev-parse HEAD)"
-            echo "COMMITS_AHEAD=$(git rev-list --count refs/remotes/upstream/main..HEAD)"
-          fi
+          if [ "$rc" -eq 0 ]; then exit 0; fi
+          for f in $(git diff --name-only --diff-filter=U | sort); do
+            echo "===== CONFLICT FILE: $f ====="
+            git diff --cc -- "$f" | sed -n '1,320p'
+          done
+          git rebase --abort
