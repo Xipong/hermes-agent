@@ -21,6 +21,7 @@ jobs:
         run: |
           set -euo pipefail
           branch='rebuild/codex'
+          cp .github/scripts/temp_semantic_rebase_92357.py /tmp/resolve_92357.py
 
           git config user.name 'Xipong'
           git config user.email '217837358+Xipong@users.noreply.github.com'
@@ -53,193 +54,12 @@ jobs:
               exit 1
             fi
 
-            # The retry loop was decomposed after this PR. Keep the current loop
-            # and port the masked-replay recovery into error_classifier + turn_recovery.
             git checkout --ours -- \
               agent/conversation_loop.py \
               agent/error_classifier.py \
               tests/agent/test_error_classifier.py \
               tests/run_agent/test_run_agent_codex_responses.py
-
-            python - <<'PY'
-          from pathlib import Path
-
-          def replace_once(path: Path, old: str, new: str) -> None:
-              text = path.read_text()
-              if old not in text:
-                  raise SystemExit(f'expected block not found in {path}: {old[:120]!r}')
-              path.write_text(text.replace(old, new, 1))
-
-          # 1) Current centralized classifier: add a dedicated, narrow reason and
-          # classify the exact ChatGPT Codex invalid_prompt envelope before HTTP 400
-          # falls into generic format_error.
-          p = Path('agent/error_classifier.py')
-          text = p.read_text()
-          enum_old = '    invalid_encrypted_content = "invalid_encrypted_content"  # Responses replay blob rejected — strip replay state and retry\n'
-          enum_new = enum_old + '    codex_reasoning_replay_rejected = "codex_reasoning_replay_rejected"  # ChatGPT Codex masked a replay rejection as invalid_prompt\n'
-          if enum_old not in text:
-              raise SystemExit('FailoverReason replay enum insertion point changed')
-          text = text.replace(enum_old, enum_new, 1)
-
-          marker = '    # Anthropic thinking-block 400s (signature mismatch after transcript\n'
-          if marker not in text:
-              raise SystemExit('provider-special-case insertion point changed')
-          codex_case = '''    # ChatGPT Codex OAuth can mask a rejected encrypted-reasoning replay behind\n    # ``invalid_prompt: Request blocked.``. Keep this signature intentionally narrow:\n    # provider + structured code + exact body shape + status None/400. Recovery is\n    # still gated on cached codex_reasoning_items in turn_recovery.py.\n    if c.provider_slug == "openai-codex" and c.code == "invalid_prompt":\n        err_obj = _error_obj(c.body)\n        if not err_obj and isinstance(c.body, dict):\n            err_obj = c.body\n        codex_message = str(err_obj.get("message") or "").strip().lower()\n        matches_masked_replay = (\n            c.status_code in {None, 400}\n            and codex_message == "request blocked."\n            and err_obj.get("type") == "invalid_request_error"\n            and "param" in err_obj\n            and err_obj.get("param") is None\n        )\n        if matches_masked_replay:\n            return _v(_R.codex_reasoning_replay_rejected, retryable=False, should_fallback=False)\n        logger.debug(\n            "OpenAI Codex invalid_prompt did not match the masked replay signature: "\n            "status=%r message=%r type=%r param_present=%s param_is_null=%s",\n            c.status_code, codex_message[:160], err_obj.get("type"),\n            "param" in err_obj, err_obj.get("param") is None,\n        )\n'''
-          text = text.replace(marker, codex_case + marker, 1)
-          p.write_text(text)
-
-          # 2) Recovery moved from conversation_loop.py to turn_recovery.py. Extend
-          # the existing one-shot replay-strip branch rather than duplicating it.
-          p = Path('agent/turn_recovery.py')
-          text = p.read_text()
-          old_reason = '        classified.reason == FailoverReason.invalid_encrypted_content\n'
-          new_reason = '''        classified.reason in {\n            FailoverReason.invalid_encrypted_content,\n            FailoverReason.codex_reasoning_replay_rejected,\n        }\n'''
-          if old_reason not in text:
-              raise SystemExit('encrypted replay recovery condition changed')
-          text = text.replace(old_reason, new_reason, 1)
-          replay_return = '''        return True\n\n    # Structured 400 naming ``context_management``: disable native compaction for the\n'''
-          replay_noop = '''        return True\n\n    if (\n        classified.reason == FailoverReason.codex_reasoning_replay_rejected\n        and not _retry.invalid_encrypted_content_retry_attempted\n        and agent.api_mode == "codex_responses"\n        and bool(getattr(agent, "_codex_reasoning_replay_enabled", True))\n    ):\n        logger.debug(\n            "%sCodex masked replay rejection matched, but no cached "\n            "codex_reasoning_items were present; replay-strip recovery is a no-op",\n            agent.log_prefix,\n        )\n\n    # Structured 400 naming ``context_management``: disable native compaction for the\n'''
-          if replay_return not in text:
-              raise SystemExit('encrypted replay recovery tail changed')
-          p.write_text(text.replace(replay_return, replay_noop, 1))
-
-          # 3) Port classifier regression coverage to the current test file.
-          p = Path('tests/agent/test_error_classifier.py')
-          text = p.read_text()
-          expected_old = '            "invalid_encrypted_content",\n            "multimodal_tool_content_unsupported",\n'
-          expected_new = '            "invalid_encrypted_content",\n            "codex_reasoning_replay_rejected",\n            "multimodal_tool_content_unsupported",\n'
-          if expected_old not in text:
-              raise SystemExit('enum expected-set shape changed')
-          text = text.replace(expected_old, expected_new, 1)
-          classifier_tests = r'''
-
-
-def test_openai_codex_masked_invalid_prompt_is_replay_rejection_candidate():
-    e = MockAPIError(
-        "Error code: 400 - Request blocked.",
-        status_code=400,
-        body={"error": {
-            "message": "Request blocked.",
-            "type": "invalid_request_error",
-            "param": None,
-            "code": "invalid_prompt",
-        }},
-    )
-    result = classify_api_error(e, provider="openai-codex", model="gpt-5.6-terra")
-    assert result.reason == FailoverReason.codex_reasoning_replay_rejected
-    assert result.retryable is False
-    assert result.should_fallback is False
-
-
-def test_openai_codex_direct_statusless_invalid_prompt_is_replay_rejection_candidate():
-    e = MockAPIError(
-        "Request blocked.",
-        body={
-            "message": "Request blocked.",
-            "type": "invalid_request_error",
-            "param": None,
-            "code": "invalid_prompt",
-        },
-    )
-    result = classify_api_error(e, provider="openai-codex", model="gpt-5.6-terra")
-    assert result.reason == FailoverReason.codex_reasoning_replay_rejected
-
-
-def test_openai_codex_masked_invalid_prompt_near_miss_stays_format_error(caplog):
-    e = MockAPIError(
-        "Error code: 400 - Request blocked",
-        status_code=400,
-        body={"error": {
-            "message": "Request blocked",
-            "type": "invalid_request_error",
-            "param": None,
-            "code": "invalid_prompt",
-        }},
-    )
-    with caplog.at_level("DEBUG", logger="agent.error_classifier"):
-        result = classify_api_error(e, provider="openai-codex", model="gpt-5.6-terra")
-    assert result.reason == FailoverReason.format_error
-    assert "did not match the masked replay signature" in caplog.text
-
-
-def test_masked_invalid_prompt_other_provider_stays_format_error():
-    e = MockAPIError(
-        "Error code: 400 - Request blocked.",
-        status_code=400,
-        body={"error": {
-            "message": "Request blocked.",
-            "type": "invalid_request_error",
-            "param": None,
-            "code": "invalid_prompt",
-        }},
-    )
-    result = classify_api_error(e, provider="openai", model="gpt-5.6-terra")
-    assert result.reason == FailoverReason.format_error
-'''
-          p.write_text(text + classifier_tests)
-
-          # 4) Preserve one end-to-end Codex regression using the live SDK error
-          # shape. This proves classifier -> turn_recovery -> second request wiring.
-          p = Path('tests/run_agent/test_run_agent_codex_responses.py')
-          text = p.read_text()
-          import_old = 'from types import SimpleNamespace\n\nimport pytest\n'
-          import_new = 'from types import SimpleNamespace\n\nimport httpx\nimport pytest\nfrom openai import APIError as OpenAIAPIError\n'
-          if import_old not in text:
-              raise SystemExit('Codex test import block changed')
-          text = text.replace(import_old, import_new, 1)
-          integration = r'''
-
-
-def test_openai_codex_masked_replay_rejection_strips_reasoning_and_retries(monkeypatch):
-    agent = _build_agent(monkeypatch)
-    agent.provider = "openai-codex"
-    agent.base_url = "https://chatgpt.com/backend-api/codex"
-    request_payloads = []
-
-    live_error = OpenAIAPIError(
-        message="Request blocked.",
-        request=httpx.Request("POST", "https://chatgpt.com/backend-api/codex/responses"),
-        body={
-            "message": "Request blocked.",
-            "type": "invalid_request_error",
-            "param": None,
-            "code": "invalid_prompt",
-        },
-    )
-    assert not hasattr(live_error, "status_code")
-    responses = [live_error, _codex_message_response("Recovered without replay.")]
-
-    def _fake_api_call(api_kwargs):
-        request_payloads.append(api_kwargs)
-        current = responses.pop(0)
-        if isinstance(current, Exception):
-            raise current
-        return current
-
-    monkeypatch.setattr(agent, "_interruptible_api_call", _fake_api_call)
-    history = [{
-        "role": "assistant",
-        "content": "",
-        "finish_reason": "incomplete",
-        "codex_reasoning_items": [
-            {"type": "reasoning", "id": "rs_001", "encrypted_content": "enc_bad", "summary": []},
-        ],
-    }]
-
-    result = agent.run_conversation("continue", conversation_history=history)
-
-    assert result["completed"] is True
-    assert result["final_response"] == "Recovered without replay."
-    assert len(request_payloads) == 2
-    assert any(item.get("type") == "reasoning" for item in request_payloads[0]["input"])
-    assert not any(item.get("type") == "reasoning" for item in request_payloads[1]["input"])
-    assert request_payloads[0].get("include") == ["reasoning.encrypted_content"]
-    assert request_payloads[1].get("include") == []
-    assert result["messages"][0].get("codex_reasoning_items") is None
-    assert agent._codex_reasoning_replay_enabled is False
-'''
-          p.write_text(text + integration)
-          PY
+            python /tmp/resolve_92357.py
 
             git add \
               agent/conversation_loop.py \
