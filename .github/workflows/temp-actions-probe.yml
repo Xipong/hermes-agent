@@ -9,73 +9,96 @@ permissions:
   contents: write
 
 jobs:
-  probe-rebases:
+  rebase-92486:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Probe open PR branches against live upstream main
+      - name: Rebase PR 92486, resolve semantic conflict, test, and push
         shell: bash
         run: |
-          set -u
-          git config user.name "Xipong rebase probe"
-          git config user.email "217837358+Xipong@users.noreply.github.com"
+          set -euo pipefail
+          branch='pr/defer-update-notice-plain'
+
+          git config user.name 'Xipong'
+          git config user.email '217837358+Xipong@users.noreply.github.com'
           git remote remove upstream 2>/dev/null || true
           git remote add upstream https://github.com/NousResearch/hermes-agent.git
           git fetch --no-tags upstream main:refs/remotes/upstream/main
-          echo "UPSTREAM_MAIN=$(git rev-parse refs/remotes/upstream/main)"
+          git fetch --no-tags origin "+refs/heads/$branch:refs/remotes/origin/$branch"
 
-          branches=(
-            'pr/nim-reasoning'
-            'pr/defer-update-notice-plain'
-            'pr/deepseek-thinking-third-party-proxy'
-            'rebuild/codex'
-            'fix/aux-resourceexhausted-fallback'
-            'fix/fallback-picker-restore-errors'
-            'feat/subagent-cli-picker'
-            'feat/delegation-child-events'
-            'feat/delegation-ready-set'
-            'feat/subagent-result-delivery-v2-stack'
-          )
+          old_head=$(git rev-parse "refs/remotes/origin/$branch")
+          upstream_head=$(git rev-parse refs/remotes/upstream/main)
+          echo "OLD_HEAD=$old_head"
+          echo "UPSTREAM_MAIN=$upstream_head"
 
-          for b in "${branches[@]}"; do
-            echo
-            echo "===== $b ====="
-            git rebase --abort >/dev/null 2>&1 || true
-            git reset --hard >/dev/null
-            git clean -fd >/dev/null
-            if ! git fetch --no-tags origin "+refs/heads/$b:refs/remotes/origin/$b"; then
-              echo "RESULT=FETCH_FAILED"
-              continue
+          git checkout -B __rebase_92486 "refs/remotes/origin/$branch"
+
+          set +e
+          GIT_EDITOR=true git rebase refs/remotes/upstream/main
+          rc=$?
+          set -e
+
+          if [ "$rc" -ne 0 ]; then
+            unmerged=$(git diff --name-only --diff-filter=U)
+            if [ "$unmerged" != 'hermes_cli/banner.py' ]; then
+              echo 'Unexpected conflict set:' >&2
+              printf '%s\n' "$unmerged" >&2
+              exit 1
             fi
-            git checkout -B __rebase_probe "refs/remotes/origin/$b" >/dev/null 2>&1
-            old_head=$(git rev-parse HEAD)
-            old_base=$(git merge-base refs/remotes/upstream/main HEAD)
-            echo "OLD_HEAD=$old_head"
-            echo "MERGE_BASE=$old_base"
 
-            set +e
-            git rebase refs/remotes/upstream/main >/tmp/rebase.log 2>&1
-            rc=$?
-            set -e
+            # During a rebase, --ours is the new upstream base. Keep current upstream
+            # structure/helpers and re-apply only the behavior owned by this PR.
+            git checkout --ours -- hermes_cli/banner.py
 
-            if [ "$rc" -eq 0 ]; then
-              echo "RESULT=CLEAN"
-              echo "NEW_HEAD=$(git rev-parse HEAD)"
-              echo "COMMITS_ON_TOP=$(git rev-list --count refs/remotes/upstream/main..HEAD)"
-            else
-              echo "RESULT=CONFLICT"
-              echo "UNMERGED_FILES_BEGIN"
-              git diff --name-only --diff-filter=U || true
-              echo "UNMERGED_FILES_END"
-              echo "REBASE_LOG_BEGIN"
-              sed -n '1,120p' /tmp/rebase.log
-              echo "REBASE_LOG_END"
-              echo "CONFLICT_DIFF_BEGIN"
-              git diff --cc | sed -n '1,220p' || true
-              echo "CONFLICT_DIFF_END"
-              git rebase --abort >/dev/null 2>&1 || true
-            fi
-          done
+            python - <<'PY'
+          from pathlib import Path
+
+          path = Path('hermes_cli/banner.py')
+          text = path.read_text()
+          old = '''    def _wait_and_print() -> None:
+              if _update_check_done.wait(timeout=max_wait) and _update_result:
+                  console.print(_format_update_notice(_update_result))
+              _daemon("update-notice", _wait_and_print)  # never break the session over an update notice
+          '''
+          new = '''    def _wait_and_print() -> None:
+              if not _update_check_done.wait(timeout=max_wait):
+                  return
+              behind = _update_result
+              if behind is None or behind == 0:
+                  return
+              # Once patch_stdout() is active, a Rich Console can leak/sanitize ANSI
+              # through prompt_toolkit's StdoutProxy. Deferred notices stay plain;
+              # the synchronous banner path remains colorized.
+              from rich.text import Text
+
+              print(Text.from_markup(_format_update_notice(behind)).plain)
+
+              _daemon("update-notice", _wait_and_print)  # never break the session over an update notice
+          '''
+          if old not in text:
+              raise SystemExit('expected upstream _defer_update_notice block not found')
+          path.write_text(text.replace(old, new, 1))
+          PY
+
+            git add hermes_cli/banner.py
+            GIT_EDITOR=true git rebase --continue
+          fi
+
+          test "$(git merge-base refs/remotes/upstream/main HEAD)" = "$upstream_head"
+          test "$(git rev-list --count refs/remotes/upstream/main..HEAD)" -eq 1
+          git diff --check refs/remotes/upstream/main..HEAD
+          python -m py_compile hermes_cli/banner.py
+
+          if ! command -v uv >/dev/null 2>&1; then
+            python -m pip install --disable-pip-version-check uv
+          fi
+          uv sync --extra dev --frozen
+          scripts/run_tests.sh tests/tools/test_startup_latency_regressions.py -q
+
+          new_head=$(git rev-parse HEAD)
+          echo "NEW_HEAD=$new_head"
+          git push origin "HEAD:refs/heads/$branch" --force-with-lease="refs/heads/$branch:$old_head"
+          echo 'PUSHED=1'
