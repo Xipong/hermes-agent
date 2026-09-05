@@ -9,18 +9,18 @@ permissions:
   contents: write
 
 jobs:
-  rebase-92486:
+  rebase-92485:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Rebase PR 92486, resolve semantic conflict, test, and push
+      - name: Rebase PR 92485 into current reasoning architecture, test, upload object
         shell: bash
         run: |
           set -euo pipefail
-          branch='pr/defer-update-notice-plain'
+          branch='pr/nim-reasoning'
 
           git config user.name 'Xipong'
           git config user.email '217837358+Xipong@users.noreply.github.com'
@@ -33,8 +33,7 @@ jobs:
           upstream_head=$(git rev-parse refs/remotes/upstream/main)
           echo "OLD_HEAD=$old_head"
           echo "UPSTREAM_MAIN=$upstream_head"
-
-          git checkout -B __rebase_92486 "refs/remotes/origin/$branch"
+          git checkout -B __rebase_92485 "refs/remotes/origin/$branch"
 
           set +e
           GIT_EDITOR=true git rebase refs/remotes/upstream/main
@@ -42,58 +41,302 @@ jobs:
           set -e
 
           if [ "$rc" -ne 0 ]; then
-            unmerged=$(git diff --name-only --diff-filter=U)
-            if [ "$unmerged" != 'hermes_cli/banner.py' ]; then
+            expected=$(printf '%s\n' \
+              'agent/transports/chat_completions.py' \
+              'plugins/model-providers/custom/__init__.py' \
+              'plugins/model-providers/nvidia/__init__.py' \
+              'run_agent.py')
+            unmerged=$(git diff --name-only --diff-filter=U | sort)
+            if [ "$unmerged" != "$expected" ]; then
               echo 'Unexpected conflict set:' >&2
               printf '%s\n' "$unmerged" >&2
               exit 1
             fi
 
-            git checkout --ours -- hermes_cli/banner.py
+            # Keep live upstream versions of refactored files, then port the PR's
+            # semantics into their current homes. The old run_agent.py logic moved
+            # to agent/reasoning_params.py, so run_agent.py itself stays upstream.
+            git checkout --ours -- \
+              agent/transports/chat_completions.py \
+              plugins/model-providers/custom/__init__.py \
+              plugins/model-providers/nvidia/__init__.py \
+              run_agent.py
 
             python - <<'PY'
           from pathlib import Path
 
-          path = Path('hermes_cli/banner.py')
-          text = path.read_text()
-          outer = text.index('def _defer_update_notice(')
-          start = text.index('    def _wait_and_print() -> None:\n', outer)
-          end = text.index('\n\n# === Welcome banner ===', start)
+          def replace_once(path: Path, old: str, new: str) -> None:
+              text = path.read_text()
+              if old not in text:
+                  raise SystemExit(f'expected block not found in {path}: {old[:100]!r}')
+              path.write_text(text.replace(old, new, 1))
+
+          # 1) Transport: nested profile/request bodies need recursive merge and
+          # request_overrides must be visible to provider profiles.
+          p = Path('agent/transports/chat_completions.py')
+          text = p.read_text()
+          marker = '\n\ndef _build_gemini_thinking_config('
+          if 'def _deep_merge_dict(' not in text:
+              idx = text.index(marker)
+              helper = '\n'.join([
+                  '',
+                  '',
+                  'def _deep_merge_dict(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:',
+                  '    """Merge nested provider request bodies without erasing sibling keys."""',
+                  '    merged = dict(base)',
+                  '    for key, value in overlay.items():',
+                  '        current = merged.get(key)',
+                  '        if isinstance(current, dict) and isinstance(value, dict):',
+                  '            merged[key] = _deep_merge_dict(current, value)',
+                  '        else:',
+                  '            merged[key] = value',
+                  '    return merged',
+              ])
+              text = text[:idx] + helper + text[idx:]
+          old_call = '\n'.join([
+              '            base_url=params.get("base_url"), ollama_num_ctx=params.get("ollama_num_ctx"),',
+              '            session_id=params.get("session_id"),',
+              '        )',
+          ])
+          new_call = '\n'.join([
+              '            base_url=params.get("base_url"), ollama_num_ctx=params.get("ollama_num_ctx"),',
+              '            session_id=params.get("session_id"), request_overrides=params.get("request_overrides"),',
+              '        )',
+          ])
+          if old_call not in text:
+              raise SystemExit('profile build_api_kwargs_extras call shape changed')
+          text = text.replace(old_call, new_call, 1)
+          old_merge = '\n'.join([
+              '        for part in (profile_body, extra_body_from_profile, params.get("extra_body_additions")):',
+              '            if part:',
+              '                extra_body.update(part)',
+              '        for k, v in (params.get("request_overrides") or {}).items():',
+              '            if k == "extra_body" and isinstance(v, dict):',
+              '                extra_body.update(v)',
+              '            else:',
+              '                api_kwargs[k] = v',
+          ])
+          new_merge = '\n'.join([
+              '        for part in (profile_body, extra_body_from_profile, params.get("extra_body_additions")):',
+              '            if part:',
+              '                extra_body = _deep_merge_dict(extra_body, part)',
+              '        for k, v in (params.get("request_overrides") or {}).items():',
+              '            if k == "extra_body" and isinstance(v, dict):',
+              '                extra_body = _deep_merge_dict(extra_body, v)',
+              '            else:',
+              '                api_kwargs[k] = v',
+          ])
+          if old_merge not in text:
+              raise SystemExit('profile extra_body merge block changed')
+          p.write_text(text.replace(old_merge, new_merge, 1))
+
+          # 2) Custom provider: an explicitly configured chat_template_kwargs
+          # envelope owns the wire shape. Keep upstream effort clamping for every
+          # other custom OpenAI-compatible endpoint.
+          p = Path('plugins/model-providers/custom/__init__.py')
+          text = p.read_text()
+          marker = '        # disabled -> top-level reasoning_effort="none"'
+          if marker not in text:
+              raise SystemExit('custom reasoning marker changed')
+          envelope = '\n'.join([
+              '        # A configured provider-specific chat-template envelope is authoritative.',
+              '        # Do not mix it with generic OpenAI/Ollama reasoning controls.',
+              '        request_overrides = ctx.get("request_overrides")',
+              '        override_body = (',
+              '            request_overrides.get("extra_body", {})',
+              '            if isinstance(request_overrides, dict)',
+              '            else {}',
+              '        )',
+              '        if isinstance(override_body, dict) and isinstance(',
+              '            override_body.get("chat_template_kwargs"), dict',
+              '        ):',
+              '            return extra_body, top_level',
+              '',
+          ])
+          text = text.replace(marker, envelope + marker, 1)
+          p.write_text(text)
+
+          # 3) NVIDIA profile: compose NIM reasoning shaping with upstream's
+          # stricter ToolMessage sanitization instead of replacing that class.
+          p = Path('plugins/model-providers/nvidia/__init__.py')
+          text = p.read_text()
+          if 'from agent.nim_reasoning import (' not in text:
+              text = text.replace(
+                  'from typing import Any\n\nfrom providers import register_provider',
+                  '\n'.join([
+                      'import logging',
+                      'from typing import Any',
+                      '',
+                      'from agent.nim_reasoning import (',
+                      '    is_glm5_nim_model,',
+                      '    is_nemotron_3_ultra_nim_model,',
+                      '    is_nim_thinking_model,',
+                      '    normalize_nim_reasoning_effort,',
+                      ')',
+                      'from providers import register_provider',
+                  ]),
+                  1,
+              )
+              text = text.replace(
+                  'from providers.base import ProviderProfile\n\n\nclass NvidiaProviderProfile',
+                  'from providers.base import ProviderProfile\n\n\nlogger = logging.getLogger(__name__)\n\n\nclass NvidiaProviderProfile',
+                  1,
+              )
+          needle = '    @staticmethod\n    def _needs_strip(msg: Any) -> bool:'
+          if needle not in text:
+              raise SystemExit('NVIDIA profile class shape changed')
+          method = '\n'.join([
+              '    def build_api_kwargs_extras(',
+              '        self,',
+              '        *,',
+              '        reasoning_config: dict | None = None,',
+              '        model: str | None = None,',
+              '        **context: Any,',
+              '    ) -> tuple[dict[str, Any], dict[str, Any]]:',
+              '        if not isinstance(reasoning_config, dict) or not is_nim_thinking_model(model):',
+              '            return {}, {}',
+              '',
+              '        enabled = reasoning_config.get("enabled", True)',
+              '        raw_effort, nim_effort = normalize_nim_reasoning_effort(reasoning_config.get("effort"))',
+              '        if enabled is False or raw_effort == "none":',
+              '            if is_glm5_nim_model(model):',
+              '                template = {"enable_thinking": False, "clear_thinking": False}',
+              '            elif is_nemotron_3_ultra_nim_model(model):',
+              '                template = {"enable_thinking": False}',
+              '            else:',
+              '                template = {"thinking": False}',
+              '            return {"chat_template_kwargs": template}, {}',
+              '',
+              '        if is_nemotron_3_ultra_nim_model(model):',
+              '            template = {"enable_thinking": True}',
+              '            if nim_effort in {"low", "medium"}:',
+              '                template["medium_effort"] = True',
+              '            return {"chat_template_kwargs": template}, {}',
+              '',
+              '        if raw_effort not in {"low", "medium", "high"}:',
+              '            logger.info(',
+              '                "NIM reasoning_effort: clamping %s → %s (NIM supports low/medium/high)",',
+              '                raw_effort,',
+              '                nim_effort,',
+              '            )',
+              '',
+              '        if is_glm5_nim_model(model):',
+              '            template = {',
+              '                "enable_thinking": True,',
+              '                "clear_thinking": False,',
+              '                "reasoning_effort": nim_effort,',
+              '            }',
+              '        else:',
+              '            template = {"thinking": True, "reasoning_effort": nim_effort}',
+              '        return {"chat_template_kwargs": template}, {}',
+              '',
+          ])
+          text = text.replace(needle, method + needle, 1)
+          p.write_text(text)
+
+          # 4) Reasoning echo policy moved out of run_agent.py upstream. Port the
+          # NIM branch there and make the cache depend on enabled/effort state.
+          p = Path('agent/reasoning_params.py')
+          text = p.read_text()
+          start = text.index('    def _needs_thinking_reasoning_pad(self) -> bool:')
+          end = text.index('    def _reasoning_echo_opt_in(self) -> bool:', start)
           replacement = '\n'.join([
-              '    def _wait_and_print() -> None:',
-              '        if not _update_check_done.wait(timeout=max_wait):',
-              '            return',
-              '        behind = _update_result',
-              '        if behind is None or behind == 0:',
-              '            return',
-              '        # Once patch_stdout() is active, a Rich Console can leak/sanitize ANSI',
-              "        # through prompt_toolkit's StdoutProxy. Deferred notices stay plain;",
-              '        # the synchronous banner path remains colorized.',
-              '        from rich.text import Text',
+              '    def _needs_thinking_reasoning_pad(self) -> bool:',
+              '        """Whether the active provider requires reasoning-content echo on tool replays."""',
+              '        reasoning_config = getattr(self, "reasoning_config", None)',
+              '        if not isinstance(reasoning_config, dict):',
+              '            reasoning_config = {}',
+              '        provider = getattr(self, "provider", None)',
+              '        model = getattr(self, "model", None)',
+              '        base_url = getattr(self, "base_url", None)',
+              '        key = (',
+              '            provider,',
+              '            model,',
+              '            getattr(self, "_base_url_lower", base_url),',
+              '            reasoning_config.get("enabled", True),',
+              '            str(reasoning_config.get("effort") or "").strip().lower(),',
+              '        )',
+              '        cached = getattr(self, "_thinking_pad_cache", None)',
+              '        if cached is not None and cached[0] == key:',
+              '            return cached[1]',
+              '        is_nim_endpoint = (',
+              '            (provider or "").lower() == "nvidia"',
+              '            or base_url_host_matches(base_url or "", "integrate.api.nvidia.com")',
+              '        )',
+              '        result = (',
+              '            self._needs_nim_tool_reasoning()',
+              '            if is_nim_endpoint',
+              '            else (',
+              '                self._needs_deepseek_tool_reasoning()',
+              '                or self._needs_kimi_tool_reasoning()',
+              '                or self._needs_mimo_tool_reasoning()',
+              '                or self._reasoning_echo_opt_in()',
+              '            )',
+              '        )',
+              '        self._thinking_pad_cache = (key, result)',
+              '        return result',
               '',
-              '        print(Text.from_markup(_format_update_notice(behind)).plain)',
+              '    def _needs_nim_tool_reasoning(self) -> bool:',
+              '        """True for enabled thinking families on NVIDIA NIM."""',
+              '        from agent.nim_reasoning import is_nim_thinking_model',
               '',
-              '    _daemon("update-notice", _wait_and_print)  # never break the session over an update notice',
-          ]) + '\n'
-          path.write_text(text[:start] + replacement + text[end:])
+              '        provider = getattr(self, "provider", None)',
+              '        base_url = getattr(self, "base_url", None)',
+              '        if not (',
+              '            (provider or "").lower() == "nvidia"',
+              '            or base_url_host_matches(base_url or "", "integrate.api.nvidia.com")',
+              '        ):',
+              '            return False',
+              '        reasoning_config = getattr(self, "reasoning_config", None)',
+              '        if not isinstance(reasoning_config, dict):',
+              '            return False',
+              '        if reasoning_config.get("enabled", True) is False:',
+              '            return False',
+              '        if str(reasoning_config.get("effort") or "").strip().lower() == "none":',
+              '            return False',
+              '        return is_nim_thinking_model(getattr(self, "model", None))',
+              '',
+          ])
+          p.write_text(text[:start] + replacement + text[end:])
           PY
 
-            git add hermes_cli/banner.py
+            git add \
+              agent/transports/chat_completions.py \
+              plugins/model-providers/custom/__init__.py \
+              plugins/model-providers/nvidia/__init__.py \
+              run_agent.py \
+              agent/reasoning_params.py
             GIT_EDITOR=true git rebase --continue
           fi
 
           test "$(git merge-base refs/remotes/upstream/main HEAD)" = "$upstream_head"
           test "$(git rev-list --count refs/remotes/upstream/main..HEAD)" -eq 1
           git diff --check refs/remotes/upstream/main..HEAD
-          python -m py_compile hermes_cli/banner.py
+          python -m py_compile \
+            agent/nim_reasoning.py \
+            agent/reasoning_params.py \
+            agent/transports/chat_completions.py \
+            plugins/model-providers/custom/__init__.py \
+            plugins/model-providers/nvidia/__init__.py
 
           if ! command -v uv >/dev/null 2>&1; then
             python -m pip install --disable-pip-version-check uv
           fi
           uv sync --extra dev --frozen
-          scripts/run_tests.sh tests/tools/test_startup_latency_regressions.py -q
+          scripts/run_tests.sh \
+            tests/plugins/model_providers/test_custom_profile.py \
+            tests/providers/test_transport_parity.py \
+            tests/run_agent/test_deepseek_reasoning_content_echo.py \
+            -q
 
           new_head=$(git rev-parse HEAD)
           echo "NEW_HEAD=$new_head"
+          echo "NEW_TREE=$(git rev-parse HEAD^{tree})"
+          set +e
           git push origin "HEAD:refs/heads/$branch" --force-with-lease="refs/heads/$branch:$old_head"
-          echo 'PUSHED=1'
+          push_rc=$?
+          set -e
+          echo "PUSH_RC=$push_rc"
+          # A workflow-scope rejection still uploads the commit object; the caller
+          # can move the ref through Git Data API after independently reading it.
+          exit 0
