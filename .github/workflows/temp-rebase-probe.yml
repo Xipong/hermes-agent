@@ -1,0 +1,55 @@
+name: Temporary rebase conflict probe
+
+on:
+  push:
+    paths:
+      - '.github/workflows/temp-rebase-probe.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Probe rebases
+        shell: bash
+        run: |
+          set -u
+          git config user.name "Xipong rebase probe"
+          git config user.email "217837358+Xipong@users.noreply.github.com"
+          git remote add upstream https://github.com/NousResearch/hermes-agent.git || true
+          git fetch upstream main
+          for branch in pr/defer-update-notice-plain pr/nim-reasoning rebuild/codex fix/aux-resourceexhausted-fallback fix/fallback-picker-restore-errors feat/subagent-cli-picker feat/delegation-child-events; do
+            echo "===== REBASE_PROBE_START $branch ====="
+            git rebase --abort >/dev/null 2>&1 || true
+            git reset --hard >/dev/null
+            git clean -fd >/dev/null
+            git fetch origin "+refs/heads/$branch:refs/remotes/origin/$branch"
+            git checkout -B __probe "origin/$branch" >/dev/null 2>&1
+            set +e
+            GIT_EDITOR=true git rebase upstream/main > /tmp/rebase.log 2>&1
+            rc=$?
+            set -e
+            cat /tmp/rebase.log
+            if [ "$rc" -eq 0 ]; then
+              echo "RESULT=CLEAN"
+              echo "REBASSED_HEAD=$(git rev-parse HEAD)"
+            else
+              echo "RESULT=CONFLICT rc=$rc"
+              echo "CONFLICT_FILES_BEGIN"
+              git diff --name-only --diff-filter=U || true
+              echo "CONFLICT_FILES_END"
+              while IFS= read -r f; do
+                [ -n "$f" ] || continue
+                echo "----- CONFLICT_FILE $f -----"
+                sed -n '1,320p' "$f" || true
+                echo "----- END_CONFLICT_FILE $f -----"
+              done < <(git diff --name-only --diff-filter=U)
+              git rebase --abort >/dev/null 2>&1 || true
+            fi
+            echo "===== REBASE_PROBE_END $branch ====="
+          done
