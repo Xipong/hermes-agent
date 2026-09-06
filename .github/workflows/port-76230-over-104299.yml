@@ -64,13 +64,25 @@ jobs:
             tests/tools/test_delegate_cron_sync_fallback.py \
             tests/tools/test_delegate.py \
             --tb=short 2>&1 | tee /tmp/port-104299/tests.txt
+      - name: Fresh publication checkout isolated from test subprocesses
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          repository: NousResearch/hermes-agent
+          ref: 028fe2c4c857710ab335a8455f5cbbcc52cbf795
+          path: publish-tree
       - name: Publish validated rebase with an exact head lease
+        working-directory: publish-tree
         run: |
           set -euo pipefail
           branch=feat/subagent-inject-over-104233
           expected=ac53c4fe517ec01d7f20056aeeac107b3559d5a8
-          git fetch --depth=1 origin "refs/heads/$branch"
-          test "$(git rev-parse FETCH_HEAD)" = "$expected"
+          git remote set-url origin https://github.com/Xipong/hermes-agent.git
+          actual=$(git ls-remote origin "refs/heads/$branch" | cut -f1)
+          test "$actual" = "$expected"
+          git apply --index /tmp/port-104299/corrected-port.patch
+          git diff --cached --check
+          git diff --cached > /tmp/port-104299/published.patch
+          cmp /tmp/port-104299/corrected-port.patch /tmp/port-104299/published.patch
           git config user.name Xipong
           git config user.email 217837358+Xipong@users.noreply.github.com
           git commit -m 'feat(delegation): opt-in same-turn results over #104299' -m 'Corrected minimal port on merged completion-unit surface 028fe2c4. Preserve #104299 groups and shared slots; reuse its unit rows and durable claims. Reference/oracle #76230 remains unchanged. Supersedes the erroneous #104233-based implementation in PR #104419.'
