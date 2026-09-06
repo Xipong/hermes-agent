@@ -1,0 +1,138 @@
+name: Validate and publish PR 104434 review fixes v2
+on:
+  push:
+    branches: [automation/port-76230-over-104299]
+    paths:
+      - .github/workflows/review-fixes-104434-v2.yml
+permissions:
+  contents: write
+concurrency:
+  group: review-fixes-104434-v2
+  cancel-in-progress: false
+jobs:
+  validate-and-publish:
+    if: github.repository == 'Xipong/hermes-agent'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39
+        with:
+          enable-cache: true
+      - name: Assemble and apply the exact reviewed patch plus fixture compatibility
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/review-104434
+          cat scripts/review_fixes_104434/*.patch.part > /tmp/review-104434/fix.patch
+          cp scripts/review_fixes_104434/06-lazy-routing-lock.patch /tmp/review-104434/fallback.patch
+          echo '81d57072b3deac1ac47f4a36b472a10dfdf3aeb8b4da4085dbd1f4133ea2ca31  /tmp/review-104434/fix.patch' | sha256sum -c -
+          echo '1797191b3d5dd7507668d14b384354f8b0cdde2795acf9d899659e520da71032  /tmp/review-104434/fallback.patch' | sha256sum -c -
+          git fetch --depth=1 origin 89616021d6647ebd5e7c6bde81ff79eaab4fbb81
+          git switch --detach 89616021d6647ebd5e7c6bde81ff79eaab4fbb81
+          git apply --check /tmp/review-104434/fix.patch
+          git apply /tmp/review-104434/fix.patch
+          git apply --check /tmp/review-104434/fallback.patch
+          git apply /tmp/review-104434/fallback.patch
+          git add \
+            agent/delegation_inject.py \
+            gateway/run_notifications.py \
+            tests/agent/test_delegation_delivery.py \
+            tests/gateway/test_completion_delivery.py \
+            tools/async_delegation.py \
+            tools/process_registry.py \
+            tui_gateway/prompt_turn.py \
+            tui_gateway/session_notifications.py
+          git diff --cached --check
+          test -z "$(git diff --cached --name-only -- .github scripts)"
+          git diff --cached --stat | tee /tmp/review-104434/diff-stat.txt
+          git diff --cached --binary > /tmp/review-104434/validated.patch
+          python -m py_compile \
+            agent/delegation_inject.py gateway/run_notifications.py \
+            tools/async_delegation.py tools/process_registry.py \
+            tui_gateway/prompt_turn.py tui_gateway/session_notifications.py \
+            tests/agent/test_delegation_delivery.py \
+            tests/gateway/test_completion_delivery.py
+      - name: Install locked test environment
+        run: uv sync --locked --python 3.11 --extra dev --extra messaging --extra anthropic
+      - name: Ruff changed files
+        run: |
+          uv run ruff check \
+            agent/delegation_inject.py gateway/run_notifications.py \
+            tools/async_delegation.py tools/process_registry.py \
+            tui_gateway/prompt_turn.py tui_gateway/session_notifications.py \
+            tests/agent/test_delegation_delivery.py \
+            tests/gateway/test_completion_delivery.py
+      - name: Validate delivery, routing, recovery, gateway and TUI regressions
+        run: |
+          set -o pipefail
+          HERMES_TEST_FILE_RETRIES=0 scripts/run_tests.sh -j 2 --file-timeout 300 \
+            tests/agent/test_delegation_delivery.py \
+            tests/gateway/test_completion_delivery.py \
+            tests/tools/test_async_delegation.py \
+            tests/tools/test_process_registry.py \
+            tests/tools/test_delegate_apiserver_background.py \
+            tests/tools/test_restored_delegation_ownership.py \
+            tests/cli/test_cli_async_delegation_delivery.py \
+            tests/agent/test_tool_executor_checkpoint_paths.py \
+            tests/agent/test_turn_finalizer_cleanup_guard.py \
+            tests/agent/test_turn_finalizer_final_response_persistence.py \
+            tests/agent/test_turn_finalizer_interrupt_alternation.py \
+            tests/agent/test_turn_finalizer_iteration_limit_exit.py \
+            tests/tools/test_delegate_batch_validation.py \
+            tests/tools/test_delegate_control_actions.py \
+            tests/tools/test_delegate_cron_sync_fallback.py \
+            tests/tools/test_delegate.py \
+            tests/tools/test_delegate_child_cache_ttl.py \
+            tests/tui_gateway/test_delegation_session_lifecycle.py \
+            tests/test_tui_gateway_server.py \
+            --tb=short 2>&1 | tee /tmp/review-104434/tests.txt
+      - name: Repeat deterministic race and restart regressions
+        run: |
+          set -euo pipefail
+          for i in 1 2 3 4 5; do
+            uv run pytest -q \
+              tests/agent/test_delegation_delivery.py::test_reconciled_carrier_claim_rejection_leaves_tui_runnable \
+              tests/agent/test_delegation_delivery.py::test_tui_busy_dequeue_cannot_hide_ready_inject_from_tool_boundary \
+              tests/gateway/test_completion_delivery.py::test_gateway_dequeue_cannot_hide_ready_inject_from_active_tool_boundary \
+              --tb=short
+          done | tee /tmp/review-104434/race-repeat.txt
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        name: Fresh publication checkout isolated from test subprocesses
+        with:
+          repository: Xipong/hermes-agent
+          ref: feat/subagent-inject-over-104299-validated
+          path: publish
+          fetch-depth: 1
+      - name: Publish review fixes with exact-head lease
+        working-directory: publish
+        run: |
+          set -euo pipefail
+          branch=feat/subagent-inject-over-104299-validated
+          expected=89616021d6647ebd5e7c6bde81ff79eaab4fbb81
+          test "$(git rev-parse HEAD)" = "$expected"
+          git apply /tmp/review-104434/validated.patch
+          git add \
+            agent/delegation_inject.py \
+            gateway/run_notifications.py \
+            tests/agent/test_delegation_delivery.py \
+            tests/gateway/test_completion_delivery.py \
+            tools/async_delegation.py \
+            tools/process_registry.py \
+            tui_gateway/prompt_turn.py \
+            tui_gateway/session_notifications.py
+          git diff --cached --binary > /tmp/review-104434/publication.patch
+          cmp /tmp/review-104434/validated.patch /tmp/review-104434/publication.patch
+          git config user.name Xipong
+          git config user.email 217837358+Xipong@users.noreply.github.com
+          git commit -m 'fix(delegation): serialize completion routing and preserve TUI liveness' \
+            -m 'Address PR #104434 review: claim durable completion before publishing TUI running state; serialize bounded queue publication/dequeue/classification/requeue across tool-boundary, gateway and TUI consumers; add deterministic restart and dequeue-race regressions.'
+          test "$(git rev-parse HEAD^)" = "$expected"
+          git push "--force-with-lease=refs/heads/$branch:$expected" origin "HEAD:refs/heads/$branch"
+          git rev-parse HEAD | tee /tmp/review-104434/published-sha.txt
+          git show -s --format=fuller HEAD > /tmp/review-104434/published-commit.txt
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: review-fixes-104434-validation-v2
+          path: /tmp/review-104434/
+          retention-days: 3
