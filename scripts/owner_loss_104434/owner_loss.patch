@@ -1,0 +1,440 @@
+diff --git a/agent/delegation_inject.py b/agent/delegation_inject.py
+--- a/agent/delegation_inject.py
++++ b/agent/delegation_inject.py
+@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
+ _PENDING_CLAIMS_ATTR = "_pending_delegation_inject_claims"
+ _CLAIM_HEARTBEAT_ATTR = "_delegation_inject_claim_heartbeat"
+ _CLAIM_HEARTBEAT_INTERVAL_SECONDS = 60.0
++_CLAIM_ABANDONED_KEY = "_delegation_local_claim_abandoned"
+ _CARRIER_SPILL_TOOL_NAME = "__delegation_carrier__"
+ _CARRIER_MARKER = (
+     "\n\n[DELEGATION RESULT READY — background evidence for the current task; "
+@@ -143,9 +144,35 @@ def _durable_event_is_in_history(
+     )
+ 
+ 
++def _entry_is_renewable(agent: Any, entry: dict[str, Any]) -> bool:
++    """Whether this RAM claim may still be renewed for the active parent turn.
++
++    A claim is only useful to the turn that created its carrier.  Once a cached
++    agent advances to another turn, retaining or renewing that older local latch
++    can only delay the durable fallback and must never block a new carrier.
++    """
++    if entry.get(_CLAIM_ABANDONED_KEY):
++        return False
++    active_turn_id = str(getattr(agent, "_active_turn_id", "") or "")
++    entry_turn_id = str(entry.get("turn_id") or "")
++    if active_turn_id and entry_turn_id and entry_turn_id != active_turn_id:
++        entry[_CLAIM_ABANDONED_KEY] = True
++        return False
++    return True
++
++
++def _claim_status(entry: dict[str, Any]) -> tuple[str | None, bool]:
++    """Return durable state and whether this exact local token still owns it."""
++    from tools.async_delegation import get_event_delivery_claim_status
++
++    return get_event_delivery_claim_status(entry["event"], entry["claim_id"])
++
++
+ def _stop_claim_heartbeat_if_idle(agent: Any) -> None:
+-    if getattr(agent, _PENDING_CLAIMS_ATTR, None):
++    pending = list(getattr(agent, _PENDING_CLAIMS_ATTR, []) or [])
++    if any(_entry_is_renewable(agent, entry) for entry in pending):
+         return
+     heartbeat = getattr(agent, _CLAIM_HEARTBEAT_ATTR, None)
+     if isinstance(heartbeat, dict):
+@@ -157,7 +184,10 @@ def ensure_pending_inject_heartbeat(agent: Any) -> bool:
+     """Renew live same-turn claims throughout provider retries and backoff."""
+ 
+-    if not getattr(agent, _PENDING_CLAIMS_ATTR, None):
++    pending = list(getattr(agent, _PENDING_CLAIMS_ATTR, []) or [])
++    if not any(_entry_is_renewable(agent, entry) for entry in pending):
++        _stop_claim_heartbeat_if_idle(agent)
+         return False
+     existing = getattr(agent, _CLAIM_HEARTBEAT_ATTR, None)
+     if isinstance(existing, dict):
+@@ -175,25 +205,38 @@ def ensure_pending_inject_heartbeat(agent: Any) -> bool:
+     def _heartbeat() -> None:
+         from tools.async_delegation import renew_event_delivery
+ 
+-        while not stop.wait(_CLAIM_HEARTBEAT_INTERVAL_SECONDS):
+-            pending = list(getattr(agent, _PENDING_CLAIMS_ATTR, []) or [])
+-            if not pending:
+-                break
+-            for entry in pending:
+-                try:
+-                    if not renew_event_delivery(entry["event"], entry["claim_id"]):
++        try:
++            while not stop.wait(_CLAIM_HEARTBEAT_INTERVAL_SECONDS):
++                pending = list(getattr(agent, _PENDING_CLAIMS_ATTR, []) or [])
++                renewable = [
++                    entry for entry in pending if _entry_is_renewable(agent, entry)
++                ]
++                if not renewable:
++                    break
++                for entry in renewable:
++                    try:
++                        renewed = renew_event_delivery(
++                            entry["event"], entry["claim_id"]
++                        )
++                    except Exception:
+                         logger.warning(
+-                            "Could not renew same-turn delegation claim %s",
++                            "Failed to renew same-turn delegation claim %s",
+                             entry.get("event_id"),
++                            exc_info=True,
+                         )
+-                except Exception:
++                        continue
++                    if renewed:
++                        continue
++                    # A False UPDATE is authoritative: the row is terminal/missing
++                    # or another token owns it.  Stop presenting this RAM entry as
++                    # live; cleanup will restore an uncommitted carrier but must not
++                    # release/requeue a row now owned by another consumer.
++                    entry[_CLAIM_ABANDONED_KEY] = True
+                     logger.warning(
+-                        "Failed to renew same-turn delegation claim %s",
++                        "Lost ownership of same-turn delegation claim %s; "
++                        "retiring its local latch",
+                         entry.get("event_id"),
+-                        exc_info=True,
+                     )
++                if not any(_entry_is_renewable(agent, entry) for entry in pending):
++                    break
++        finally:
++            stop.set()
+ 
+     from tools.thread_context import propagate_context_to_thread
+ 
+@@ -215,7 +258,7 @@ def acknowledge_pending_injects(agent: Any, *, turn_id: str | None = None) -> i
+ 
+     pending = list(getattr(agent, _PENDING_CLAIMS_ATTR, []) or [])
+     keep: list[dict[str, Any]] = []
+-    acknowledged_messages: list[dict[str, Any]] = []
++    settled_messages: list[dict[str, Any]] = []
+     acknowledged = 0
+     for entry in pending:
+         if turn_id is not None and str(entry.get("turn_id") or "") != str(turn_id):
+@@ -237,17 +280,35 @@ def acknowledge_pending_injects(agent: Any, *, turn_id: str | None = None) -> i
+         if committed:
+             acknowledged += 1
+             message = entry.get("message")
+             if isinstance(message, dict):
+-                acknowledged_messages.append(message)
+-        else:
++                settled_messages.append(message)
++            continue
++        try:
++            state, still_owned = _claim_status(entry)
++        except Exception:
+             keep.append(entry)
+             logger.warning(
+-                "Delegation carrier persisted but durable event ack did not commit: %s",
++                "Could not classify failed delegation acknowledgement %s; "
++                "retaining local claim for retry",
+                 entry.get("event_id"),
++                exc_info=True,
+             )
++            continue
++        if still_owned:
++            keep.append(entry)
++            logger.warning(
++                "Delegation carrier persisted but durable event ack did not commit: %s",
++                entry.get("event_id"),
++            )
++            continue
++        entry[_CLAIM_ABANDONED_KEY] = True
++        message = entry.get("message")
++        if isinstance(message, dict):
++            settled_messages.append(message)
++        logger.warning(
++            "Retired stale local delegation claim %s after failed acknowledgement "
++            "(durable state=%s)",
++            entry.get("event_id"), state,
++        )
+     setattr(agent, _PENDING_CLAIMS_ATTR, keep)
+     still_pending_ids = {str(entry.get("event_id") or "") for entry in keep}
+-    for message in acknowledged_messages:
++    for message in settled_messages:
+         if not (_message_event_ids(message) & still_pending_ids):
+             _clear_carrier_metadata(message)
+     _stop_claim_heartbeat_if_idle(agent)
+@@ -272,6 +333,7 @@ def release_pending_injects(
+     pending = list(getattr(agent, _PENDING_CLAIMS_ATTR, []) or [])
+     keep: list[dict[str, Any]] = []
+     removable_event_ids: set[str] = set()
++    settled_messages: list[dict[str, Any]] = []
+     settled = 0
+     for entry in pending:
+         if turn_id is not None and str(entry.get("turn_id") or "") != str(turn_id):
+@@ -282,9 +344,30 @@ def release_pending_injects(
+         event_id = str(entry["event_id"])
+         if _durable_event_is_in_history(messages, event_id):
+             if complete_event_delivery(event, entry["claim_id"]):
+                 settled += 1
+-            else:
++                message = entry.get("message")
++                if isinstance(message, dict):
++                    settled_messages.append(message)
++                continue
++            try:
++                state, still_owned = _claim_status(entry)
++            except Exception:
+                 keep.append(entry)
++                logger.warning(
++                    "Could not classify failed durable carrier settlement %s; "
++                    "retaining local claim for retry",
++                    event_id,
++                    exc_info=True,
++                )
++                continue
++            if still_owned:
++                keep.append(entry)
++                continue
++            entry[_CLAIM_ABANDONED_KEY] = True
++            settled += 1
++            message = entry.get("message")
++            if isinstance(message, dict):
++                settled_messages.append(message)
++            logger.warning(
++                "Retired stale local delegation claim %s while preserving its "
++                "durable carrier (state=%s)",
++                event_id, state,
++            )
+         else:
+             # Remove the unconsumed marker by durable identity even when
+             # compression replaced the Python dict object.
+@@ -299,8 +382,25 @@ def release_pending_injects(
+                 settled += 1
+             elif state == "delivered":
+                 settled += 1
+-            else:
++            else:
++                try:
++                    state, still_owned = _claim_status(entry)
++                except Exception:
++                    keep.append(entry)
++                    logger.warning(
++                        "Could not classify failed delegation release %s; "
++                        "retaining local claim for retry",
++                        event_id,
++                        exc_info=True,
++                    )
++                    continue
++                if not still_owned:
++                    entry[_CLAIM_ABANDONED_KEY] = True
++                    settled += 1
++                    logger.warning(
++                        "Retired stale local delegation claim %s after ownership "
++                        "moved elsewhere (durable state=%s)",
++                        event_id, state,
++                    )
++                    continue
+                 keep.append(entry)
+ 
+     if removable_event_ids:
+@@ -319,6 +419,10 @@ def release_pending_injects(
+             retained.append(message)
+         messages[:] = retained
+         agent._session_messages = messages
++    still_pending_ids = {str(entry.get("event_id") or "") for entry in keep}
++    for message in settled_messages:
++        if not (_message_event_ids(message) & still_pending_ids):
++            _clear_carrier_metadata(message)
+     setattr(agent, _PENDING_CLAIMS_ATTR, keep)
+     _stop_claim_heartbeat_if_idle(agent)
+     return settled
+@@ -360,8 +464,17 @@ def attach_ready_injects_to_tool_results(
+         return 0
+     if not _normal_budget_available(agent):
+         return 0
+-    if getattr(agent, _PENDING_CLAIMS_ATTR, None):
++
++    # The single-flight latch is scoped to the carrier's originating turn.  A
++    # cached agent may retain an older entry after an uncertain DB failure, but
++    # that obsolete local bookkeeping must never disable injection forever.
++    pending = list(getattr(agent, _PENDING_CLAIMS_ATTR, []) or [])
++    for entry in pending:
++        _entry_is_renewable(agent, entry)  # marks prior-turn entries abandoned
++    _stop_claim_heartbeat_if_idle(agent)
++    if any(
++        str(entry.get("turn_id") or "") in {"", active_turn_id}
++        for entry in pending
++    ):
+         return 0
+ 
+     # Only the newest result is eligible. Never search backwards past an already
+diff --git a/tools/async_delegation.py b/tools/async_delegation.py
+--- a/tools/async_delegation.py
++++ b/tools/async_delegation.py
+@@ -386,6 +386,22 @@ def get_event_delivery_state(evt: Dict[str, Any]) -> Optional[str]:
+     return row[0] if row else None
+ 
+ 
++def get_event_delivery_claim_status(
++    evt: Dict[str, Any], claim_id: str,
++) -> tuple[Optional[str], bool]:
++    """Return durable state and ownership of one exact delivery token.
++
++    Callers use the pair after a failed UPDATE to distinguish a transient/local
++    failure (the token still owns a pending row) from definitive owner loss.  A
++    stale RAM claimant must not release or requeue a row owned by another consumer.
++    """
++    if evt.get("type") != "async_delegation":
++        return None, False
++    delegation_id = str(evt.get("delegation_id") or "")
++    if not delegation_id:
++        return None, False
++    with _DB_LOCK, _transaction() as conn:
++        row = conn.execute(
++            "SELECT delivery_state, delivery_claim FROM async_delegations "
++            "WHERE delegation_id=?", (delegation_id,),
++        ).fetchone()
++    return (None, False) if row is None else (row[0], bool(claim_id and row[0] == "pending" and row[1] == claim_id))
++
++
+ def renew_event_delivery(evt: Dict[str, Any], claim_id: str) -> bool:
+     """Keep the existing single-row lease live until the transcript flush settles."""
+     if not claim_id or evt.get("type") != "async_delegation":
+ diff --git a/tests/agent/test_delegation_delivery.py b/tests/agent/test_delegation_delivery.py
+--- a/tests/agent/test_delegation_delivery.py
++++ b/tests/agent/test_delegation_delivery.py
+@@ -116,6 +116,18 @@ def _event_state(delegation_id: str):
+         ).fetchone()
+ 
+ 
++def _take_over_event_claim(delegation_id: str, claim_id: str) -> None:
++    """Simulate another process winning an expired delivery lease."""
++    now = time.time()
++    with ad._DB_LOCK, ad._transaction() as conn:
++        changed = conn.execute(
++            "UPDATE async_delegations SET delivery_claim=?, delivery_claimed_at=?, "
++            "updated_at=? WHERE delegation_id=? AND delivery_state='pending'",
++            (claim_id, now, now, delegation_id),
++        ).rowcount
++    assert changed == 1
++
++
+ def _loop_response(*, content, finish_reason="stop", tool_calls=None):
+     message = SimpleNamespace(content=content, tool_calls=tool_calls)
+     choice = SimpleNamespace(message=message, finish_reason=finish_reason)
+@@ -517,6 +529,117 @@ def test_pending_claim_heartbeat_renews_until_ack(monkeypatch):
+     assert not heartbeat["thread"].is_alive()
+ 
+ 
++def test_owner_loss_retires_local_latch_and_next_turn_can_inject(monkeypatch):
++    """A foreign takeover cannot strand this cached parent after its old turn."""
++    monkeypatch.setattr(
++        inject, "_CLAIM_HEARTBEAT_INTERVAL_SECONDS", 0.01, raising=False
++    )
++    first_id = _record(turn_id="turn-old")
++    assert _complete_unit(first_id, _child(0, "old carrier"))
++    agent = _tool_boundary_agent()
++    agent._active_turn_id = "turn-old"
++    old_messages = [
++        {"role": "tool", "tool_call_id": "old", "content": "old original"}
++    ]
++    agent._session_messages = old_messages
++
++    assert attach_ready_injects_to_tool_results(
++        agent, old_messages, num_tool_msgs=1, turn_id="turn-old"
++    ) == 1
++    old_entry = agent._pending_delegation_inject_claims[0]
++    foreign_claim = "other-consumer:999:takeover"
++    _take_over_event_claim(first_id, foreign_claim)
++
++    deadline = time.monotonic() + 1
++    while (
++        not old_entry.get(inject._CLAIM_ABANDONED_KEY)
++        and time.monotonic() < deadline
++    ):
++        time.sleep(0.005)
++    assert old_entry.get(inject._CLAIM_ABANDONED_KEY) is True
++    heartbeat = agent._delegation_inject_claim_heartbeat
++    heartbeat["thread"].join(timeout=1)
++    assert not heartbeat["thread"].is_alive()
++
++    # Old-turn finalization restores the uncommitted tool result but neither
++    # releases nor requeues the row now owned by the foreign consumer.
++    assert release_pending_injects(agent, old_messages, turn_id="turn-old") == 1
++    assert old_messages == [
++        {"role": "tool", "tool_call_id": "old", "content": "old original"}
++    ]
++    assert not agent._pending_delegation_inject_claims
++    assert process_registry.completion_queue.empty()
++    assert _event_state(first_id) == ("pending", 1)
++    assert ad.complete_completion_delivery(first_id, foreign_claim)
++
++    # The same cached parent now starts another turn.  Its new result must not
++    # be rejected by the dead latch from turn-old.
++    agent._active_turn_id = "turn-next"
++    second_id = _record(turn_id="turn-next")
++    assert _complete_unit(second_id, _child(0, "new turn evidence"))
++    new_messages = [
++        {"role": "tool", "tool_call_id": "new", "content": "new original"}
++    ]
++    agent._session_messages = new_messages
++    assert attach_ready_injects_to_tool_results(
++        agent, new_messages, num_tool_msgs=1, turn_id="turn-next"
++    ) == 1
++    assert "new turn evidence" in new_messages[0]["content"]
++    new_messages[0]["_db_persisted"] = True
++    assert acknowledge_pending_injects(agent, turn_id="turn-next") == 1
++    agent._delegation_inject_claim_heartbeat["thread"].join(timeout=1)
++
++
++def test_uncertain_previous_turn_claim_does_not_block_current_turn(monkeypatch):
++    """Even a conservatively retained old entry is not a process-lifetime latch."""
++    first_id = _record(turn_id="turn-old")
++    assert _complete_unit(first_id, _child(0, "old uncertain carrier"))
++    agent = _tool_boundary_agent()
++    agent._active_turn_id = "turn-old"
++    old_messages = [
++        {"role": "tool", "tool_call_id": "old", "content": "old original"}
++    ]
++    agent._session_messages = old_messages
++    assert attach_ready_injects_to_tool_results(
++        agent, old_messages, num_tool_msgs=1, turn_id="turn-old"
++    ) == 1
++    old_entry = agent._pending_delegation_inject_claims[0]
++    heartbeat = agent._delegation_inject_claim_heartbeat
++    heartbeat["stop"].set()
++    heartbeat["thread"].join(timeout=1)
++
++    # Model a transient release failure while the exact token is still ours.
++    with monkeypatch.context() as scoped:
++        scoped.setattr(ad, "release_event_delivery", lambda *_args: False)
++        assert release_pending_injects(
++            agent, old_messages, turn_id="turn-old"
++        ) == 0
++    assert agent._pending_delegation_inject_claims == [old_entry]
++
++    agent._active_turn_id = "turn-next"
++    second_id = _record(turn_id="turn-next")
++    assert _complete_unit(second_id, _child(0, "current turn evidence"))
++    new_messages = [
++        {"role": "tool", "tool_call_id": "new", "content": "new original"}
++    ]
++    agent._session_messages = new_messages
++    assert attach_ready_injects_to_tool_results(
++        agent, new_messages, num_tool_msgs=1, turn_id="turn-next"
++    ) == 1
++    assert "current turn evidence" in new_messages[0]["content"]
++    assert len(agent._pending_delegation_inject_claims) == 2
++
++    new_messages[0]["_db_persisted"] = True
++    assert acknowledge_pending_injects(agent, turn_id="turn-next") == 1
++    assert agent._pending_delegation_inject_claims == [old_entry]
++    agent._delegation_inject_claim_heartbeat["thread"].join(timeout=1)
++
++    # Settle the retained old row and let its normal cleanup remove the RAM entry.
++    assert ad.complete_event_delivery(old_entry["event"], old_entry["claim_id"])
++    assert release_pending_injects(agent, old_messages, turn_id="turn-old") == 1
++    assert not agent._pending_delegation_inject_claims
++
++
+ def test_run_conversation_inject_transport_normalize_and_ack(monkeypatch, tmp_path):
+     agent = _make_loop_agent(tmp_path)
+     cached_system_prompt = deepcopy(getattr(agent, "_cached_system_prompt"))
