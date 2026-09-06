@@ -1,0 +1,198 @@
+
+
+# #104299 integration: preserve its real completion-unit partition/finalizer.
+def _gated_unit_call(monkeypatch, gates, *, delivery="inject"):
+    import json
+
+    parent = MagicMock()
+    parent._delegate_depth = 0
+    parent.session_id = "parent-session"
+    parent._active_turn_id = "turn-current"
+    parent._interrupt_requested = False
+    parent._active_children = []
+    parent._active_children_lock = None
+
+    def build(**kw):
+        child = MagicMock()
+        child._delegate_role = "leaf"
+        child._subagent_id = f"unit-child-{kw['task_index']}"
+        return child
+
+    def run(task_index, goal, **kw):
+        assert gates[task_index].wait(timeout=10), "test did not release child"
+        return _child(task_index, f"completed: {goal}")
+
+    creds = dict(model="child-model", provider=None, base_url=None, api_key=None,
+                 api_mode=None, command=None, args=None)
+    monkeypatch.setattr(delegate_tool, "_build_child_agent", build)
+    monkeypatch.setattr(delegate_tool, "_run_single_child", run)
+    monkeypatch.setattr(delegate_tool, "_resolve_delegation_credentials", lambda *a, **k: creds)
+    monkeypatch.setattr(delegate_tool, "_get_max_async_children", lambda: 1)
+    monkeypatch.setattr(delegate_tool, "_get_max_concurrent_children", lambda: 3)
+    return json.loads(delegate_tool.delegate_task(
+        tasks=[
+            {"goal": "compare implementation alpha in detail", "group": "compare"},
+            {"goal": "compare implementation beta in detail", "group": "compare"},
+            {"goal": "audit the independent security boundary"},
+        ], background=True, parent_agent=parent, result_delivery=delivery,
+    ))
+
+
+def test_inject_uses_completed_units_without_splitting_groups_or_capacity(monkeypatch, tmp_path):
+    import json
+    import queue
+
+    monkeypatch.setattr(ad, "_db_path", lambda: tmp_path / "units.db")
+    db = SessionDB(db_path=tmp_path / "units.db")
+    db.create_session("parent-session", source="cli", model="test")
+    gates = [threading.Event() for _ in range(3)]
+    agent = _tool_boundary_agent()
+    messages = []
+
+    def consume(event):
+        nonlocal messages
+        process_registry.completion_queue.put(event)
+        messages = [{"role": "tool", "tool_call_id": "boundary", "content": "fresh tool result"}]
+        assert attach_ready_injects_to_tool_results(agent, messages, 1) == 1
+        metadata = messages[-1]["display_metadata"]
+        assert metadata["delegation_event_ids"] == [event["delegation_id"]]
+        db.append_message("parent-session", "tool", messages[-1]["content"], display_metadata=metadata)
+        messages[-1]["_db_persisted"] = True
+        assert acknowledge_pending_injects(agent) == 1
+        assert _event_state(event["delegation_id"]) == ("delivered", 1)
+        return messages[-1]["content"]
+
+    try:
+        handle = _gated_unit_call(monkeypatch, gates)
+        assert handle["status"] == "dispatched"
+        units = {tuple(u["task_indexes"]): u for u in handle["units"]}
+        assert set(units) == {(0, 1), (2,)}
+        assert units[(0, 1)]["group"] == "compare"
+        assert units[(2,)]["group"] is None
+        assert ad.active_count() == 2
+        assert ad.active_task_count() == 3
+        with ad._records_lock:
+            records = [dict(ad._records[u["delegation_id"]]) for u in units.values()]
+        assert len({r["slot_key"] for r in records}) == 1
+        with ad._DB_LOCK, ad._transaction() as conn:
+            rows = conn.execute("SELECT delegation_id, task_json FROM async_delegations").fetchall()
+        assert {r[0] for r in rows} == {u["delegation_id"] for u in units.values()}
+        for _, payload in rows:
+            task = json.loads(payload)
+            assert task["result_delivery"] == "inject"
+            assert task["parent_turn_id"] == "turn-current"
+
+        rejected = ad.dispatch_async_delegation(
+            goal="another call", context=None, toolsets=None, role="leaf", model="test", session_key="",
+            runner=lambda: {"status": "completed", "summary": "must not run"}, max_async_children=1,
+        )
+        assert rejected["status"] == "rejected"
+
+        gates[2].set()
+        first = process_registry.completion_queue.get(timeout=5)
+        assert first["delegation_id"] == units[(2,)]["delegation_id"]
+        assert [r["task_index"] for r in first["results"]] == [2]
+        assert first["parent_session_id"] == "parent-session"
+        assert first["parent_turn_id"] == "turn-current"
+        assert first["result_delivery"] == "inject"
+        assert "independent security" in consume(first)
+
+        gates[0].set()
+        with pytest.raises(queue.Empty):
+            process_registry.completion_queue.get(timeout=0.15)
+        gates[1].set()
+        grouped = process_registry.completion_queue.get(timeout=5)
+        assert grouped["delegation_id"] == units[(0, 1)]["delegation_id"]
+        assert grouped["group"] == "compare"
+        assert [r["task_index"] for r in grouped["results"]] == [0, 1]
+        content = consume(grouped)
+        assert "implementation alpha" in content and "implementation beta" in content
+        assert "group 'compare'" in content
+    finally:
+        for gate in gates:
+            gate.set()
+        release_pending_injects(agent, messages)
+        db.close()
+
+
+@pytest.mark.parametrize("requested,expected", [
+    (None, "after_turn"), ("unknown-mode", "after_turn"),
+    ("after_turn", "after_turn"), (" INJECT ", "inject"),
+])
+def test_unit_dispatch_propagates_policy_and_default_uses_same_after_turn_claim(monkeypatch, requested, expected):
+    gates = [threading.Event() for _ in range(3)]
+    agent = _tool_boundary_agent()
+    messages = [{"role": "tool", "tool_call_id": "current", "content": "unchanged"}]
+    try:
+        handle = _gated_unit_call(monkeypatch, gates, delivery=requested)
+        assert handle["status"] == "dispatched"
+        assert handle["result_delivery"] == expected
+        for gate in gates:
+            gate.set()
+        events = [process_registry.completion_queue.get(timeout=5) for _ in range(2)]
+        assert {e["delegation_id"] for e in events} == {u["delegation_id"] for u in handle["units"]}
+        for event in events:
+            assert event["result_delivery"] == expected
+            assert event["parent_turn_id"] == "turn-current"
+            process_registry.completion_queue.put(event)
+        attached = attach_ready_injects_to_tool_results(agent, messages, 1)
+        if expected == "inject":
+            assert attached == 2  # two units, not three child rows
+            release_pending_injects(agent, messages)
+        else:
+            assert attached == 0
+        assert messages[-1]["content"] == "unchanged"
+        for _ in range(2):
+            event = process_registry.completion_queue.get(timeout=5)
+            claim = ad.claim_event_delivery(event, "ordinary-after-turn")
+            assert claim
+            assert ad.complete_event_delivery(event, claim)
+            assert ad.get_event_delivery_state(event) == "delivered"
+    finally:
+        for gate in gates:
+            gate.set()
+        release_pending_injects(agent, messages)
+
+
+@pytest.mark.parametrize("batch", [False, True])
+def test_direct_dispatch_entry_points_persist_unit_policy(batch):
+    common = dict(context=None, toolsets=None, role="leaf", model="test", session_key="",
+                  parent_session_id="parent-session", parent_turn_id="turn-current", result_delivery="inject")
+    if batch:
+        handle = ad.dispatch_async_delegation_batch(
+            goals=["audit"], runner=lambda: {"results": [_child(0, "ready")], "total_duration_seconds": 0.1},
+            **common,
+        )
+    else:
+        handle = ad.dispatch_async_delegation(
+            goal="audit", runner=lambda: {"status": "completed", "summary": "ready"}, **common,
+        )
+    event = process_registry.completion_queue.get(timeout=5)
+    assert event["delegation_id"] == handle["delegation_id"]
+    assert event["parent_turn_id"] == "turn-current"
+    assert event["result_delivery"] == "inject"
+    claim = ad.claim_event_delivery(event, "after-turn")
+    assert claim and ad.complete_event_delivery(event, claim)
+
+
+def test_abandoned_unit_retains_dispatch_policy_and_turn_on_recovery(monkeypatch):
+    import json
+
+    delegation_id = _record()
+    monkeypatch.setattr("gateway.status._pid_exists", lambda _pid: False)
+    assert ad.recover_abandoned_delegations() == 1
+    with ad._DB_LOCK, ad._transaction() as conn:
+        row = conn.execute("SELECT event_json FROM async_delegations WHERE delegation_id=?", (delegation_id,)).fetchone()
+    event = json.loads(row[0])
+    assert event["delegation_id"] == delegation_id
+    assert event["status"] == "unknown"
+    assert event["result_delivery"] == "inject"
+    assert event["parent_turn_id"] == "turn-current"
+    # A later turn cannot steal an abandoned unit's opt-in window.
+    process_registry.completion_queue.put(event)
+    agent = _tool_boundary_agent()
+    agent._active_turn_id = "new-turn"
+    messages = [{"role": "tool", "tool_call_id": "late", "content": "untouched"}]
+    assert attach_ready_injects_to_tool_results(agent, messages, 1) == 0
+    claim = ad.claim_event_delivery(event, "recovered-after-turn")
+    assert claim and ad.complete_event_delivery(event, claim)
