@@ -4,37 +4,81 @@ on:
     branches: [automation/port-76230-over-104299]
     paths:
       - .github/workflows/port-76230-over-104299.yml
-      - scripts/port_76230_over_104299.py
+      - scripts/build_inject_104299.py
+      - scripts/unit_tests_104299.txt
 permissions:
-  contents: read
+  contents: write
 concurrency:
   group: port-76230-over-104299
   cancel-in-progress: false
 jobs:
-  prepare:
+  validate-and-publish:
     if: github.repository == 'Xipong/hermes-agent'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39
         with:
-          persist-credentials: false
-      - name: Export exact surfaces for conflict inspection
+          enable-cache: true
+      - name: Build only the opt-in delta on the exact merged surface
         run: |
           set -euo pipefail
-          mkdir -p /tmp/port-104299
-          git fetch --depth=1 origin a7c0d307d7fea45be40772a9b0663ec096779398 ac53c4fe517ec01d7f20056aeeac107b3559d5a8 4a3a2af360c6d4990f5266c1800d5335bcca6cba
+          mkdir -p /tmp/port-104299 /tmp/prior-port
+          cp scripts/build_inject_104299.py scripts/unit_tests_104299.txt /tmp/port-104299/
+          git fetch --depth=1 origin a7c0d307d7fea45be40772a9b0663ec096779398 ac53c4fe517ec01d7f20056aeeac107b3559d5a8
           git fetch --depth=1 https://github.com/NousResearch/hermes-agent.git 028fe2c4c857710ab335a8455f5cbbcc52cbf795
-          git archive 028fe2c4c857710ab335a8455f5cbbcc52cbf795 | gzip > /tmp/port-104299/base-104299.tar.gz
+          git archive ac53c4fe517ec01d7f20056aeeac107b3559d5a8 tools/async_delegation.py | tar -x -C /tmp/prior-port
           git diff a7c0d307d7fea45be40772a9b0663ec096779398 ac53c4fe517ec01d7f20056aeeac107b3559d5a8 > /tmp/port-104299/old-port.patch
-          git archive a7c0d307d7fea45be40772a9b0663ec096779398 tools/async_delegation.py tools/delegate_tool_dispatch.py tools/delegate_tool.py agent/tool_executor.py agent/conversation_loop.py agent/turn_finalizer.py run_agent.py > /tmp/port-104299/old-base-files.tar
-          git archive ac53c4fe517ec01d7f20056aeeac107b3559d5a8 agent/delegation_inject.py tests/agent/test_delegation_delivery.py tools/async_delegation.py tools/delegate_tool_dispatch.py tools/delegate_tool.py > /tmp/port-104299/old-port-files.tar
-          git archive 4a3a2af360c6d4990f5266c1800d5335bcca6cba agent/delegation_inject.py tests/agent/test_delegation_delivery.py > /tmp/port-104299/oracle-files.tar
-          git log -1 --format=fuller 028fe2c4c857710ab335a8455f5cbbcc52cbf795 > /tmp/port-104299/base-commit.txt
-          git diff --stat a7c0d307d7fea45be40772a9b0663ec096779398 ac53c4fe517ec01d7f20056aeeac107b3559d5a8
+          git switch --detach 028fe2c4c857710ab335a8455f5cbbcc52cbf795
+          python /tmp/port-104299/build_inject_104299.py "$PWD" /tmp/prior-port /tmp/port-104299/old-port.patch
+          git add agent/conversation_loop.py agent/delegation_inject.py agent/tool_executor.py agent/turn_finalizer.py run_agent.py tools/async_delegation.py tools/delegate_tool.py tools/delegate_tool_dispatch.py tests/agent/test_delegation_delivery.py website/docs/user-guide/features/delegation.md
+          git diff --cached --check
+          git diff --cached --stat | tee /tmp/port-104299/diff-stat.txt
+          git diff --cached > /tmp/port-104299/corrected-port.patch
+          python -m py_compile agent/conversation_loop.py agent/delegation_inject.py agent/tool_executor.py agent/turn_finalizer.py run_agent.py tools/async_delegation.py tools/delegate_tool.py tools/delegate_tool_dispatch.py tests/agent/test_delegation_delivery.py
+          test -z "$(git diff --cached --name-only -- .github scripts hermes_state.py gateway cli.py)"
+          ! grep -n 'publish_batch_child\|104233' agent/delegation_inject.py tests/agent/test_delegation_delivery.py
+      - name: Install locked isolated test environment
+        run: uv sync --locked --python 3.11 --extra dev --extra messaging --extra anthropic
+      - name: Validate oracle, grouping, delivery and executor regressions
+        run: |
+          set -o pipefail
+          HERMES_TEST_FILE_RETRIES=0 scripts/run_tests.sh -j 2 --file-timeout 300 \
+            tests/agent/test_delegation_delivery.py \
+            tests/tools/test_async_delegation.py \
+            tests/tools/test_delegate_apiserver_background.py \
+            tests/tools/test_process_registry.py \
+            tests/tools/test_restored_delegation_ownership.py \
+            tests/cli/test_cli_async_delegation_delivery.py \
+            tests/gateway/test_completion_delivery.py \
+            tests/agent/test_tool_executor_checkpoint_paths.py \
+            tests/agent/test_turn_finalizer_cleanup_guard.py \
+            tests/agent/test_turn_finalizer_final_response_persistence.py \
+            tests/agent/test_turn_finalizer_interrupt_alternation.py \
+            tests/agent/test_turn_finalizer_iteration_limit_exit.py \
+            tests/tools/test_delegate_batch_validation.py \
+            tests/tools/test_delegate_control_actions.py \
+            tests/tools/test_delegate_cron_sync_fallback.py \
+            tests/tools/test_delegate.py \
+            --tb=short 2>&1 | tee /tmp/port-104299/tests.txt
+      - name: Publish validated rebase with an exact head lease
+        run: |
+          set -euo pipefail
+          branch=feat/subagent-inject-over-104233
+          expected=ac53c4fe517ec01d7f20056aeeac107b3559d5a8
+          git fetch --depth=1 origin "refs/heads/$branch"
+          test "$(git rev-parse FETCH_HEAD)" = "$expected"
+          git config user.name Xipong
+          git config user.email 217837358+Xipong@users.noreply.github.com
+          git commit -m 'feat(delegation): opt-in same-turn results over #104299' -m 'Corrected minimal port on merged completion-unit surface 028fe2c4. Preserve #104299 groups and shared slots; reuse its unit rows and durable claims. Reference/oracle #76230 remains unchanged. Supersedes the erroneous #104233-based implementation in PR #104419.'
+          test "$(git rev-parse HEAD^)" = 028fe2c4c857710ab335a8455f5cbbcc52cbf795
+          git push "--force-with-lease=refs/heads/$branch:$expected" origin "HEAD:refs/heads/$branch"
+          git rev-parse HEAD | tee /tmp/port-104299/published-sha.txt
+          git show -s --format=fuller HEAD | tee /tmp/port-104299/published-commit.txt
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
-          name: port-104299-inspection
+          name: port-104299-validation
           path: /tmp/port-104299/
           retention-days: 3
