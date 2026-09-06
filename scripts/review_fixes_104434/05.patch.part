@@ -1,0 +1,132 @@
++    return evt, "reserved"
++
++
++def _notif_handle_event(sid, session, evt, emitted, registry, fmt, action) -> None:
++    """Format/emit outside routing reservation, then claim DB row before ``running``."""
++    try:
++        text = fmt(evt)
++    except Exception:
++        if action == "reserved":
++            with registry.completion_routing_lock:
++                registry.completion_queue.put(evt)
++        logger.exception("Could not format notification; kept for retry")
++        return
+     if not text:
+-        return True
+-    # Emit once per dedup key: a re-queued completion would otherwise re-emit every 0.5s while the session is busy,
+-    # while distinct watch_match events from one process must stay visible.
++        return
++
++    # Emit once per dedup key: a requeued completion would otherwise re-emit every
++    # poll while busy, while distinct watch matches remain visible.
+     dedup_key = _notification_event_dedup_key(evt)
+     if dedup_key not in emitted:
+         _emit("status.update", sid, {"kind": "process", "text": text})
+         emitted.add(dedup_key)
+-    if not _notif_claim_turn(session):
+-        queue.put(evt)
+-        if deferred is not None:
+-            return False
+-        time.sleep(0.25)  # back off: the re-queued event keeps the queue non-empty, else this loop spins at 100% CPU
+-        return True
+-    _notif_dispatch_event(sid, session, evt, text)
+-    return True
++    if action != "reserved":
++        return
+ 
++    from tools.async_delegation import claim_event_delivery
++    # A racing user prompt gets priority.  Crucially, ``running`` is published only
++    # after the durable claim succeeds; reconciliation returning None cannot wedge UI.
++    with session["history_lock"]:
++        if session.get("running") or session.get("_finalized"):
++            claim = None
++            raced_busy = True
++        else:
++            raced_busy = False
++            claim = claim_event_delivery(evt, "tui-poller")
++            if claim is not None:
++                session["running"] = True
++    if raced_busy:
++        with registry.completion_routing_lock:
++            registry.completion_queue.put(evt)
++        return
++    if claim is None:
++        _notif_requeue_if_pending(registry, evt)
++        return
++    _notif_dispatch_event(sid, session, evt, text, claim)
+ 
+-def _notification_poller_loop(stop_event: threading.Event, sid: str, session: dict) -> None:
+-    """Daemon thread (started by _init_session()) that drains the process-global completion_queue for this session
+-    (ownership routing: _notif_handle_event) and polls ``kanban_notify_subs`` every ``_KANBAN_POLL_SECONDS`` — the
+-    delivery path for platform="tui" rows.
+ 
+-    Also polls ``kanban_notify_subs`` every ``_KANBAN_POLL_SECONDS`` for this session's TUI kanban
+-    subscriptions and delivers terminal task events the same way (status.update + agent turn) — the delivery
+-    path tools/kanban_tools.py documents for platform="tui" rows (issue #59890).
+-    """
++def _notification_poller_loop(stop_event: threading.Event, sid: str, session: dict) -> None:
++    """Daemon notification and kanban poller for one TUI/Desktop session."""
+     from tools.process_registry import process_registry
+     from tools.process_registry_notifications import format_process_notification
+-    queue = process_registry.completion_queue
+-    emitted: set = set()  # dedup re-queued events so one completion isn't emitted 50 times while busy
+-    handle = lambda evt, deferred: _notif_handle_event(  # noqa: E731
+-        sid, session, evt, emitted, process_registry, format_process_notification, deferred)
++
++    emitted: set = set()
+     last_kanban_poll = last_loop_poll = 0.0
+     while not stop_event.is_set() and not session.get("_finalized"):
+         now = time.monotonic()
+-        # /loop and /heartbeat wakeup drivers: fire a due tick for THIS session while idle (same claim-under-lock
+-        # as kanban dispatch). An active non-parked /goal owns the idle boundary and defers the loop tick.
+         if now - last_loop_poll >= _LOOP_POLL_SECONDS:
+             last_loop_poll = now
+             for what, fire in (("loop wakeup", _maybe_fire_tui_loop_tick), ("heartbeat", _maybe_fire_tui_heartbeat_tick)):
+@@ -466,23 +512,31 @@ def _notification_poller_loop(stop_event: threading.Event, sid: str, session: di
+         if now - last_kanban_poll >= _KANBAN_POLL_SECONDS:
+             last_kanban_poll = now
+             _notif_poll_kanban(sid, session)
+-        try:
+-            evt = queue.get(timeout=0.5)
+-        except Exception:
+-            continue
+-        handle(evt, None)
+-    # Drain remaining events after the stop signal so nothing is lost on shutdown; foreign and orphaned-delegation
+-    # events are handed back to the shared queue afterwards.
+-    deferred: list = []
+-    while not queue.empty():
+-        try:
+-            evt = queue.get_nowait()
+-        except Exception:
+-            break
+-        if not handle(evt, deferred):
++
++        with process_registry.completion_routing_lock:
++            evt, action = _notif_reserve_event(sid, session, process_registry)
++        if evt is not None:
++            _notif_handle_event(
++                sid, session, evt, emitted, process_registry,
++                format_process_notification, action)
++        if action in {"empty", "foreign", "busy"}:
++            time.sleep({"empty": 0.5, "foreign": 0.1, "busy": 0.25}[action])
++
++    # One bounded shutdown snapshot: foreign/busy requeues cannot spin forever.
++    try:
++        remaining = process_registry.completion_queue.qsize()
++    except Exception:
++        remaining = 0
++    for _ in range(max(0, remaining)):
++        with process_registry.completion_routing_lock:
++            evt, action = _notif_reserve_event(
++                sid, session, process_registry, shutdown=True)
++        if evt is not None:
++            _notif_handle_event(
++                sid, session, evt, emitted, process_registry,
++                format_process_notification, action)
++        if action in {"empty", "busy"}:
+             break
+-    for evt in deferred:
+-        queue.put(evt)
+ 
+ 
+ def _async_delegation_display_metadata(evt: dict) -> dict:
