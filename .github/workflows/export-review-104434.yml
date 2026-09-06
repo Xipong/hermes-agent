@@ -1,0 +1,27 @@
+name: Export exact PR 104434 head for review fixes
+on:
+  push:
+    branches: [automation/port-76230-over-104299]
+    paths: [.github/workflows/export-review-104434.yml]
+permissions:
+  contents: read
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - name: Export exact validated PR head
+        run: |
+          set -euo pipefail
+          git fetch --depth=1 origin 89616021d6647ebd5e7c6bde81ff79eaab4fbb81
+          mkdir -p /tmp/export
+          git archive 89616021d6647ebd5e7c6bde81ff79eaab4fbb81 | gzip -9 > /tmp/export/hermes-pr-104434-head.tar.gz
+          git show -s --format=fuller 89616021d6647ebd5e7c6bde81ff79eaab4fbb81 > /tmp/export/head.txt
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: hermes-pr-104434-head
+          path: /tmp/export/
+          retention-days: 2
