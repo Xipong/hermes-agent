@@ -2,29 +2,66 @@ name: Isolated port of 76230 over 104233
 on:
   push:
     branches: [automation/port-76230-over-104233]
-    paths: [.github/workflows/port-76230-over-104233.yml]
+    paths:
+      - .github/workflows/port-76230-over-104233.yml
+      - scripts/port_76230_over_104233.py
 permissions:
-  contents: read
+  contents: write
+concurrency:
+  group: port-76230-over-104233
+  cancel-in-progress: false
 jobs:
-  source-snapshots:
+  validate-and-publish:
     if: github.repository == 'Xipong/hermes-agent'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
         with:
-          ref: a7c0d307d7fea45be40772a9b0663ec096779398
-          persist-credentials: false
-          fetch-depth: 1
-      - name: Archive the exact requested base and unchanged reference
+          enable-cache: true
+      - name: Build only the opt-in delta
         run: |
-          mkdir -p /tmp/port-snapshots
-          git archive --format=tar.gz HEAD > /tmp/port-snapshots/base-104233.tar.gz
-          git fetch --depth=1 https://github.com/Xipong/hermes-agent.git 4a3a2af360c6d4990f5266c1800d5335bcca6cba
-          git archive --format=tar.gz FETCH_HEAD > /tmp/port-snapshots/reference-76230.tar.gz
-          printf 'base=a7c0d307d7fea45be40772a9b0663ec096779398\nreference=4a3a2af360c6d4990f5266c1800d5335bcca6cba\n' > /tmp/port-snapshots/refs.txt
-      - uses: actions/upload-artifact@v4
+          set -euo pipefail
+          mkdir -p /tmp/port-receipts /tmp/port-reference
+          cp scripts/port_76230_over_104233.py /tmp/port-receipts/build-port.py
+          git fetch --depth=1 origin a7c0d307d7fea45be40772a9b0663ec096779398 4a3a2af360c6d4990f5266c1800d5335bcca6cba
+          git archive 4a3a2af360c6d4990f5266c1800d5335bcca6cba | tar -x -C /tmp/port-reference
+          git switch --detach a7c0d307d7fea45be40772a9b0663ec096779398
+          python /tmp/port-receipts/build-port.py "$PWD" /tmp/port-reference
+          git add agent/conversation_loop.py agent/delegation_inject.py agent/tool_executor.py agent/turn_finalizer.py run_agent.py tools/async_delegation.py tools/delegate_tool.py tools/delegate_tool_dispatch.py tests/agent/test_delegation_delivery.py website/docs/user-guide/features/delegation.md
+          git diff --cached --check
+          git diff --cached --stat | tee /tmp/port-receipts/diff-stat.txt
+          git diff --cached > /tmp/port-receipts/minimal-port.patch
+      - name: Install locked test environment
+        run: uv sync --locked --python 3.11 --extra dev --extra messaging --extra anthropic
+      - name: Validate existing rail and reference contracts
+        run: |
+          set -o pipefail
+          HERMES_TEST_FILE_RETRIES=0 scripts/run_tests.sh -j 2 --file-timeout 300 \
+            tests/agent/test_delegation_delivery.py \
+            tests/tools/test_async_delegation_ready_children.py \
+            tests/tools/test_async_delegation.py \
+            tests/tools/test_delegate_apiserver_background.py \
+            tests/tools/test_process_registry.py \
+            tests/tools/test_restored_delegation_ownership.py \
+            tests/cli/test_cli_async_delegation_delivery.py \
+            tests/gateway/test_completion_delivery.py \
+            --tb=short 2>&1 | tee /tmp/port-receipts/tests.txt
+      - name: Publish only after successful validation
+        run: |
+          set -euo pipefail
+          branch=feat/subagent-inject-over-104233
+          git fetch --depth=1 origin "refs/heads/$branch"
+          test "$(git rev-parse FETCH_HEAD)" = a7c0d307d7fea45be40772a9b0663ec096779398
+          git config user.name Xipong
+          git config user.email 217837358+Xipong@users.noreply.github.com
+          git commit -m 'feat(delegation): opt-in same-turn results over #104233' -m 'Minimal layer over a7c0d307. Reference implementation and semantic oracle: #76230 at 4a3a2af3. Reuse existing child-row identities and delivery claims; no second ledger or consumer rewrite.'
+          git push origin "HEAD:refs/heads/$branch"
+          git rev-parse HEAD | tee /tmp/port-receipts/published-sha.txt
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
         with:
-          name: port-76230-source-snapshots
-          path: /tmp/port-snapshots/
-          retention-days: 1
+          name: port-76230-validation
+          path: /tmp/port-receipts/
+          retention-days: 3
