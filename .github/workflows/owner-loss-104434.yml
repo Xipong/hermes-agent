@@ -5,11 +5,12 @@ on:
     paths:
       - .github/workflows/owner-loss-104434.yml
       - scripts/owner_loss_104434/apply.py
+      - scripts/owner_loss_104434/stabilize.py
 permissions:
   contents: write
 concurrency:
   group: owner-loss-104434
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   validate-and-publish:
     if: github.repository == 'Xipong/hermes-agent'
@@ -25,9 +26,11 @@ jobs:
           set -euo pipefail
           mkdir -p /tmp/owner-loss-104434
           cp scripts/owner_loss_104434/apply.py /tmp/owner-loss-104434/apply.py
+          cp scripts/owner_loss_104434/stabilize.py /tmp/owner-loss-104434/stabilize.py
           git fetch --depth=1 origin acd3be4810b1f905087fa9d8cf1d97f83e9a35f4
           git switch --detach acd3be4810b1f905087fa9d8cf1d97f83e9a35f4
           python /tmp/owner-loss-104434/apply.py "$PWD"
+          python /tmp/owner-loss-104434/stabilize.py "$PWD"
           git add \
             agent/delegation_inject.py \
             tools/async_delegation.py \
