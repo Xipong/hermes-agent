@@ -1,0 +1,23 @@
+name: Export 104426 checkpoint files
+
+on:
+  push:
+    branches:
+      - automation/export-104426-head
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pr-104426-checkpoint
+          path: |
+            agent/delegation_inject.py
+            tests/agent/test_delegation_unit_inject.py
+          retention-days: 1
