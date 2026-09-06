@@ -1,0 +1,116 @@
+name: Trim PR 104434 to essential contract tests
+on:
+  push:
+    branches: [automation/port-76230-over-104299]
+    paths:
+      - .github/workflows/trim-tests-104434.yml
+      - scripts/trim_tests_104434/apply.py
+permissions:
+  contents: write
+concurrency:
+  group: trim-tests-104434
+  cancel-in-progress: true
+jobs:
+  validate-and-publish:
+    if: github.repository == 'Xipong/hermes-agent'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39
+        with:
+          enable-cache: true
+      - name: Build the reduced suite on the exact PR head
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/trim-tests-104434
+          cp scripts/trim_tests_104434/apply.py /tmp/trim-tests-104434/apply.py
+          git fetch --depth=1 origin 22d84c6733089331557fe43b021b56a30d666dff
+          git switch --detach 22d84c6733089331557fe43b021b56a30d666dff
+          python /tmp/trim-tests-104434/apply.py "$PWD" \
+            | tee /tmp/trim-tests-104434/selection.txt
+      - name: Install locked test environment
+        run: uv sync --locked --python 3.11 --extra dev --extra messaging --extra anthropic
+      - name: Remove imports made obsolete by deleted micro-tests
+        run: |
+          set -euo pipefail
+          uv run ruff check --fix tests/agent/test_delegation_delivery.py
+          uv run ruff check \
+            tests/agent/test_delegation_delivery.py \
+            tests/gateway/test_completion_delivery.py
+          python -m py_compile \
+            tests/agent/test_delegation_delivery.py \
+            tests/gateway/test_completion_delivery.py
+          git add tests/agent/test_delegation_delivery.py
+          git diff --cached --check
+          test -z "$(git diff --cached --name-only -- .github scripts)"
+          git diff --cached --stat | tee /tmp/trim-tests-104434/diff-stat.txt
+          git diff --cached --binary > /tmp/trim-tests-104434/validated.patch
+      - name: Prove the intended collection size
+        run: |
+          set -o pipefail
+          uv run pytest --collect-only -q tests/agent/test_delegation_delivery.py \
+            2>&1 | tee /tmp/trim-tests-104434/collection.txt
+          grep -Eq '15 tests collected' /tmp/trim-tests-104434/collection.txt
+      - name: Run the affected production regression matrix
+        run: |
+          set -o pipefail
+          HERMES_TEST_FILE_RETRIES=0 scripts/run_tests.sh -j 2 --file-timeout 300 \
+            tests/agent/test_delegation_delivery.py \
+            tests/gateway/test_completion_delivery.py \
+            tests/tools/test_async_delegation.py \
+            tests/tools/test_process_registry.py \
+            tests/tools/test_restored_delegation_ownership.py \
+            tests/cli/test_cli_async_delegation_delivery.py \
+            tests/tui_gateway/test_delegation_session_lifecycle.py \
+            tests/test_tui_gateway_server.py \
+            --tb=short 2>&1 | tee /tmp/trim-tests-104434/tests.txt
+      - name: Repeat every retained race and owner-loss proof
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 5); do
+            uv run pytest -q \
+              tests/agent/test_delegation_delivery.py::test_reconciled_carrier_claim_rejection_leaves_tui_runnable \
+              tests/agent/test_delegation_delivery.py::test_tui_busy_dequeue_cannot_hide_ready_inject_from_tool_boundary \
+              tests/agent/test_delegation_delivery.py::test_owner_loss_retires_local_latch_and_next_turn_can_inject \
+              tests/agent/test_delegation_delivery.py::test_uncertain_previous_turn_claim_does_not_block_current_turn \
+              tests/gateway/test_completion_delivery.py::test_gateway_dequeue_cannot_hide_ready_inject_from_active_tool_boundary \
+              tests/gateway/test_completion_delivery.py::test_watch_drain_cannot_hide_ready_inject_from_active_tool_boundary \
+              --tb=short
+          done | tee /tmp/trim-tests-104434/repeat.txt
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        name: Fresh publication checkout isolated from tests
+        with:
+          repository: Xipong/hermes-agent
+          ref: feat/subagent-inject-over-104299-validated
+          path: publish
+          fetch-depth: 1
+      - name: Publish the exact validated reduction with a head lease
+        working-directory: publish
+        run: |
+          set -euo pipefail
+          branch=feat/subagent-inject-over-104299-validated
+          expected=22d84c6733089331557fe43b021b56a30d666dff
+          test "$(git rev-parse HEAD)" = "$expected"
+          git apply /tmp/trim-tests-104434/validated.patch
+          git add tests/agent/test_delegation_delivery.py
+          git diff --cached --binary > /tmp/trim-tests-104434/publication.patch
+          cmp /tmp/trim-tests-104434/validated.patch \
+              /tmp/trim-tests-104434/publication.patch
+          git config user.name Xipong
+          git config user.email 217837358+Xipong@users.noreply.github.com
+          git commit \
+            -m 'test(delegation): keep only merge-blocking carrier proofs' \
+            -m 'Reduce the added carrier suite from 53 pytest cases to 15. Retain one proof per distinct contract: safe complete-batch boundary, append-only/provider shape, durable flush rollback, bounded spill through compression, pre-claim failure, TUI receipt/liveness, queue routing races, owner loss versus uncertain failure, #104299 grouping/capacity/default policy, and #104373 recovery. The two gateway routing-race tests remain separate, for 17 PR-specific cases total.'
+          test "$(git rev-parse HEAD^)" = "$expected"
+          git push "--force-with-lease=refs/heads/$branch:$expected" \
+            origin "HEAD:refs/heads/$branch"
+          git rev-parse HEAD | tee /tmp/trim-tests-104434/published-sha.txt
+          git show -s --format=fuller HEAD \
+            > /tmp/trim-tests-104434/published-commit.txt
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: trim-tests-104434-validation
+          path: /tmp/trim-tests-104434/
+          retention-days: 3
