@@ -1,0 +1,69 @@
+name: retrigger-104426-docs
+
+on:
+  push:
+    branches:
+      - automation/retrigger-104426-docs
+
+permissions:
+  contents: write
+
+jobs:
+  retrigger:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Amend the feature commit with a concrete inject example
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TARGET_BRANCH: feat/delegation-inject-over-104299
+          EXPECTED_HEAD: e0ff8b8de47dbb2fffe0b9af982024649cb115bf
+          FEATURE_PARENT: c5594ec4b34097cafbe24deb6dfd9ac4b21d411d
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin "${TARGET_BRANCH}"
+          test "$(git rev-parse FETCH_HEAD)" = "${EXPECTED_HEAD}"
+          git checkout --detach FETCH_HEAD
+
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("website/docs/user-guide/features/delegation.md")
+          text = path.read_text(encoding="utf-8")
+          anchor = (
+              'Set `result_delivery: "inject"` for a review or dependency whose result can still change '
+              'the parent’s current turn. A unit that is already complete may be attached to the final '
+              '**new, not-yet-persisted** tool result of a complete tool-call batch before the next model '
+              'request. Hermes never waits for a child, creates an extra request, rewrites an older tool '
+              'result, or crosses into a later turn; a result that misses the boundary remains on the '
+              'ordinary fresh-turn delivery rail. The default is `result_delivery: "after_turn"`.\n'
+          )
+          addition = '''
+
+          ```json
+          {
+            "tasks": [{"goal": "Review the patch before I finalize it"}],
+            "result_delivery": "inject"
+          }
+          ```
+          '''
+          if text.count(anchor) != 1:
+              raise RuntimeError("expected one result_delivery documentation anchor")
+          path.write_text(text.replace(anchor, anchor + addition, 1), encoding="utf-8")
+          PY
+
+          git diff --check
+          git add website/docs/user-guide/features/delegation.md
+          git commit --amend --no-edit
+          test "$(git rev-parse HEAD^)" = "${FEATURE_PARENT}"
+          test "$(git rev-list --count "${FEATURE_PARENT}..HEAD")" = 1
+          git push --force-with-lease="refs/heads/${TARGET_BRANCH}:${EXPECTED_HEAD}" \
+            origin "HEAD:refs/heads/${TARGET_BRANCH}"
+          gh api --method DELETE "repos/${GH_REPO}/git/refs/heads/automation/retrigger-104426-docs"
