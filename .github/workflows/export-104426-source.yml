@@ -1,0 +1,22 @@
+name: Export source for 104426 port
+
+on:
+  push:
+    branches:
+      - automation/export-104426-source
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hermes-source-c5594ec
+          path: .
+          include-hidden-files: true
+          retention-days: 1
