@@ -1,0 +1,30 @@
+name: Isolated port of 76230 over 104233
+on:
+  push:
+    branches: [automation/port-76230-over-104233]
+    paths: [.github/workflows/port-76230-over-104233.yml]
+permissions:
+  contents: read
+jobs:
+  source-snapshots:
+    if: github.repository == 'Xipong/hermes-agent'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: a7c0d307d7fea45be40772a9b0663ec096779398
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Archive the exact requested base and unchanged reference
+        run: |
+          mkdir -p /tmp/port-snapshots
+          git archive --format=tar.gz HEAD > /tmp/port-snapshots/base-104233.tar.gz
+          git fetch --depth=1 https://github.com/Xipong/hermes-agent.git 4a3a2af360c6d4990f5266c1800d5335bcca6cba
+          git archive --format=tar.gz FETCH_HEAD > /tmp/port-snapshots/reference-76230.tar.gz
+          printf 'base=a7c0d307d7fea45be40772a9b0663ec096779398\nreference=4a3a2af360c6d4990f5266c1800d5335bcca6cba\n' > /tmp/port-snapshots/refs.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: port-76230-source-snapshots
+          path: /tmp/port-snapshots/
+          retention-days: 1
