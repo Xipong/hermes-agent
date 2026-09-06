@@ -1,0 +1,97 @@
+name: Validate final routing closure for PR 104434
+on:
+  push:
+    branches: [automation/port-76230-over-104299]
+    paths:
+      - .github/workflows/review-fixes-104434-v3.yml
+permissions:
+  contents: write
+concurrency:
+  group: review-fixes-104434-v3
+  cancel-in-progress: false
+jobs:
+  validate-and-publish:
+    if: github.repository == 'Xipong/hermes-agent'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39
+        with:
+          enable-cache: true
+      - name: Apply the final gateway watch-drain routing patch
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/review-104434-v3
+          cp scripts/review_fixes_104434/07-watch-drain-routing.patch /tmp/review-104434-v3/fix.patch
+          echo '06b8ad7b849ec6534628eb596b8bd3f9c40c4c55c52ab0eae5a681f16fd0b66a  /tmp/review-104434-v3/fix.patch' | sha256sum -c -
+          git fetch --depth=1 origin fb85c19a72aeffbfb7e6c2d1970734eeda055a8b
+          git switch --detach fb85c19a72aeffbfb7e6c2d1970734eeda055a8b
+          git apply --check /tmp/review-104434-v3/fix.patch
+          git apply /tmp/review-104434-v3/fix.patch
+          git add gateway/run_notifications.py tests/gateway/test_completion_delivery.py
+          git diff --cached --check
+          git diff --cached --stat | tee /tmp/review-104434-v3/diff-stat.txt
+          git diff --cached --binary > /tmp/review-104434-v3/validated.patch
+          python -m py_compile gateway/run_notifications.py tests/gateway/test_completion_delivery.py
+      - name: Install locked test environment
+        run: uv sync --locked --python 3.11 --extra dev --extra messaging --extra anthropic
+      - name: Ruff changed files
+        run: uv run ruff check gateway/run_notifications.py tests/gateway/test_completion_delivery.py
+      - name: Validate all affected delivery and gateway/TUI consumers
+        run: |
+          set -o pipefail
+          HERMES_TEST_FILE_RETRIES=0 scripts/run_tests.sh -j 2 --file-timeout 300 \
+            tests/agent/test_delegation_delivery.py \
+            tests/gateway/test_completion_delivery.py \
+            tests/gateway/test_background_process_notifications.py \
+            tests/tools/test_async_delegation.py \
+            tests/tools/test_process_registry.py \
+            tests/tools/test_restored_delegation_ownership.py \
+            tests/cli/test_cli_async_delegation_delivery.py \
+            tests/tui_gateway/test_delegation_session_lifecycle.py \
+            tests/test_tui_gateway_server.py \
+            --tb=short 2>&1 | tee /tmp/review-104434-v3/tests.txt
+      - name: Repeat every deterministic routing and restart race
+        run: |
+          set -euo pipefail
+          for i in 1 2 3 4 5; do
+            uv run pytest -q \
+              tests/agent/test_delegation_delivery.py::test_reconciled_carrier_claim_rejection_leaves_tui_runnable \
+              tests/agent/test_delegation_delivery.py::test_tui_busy_dequeue_cannot_hide_ready_inject_from_tool_boundary \
+              tests/gateway/test_completion_delivery.py::test_gateway_dequeue_cannot_hide_ready_inject_from_active_tool_boundary \
+              tests/gateway/test_completion_delivery.py::test_watch_drain_cannot_hide_ready_inject_from_active_tool_boundary \
+              --tb=short
+          done | tee /tmp/review-104434-v3/race-repeat.txt
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        name: Fresh publication checkout isolated from tests
+        with:
+          repository: Xipong/hermes-agent
+          ref: feat/subagent-inject-over-104299-validated
+          path: publish
+          fetch-depth: 1
+      - name: Publish with an exact-head lease
+        working-directory: publish
+        run: |
+          set -euo pipefail
+          branch=feat/subagent-inject-over-104299-validated
+          expected=fb85c19a72aeffbfb7e6c2d1970734eeda055a8b
+          test "$(git rev-parse HEAD)" = "$expected"
+          git apply /tmp/review-104434-v3/validated.patch
+          git add gateway/run_notifications.py tests/gateway/test_completion_delivery.py
+          git diff --cached --binary > /tmp/review-104434-v3/publication.patch
+          cmp /tmp/review-104434-v3/validated.patch /tmp/review-104434-v3/publication.patch
+          git config user.name Xipong
+          git config user.email 217837358+Xipong@users.noreply.github.com
+          git commit -m 'fix(gateway): route watch-drain queue scans through the shared reservation' \
+            -m 'The post-turn watch-only drain also dequeues and requeues async delegation events. Serialize that bounded pass with current-turn, gateway-idle and TUI consumers, and add a deterministic post-dequeue pause regression.'
+          test "$(git rev-parse HEAD^)" = "$expected"
+          git push "--force-with-lease=refs/heads/$branch:$expected" origin "HEAD:refs/heads/$branch"
+          git rev-parse HEAD | tee /tmp/review-104434-v3/published-sha.txt
+          git show -s --format=fuller HEAD > /tmp/review-104434-v3/published-commit.txt
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: review-fixes-104434-final-routing
+          path: /tmp/review-104434-v3/
+          retention-days: 3
