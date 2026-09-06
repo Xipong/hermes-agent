@@ -4,7 +4,7 @@ on:
     branches: [automation/port-76230-over-104299]
     paths:
       - .github/workflows/owner-loss-104434.yml
-      - scripts/owner_loss_104434/**
+      - scripts/owner_loss_104434/apply.py
 permissions:
   contents: write
 concurrency:
@@ -20,21 +20,14 @@ jobs:
       - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39
         with:
           enable-cache: true
-      - name: Apply owner-loss fix to the exact PR head
+      - name: Build owner-loss fix on the exact PR head
         run: |
           set -euo pipefail
           mkdir -p /tmp/owner-loss-104434
-          sed 's/^ diff --git /diff --git /' \
-            scripts/owner_loss_104434/owner_loss.patch \
-            > /tmp/owner-loss-104434/owner-loss.patch
-          cp scripts/owner_loss_104434/format.patch \
-            /tmp/owner-loss-104434/format.patch
+          cp scripts/owner_loss_104434/apply.py /tmp/owner-loss-104434/apply.py
           git fetch --depth=1 origin acd3be4810b1f905087fa9d8cf1d97f83e9a35f4
           git switch --detach acd3be4810b1f905087fa9d8cf1d97f83e9a35f4
-          git apply --check /tmp/owner-loss-104434/owner-loss.patch
-          git apply /tmp/owner-loss-104434/owner-loss.patch
-          git apply --check /tmp/owner-loss-104434/format.patch
-          git apply /tmp/owner-loss-104434/format.patch
+          python /tmp/owner-loss-104434/apply.py "$PWD"
           git add \
             agent/delegation_inject.py \
             tools/async_delegation.py \
@@ -68,12 +61,13 @@ jobs:
             tests/tui_gateway/test_delegation_session_lifecycle.py \
             tests/test_tui_gateway_server.py \
             --tb=short 2>&1 | tee /tmp/owner-loss-104434/tests.txt
-      - name: Repeat the owner-loss and cross-turn latch regressions
+      - name: Repeat owner-loss and cross-turn latch regressions
         run: |
           set -euo pipefail
           for i in $(seq 1 20); do
             uv run pytest -q \
               tests/agent/test_delegation_delivery.py::test_owner_loss_retires_local_latch_and_next_turn_can_inject \
+              tests/agent/test_delegation_delivery.py::test_failed_ack_after_owner_loss_prunes_stale_local_entry \
               tests/agent/test_delegation_delivery.py::test_uncertain_previous_turn_claim_does_not_block_current_turn \
               --tb=short
           done | tee /tmp/owner-loss-104434/repeat.txt
@@ -103,7 +97,7 @@ jobs:
           git config user.email 217837358+Xipong@users.noreply.github.com
           git commit \
             -m 'fix(delegation): retire stale inject claims after owner loss' \
-            -m 'Scope the in-memory single-flight latch to its originating turn. Failed renewals mark local ownership abandoned; failed ack/release paths query the exact durable token and prune only when ownership definitively moved or the row became terminal. Preserve uncertain claims for retry and never requeue a row owned by another consumer. Add regression coverage for lease takeover, heartbeat shutdown, old-turn finalization, and a subsequent successful inject on the same cached parent.'
+            -m 'Scope the in-memory single-flight latch to its originating turn. Failed renewals mark local ownership abandoned; failed ack/release paths query the exact durable token and prune only when ownership definitively moved or the row became terminal. Preserve uncertain claims for retry and never requeue a row owned by another consumer. Add regressions for lease takeover, heartbeat shutdown, committed-carrier acknowledgement loss, old-turn finalization, and a subsequent successful inject on the same cached parent.'
           test "$(git rev-parse HEAD^)" = "$expected"
           git push "--force-with-lease=refs/heads/$branch:$expected" \
             origin "HEAD:refs/heads/$branch"
