@@ -1,0 +1,170 @@
++        tui_dequeued.set()
++        assert release_tui.wait(timeout=2)
++        return original_owns(sid, candidate_session, candidate)
++
++    monkeypatch.setattr(server, "_session_owns_notification_event", paused_owns)
++    reserved = []
++
++    def reserve():
++        with process_registry.completion_routing_lock:
++            reserved.append(server._notif_reserve_event(
++                "tui-race", session, process_registry))
++
++    tui_thread = threading.Thread(target=reserve)
++    tui_thread.start()
++    assert tui_dequeued.wait(timeout=2)
++
++    attached: list[int] = []
++    attach_done = threading.Event()
++
++    def attach():
++        attached.append(attach_ready_injects_to_tool_results(agent, messages, 1))
++        attach_done.set()
++
++    attach_thread = threading.Thread(target=attach)
++    attach_thread.start()
++    assert not attach_done.wait(timeout=0.05)
++
++    release_tui.set()
++    tui_thread.join(timeout=2)
++    attach_thread.join(timeout=2)
++    assert not tui_thread.is_alive()
++    assert not attach_thread.is_alive()
++    assert reserved and reserved[0][1] == "busy"
++    assert attached == [1]
++    assert "tui race result" in messages[0]["content"]
++
++    messages[0]["_db_persisted"] = True
++    assert acknowledge_pending_injects(agent) == 1
++    agent._delegation_inject_claim_heartbeat["thread"].join(timeout=1)
++
++
+ @pytest.mark.parametrize("wrong_field", ["session", "role", "identity", "kind", "malformed"])
+ def test_unrelated_transcript_metadata_cannot_suppress_delivery(tmp_path, monkeypatch, wrong_field):
+     monkeypatch.setattr(ad, "_db_path", lambda: tmp_path / "receipt.db")
+diff --git a/tests/gateway/test_completion_delivery.py b/tests/gateway/test_completion_delivery.py
+index 24a1a8c..07893db 100644
+--- a/tests/gateway/test_completion_delivery.py
++++ b/tests/gateway/test_completion_delivery.py
+@@ -9,6 +9,7 @@ state (when available) is acknowledged through its authoritative SQLite API.
+ import asyncio
+ import json
+ import queue
++import threading
+ from collections import OrderedDict
+ from types import SimpleNamespace
+ from unittest.mock import AsyncMock, MagicMock, patch
+@@ -825,6 +826,85 @@ def test_single_async_event_latency_and_text_are_unchanged(
+     assert "deleg_single" in delivered.text
+ 
+ 
++def test_gateway_dequeue_cannot_hide_ready_inject_from_active_tool_boundary(
++    monkeypatch, isolated_registry,
++):
++    """The gateway must requeue an active-turn inject before releasing routing ownership.
++
++    Pause the real gateway classifier after it has dequeued the event while holding
++    the shared reservation.  The tool-boundary drain must block, then observe and
++    claim the event immediately after the gateway restores it to the queue.
++    """
++    from agent.delegation_inject import (
++        acknowledge_pending_injects,
++        attach_ready_injects_to_tool_results,
++    )
++
++    event = _distinct_async_event("deleg_active_boundary")
++    event.update({
++        "parent_session_id": "parent-session",
++        "parent_turn_id": "turn-active",
++        "result_delivery": "inject",
++    })
++    _persist_pending_completion(event)
++    isolated_registry.completion_queue.put(dict(event))
++
++    adapter = SimpleNamespace(handle_message=AsyncMock())
++    runner = _runner(adapter)
++    active_parent = SimpleNamespace(
++        session_id="parent-session",
++        _active_turn_id="turn-active",
++        _pending_delegation_inject_claims=[],
++        _session_messages=[],
++    )
++    runner._running_agents = {event["session_key"]: active_parent}
++
++    gateway_dequeued = threading.Event()
++    release_gateway = threading.Event()
++    original_enrich = runner._enrich_async_delegation_routing
++
++    def paused_enrich(candidate):
++        original_enrich(candidate)
++        gateway_dequeued.set()
++        assert release_gateway.wait(timeout=2)
++
++    monkeypatch.setattr(runner, "_enrich_async_delegation_routing", paused_enrich)
++    reserved: list[list[dict]] = []
++    gateway_thread = threading.Thread(
++        target=lambda: reserved.append(
++            runner._reserve_idle_async_delegation_events(isolated_registry)
++        )
++    )
++    gateway_thread.start()
++    assert gateway_dequeued.wait(timeout=2)
++
++    messages = [{"role": "tool", "tool_call_id": "tc", "content": "foreground result"}]
++    attached: list[int] = []
++    attach_done = threading.Event()
++
++    def attach():
++        attached.append(attach_ready_injects_to_tool_results(active_parent, messages, 1))
++        attach_done.set()
++
++    attach_thread = threading.Thread(target=attach)
++    attach_thread.start()
++    assert not attach_done.wait(timeout=0.05)  # blocked by the gateway's routing reservation
++
++    release_gateway.set()
++    gateway_thread.join(timeout=2)
++    attach_thread.join(timeout=2)
++    assert not gateway_thread.is_alive()
++    assert not attach_thread.is_alive()
++    assert reserved == [[]]
++    assert attached == [1]
++    assert "Result for deleg_active_boundary" in messages[0]["content"]
++    adapter.handle_message.assert_not_awaited()
++
++    messages[0]["_db_persisted"] = True
++    assert acknowledge_pending_injects(active_parent) == 1
++    active_parent._delegation_inject_claim_heartbeat["thread"].join(timeout=1)
++
++
+ def test_failed_coalesced_async_batch_releases_claims_and_retries(
+     monkeypatch, isolated_registry,
+ ):
+diff --git a/tools/async_delegation.py b/tools/async_delegation.py
+index 3edae45..5c467ab 100644
+--- a/tools/async_delegation.py
++++ b/tools/async_delegation.py
+@@ -799,7 +799,11 @@ def _push_completion_event(record: Dict[str, Any], result: Dict[str, Any], statu
+         **{k: result[k] for k in _STALL_META_KEYS if k in result}}
+     _persist_completion(evt, result)
+     try:
+-        process_registry.completion_queue.put(evt)
++        # Publication participates in the same reservation as every dequeue.
++        # Thus "ready before the boundary" has one linearization point instead
++        # of racing the active drain's qsize snapshot.
++        with process_registry.completion_routing_lock:
++            process_registry.completion_queue.put(evt)
+     except Exception as exc:  # pragma: no cover
+         logger.error(f"Async delegation{label} %s: failed to enqueue completion event; "
+                      "result lost: %s", record.get("delegation_id"), exc)
+diff --git a/tools/process_registry.py b/tools/process_registry.py
+index 2df6fe1..6ad88e3 100644
+--- a/tools/process_registry.py
++++ b/tools/process_registry.py
+@@ -403,6 +403,12 @@ class ProcessRegistry:
+         # process_loop and the gateway drain it after each agent turn to trigger new turns.
+         import queue as _queue_mod
+         self.completion_queue: _queue_mod.Queue = _queue_mod.Queue()
++        # Every completion consumer uses this short reservation while it dequeues,
++        # classifies, and either keeps or requeues a bounded snapshot.  No formatter,
++        # model, adapter, or database I/O belongs under this lock.  In particular,
