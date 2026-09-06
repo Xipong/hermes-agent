@@ -1,0 +1,147 @@
+diff --git a/agent/delegation_inject.py b/agent/delegation_inject.py
+index f4ed855..a68b580 100644
+--- a/agent/delegation_inject.py
++++ b/agent/delegation_inject.py
+@@ -288,7 +288,8 @@ def release_pending_injects(
+             if committed:
+                 # At the attempt cap release transitions to dropped, not pending.
+                 if state == "pending":
+-                    process_registry.completion_queue.put(event)
++                    with process_registry.completion_routing_lock:
++                        process_registry.completion_queue.put(event)
+                 settled += 1
+             elif state == "delivered":
+                 settled += 1
+@@ -394,27 +395,38 @@ def attach_ready_injects_to_tool_results(
+     completion_queue = process_registry.completion_queue
+ 
+     def requeue(event):
+-        completion_queue.put(event)
++        with process_registry.completion_routing_lock:
++            completion_queue.put(event)
+ 
+     candidates = []
+-    # Queue.get_nowait is already atomic. Take only a bounded snapshot; an idle
+-    # consumer winning a race is a missed opportunity, not another delivery rail.
+-    for _ in range(completion_queue.qsize()):
++    # Dequeue/classify/requeue is one bounded routing reservation shared with
++    # gateway and TUI consumers.  Whichever consumer gets here first must either
++    # keep the event or make it visible again before releasing the lock, so a
++    # ready same-turn dependency cannot disappear in another consumer's private
++    # list at the exact tool-result boundary.
++    with process_registry.completion_routing_lock:
+         try:
+-            event = completion_queue.get_nowait()
+-        except queue.Empty:
+-            break
+-        delivery = str(event.get("result_delivery") or "after_turn").strip().lower()
+-        if (
+-            event.get("type") != "async_delegation"
+-            or delivery != "inject"
+-            or str(event.get("parent_turn_id") or "") != active_turn_id
+-            or str(event.get("parent_session_id") or "") != str(getattr(agent, "session_id", "") or "")
+-            or not event.get("parent_session_id")
+-        ):
+-            requeue(event)
+-            continue
+-        candidates.append(event)
++            scan_count = completion_queue.qsize()
++        except Exception:
++            return 0
++        for _ in range(max(0, scan_count)):
++            try:
++                event = completion_queue.get_nowait()
++            except queue.Empty:
++                break
++            except Exception:
++                break
++            delivery = str(event.get("result_delivery") or "after_turn").strip().lower()
++            if (
++                event.get("type") != "async_delegation"
++                or delivery != "inject"
++                or str(event.get("parent_turn_id") or "") != active_turn_id
++                or str(event.get("parent_session_id") or "") != str(getattr(agent, "session_id", "") or "")
++                or not event.get("parent_session_id")
++            ):
++                completion_queue.put(event)
++                continue
++            candidates.append(event)
+ 
+     # Formatting / sandbox I/O holds neither a queue nor a database lock.
+     # Dequeue gives this consumer the RAM item; the durable claim arbitrates a
+@@ -493,7 +505,7 @@ def attach_ready_injects_to_tool_results(
+                 logger.exception("Failed to release rolled-back delegation claim")
+                 continue
+             if released and get_event_delivery_state(event) == "pending":
+-                completion_queue.put(event)
++                requeue(event)
+         raise
+ 
+     return len(accepted)
+diff --git a/gateway/run_notifications.py b/gateway/run_notifications.py
+index fc356f6..97f2ff7 100644
+--- a/gateway/run_notifications.py
++++ b/gateway/run_notifications.py
+@@ -1331,10 +1331,66 @@ class GatewayNotificationsMixin:
+                 self._settle_sibling_claims(siblings, release_event_delivery, "Could not release coalesced durable claim")
+                 if delivered is None:
+                     # Primary dropped/owned elsewhere: requeue just the siblings for the next tick.
+-                    for evt, _claim_id in siblings:
+-                        _pr.completion_queue.put(evt)
++                    with _pr.completion_routing_lock:
++                        for evt, _claim_id in siblings:
++                            _pr.completion_queue.put(evt)
+         return delivered
+ 
++    def _reserve_idle_async_delegation_events(self, registry) -> list[dict]:
++        """Take only async completions that are genuinely idle-deliverable.
++
++        Dequeue, active-parent classification, and requeue happen under the same
++        short routing reservation used by the current-turn tool carrier and TUI.
++        A matching ``result_delivery=inject`` event therefore stays visible to
++        its active parent until that parent's safe tool-result boundary.  This
++        method performs no formatting, durable claims, adapter calls, or awaits.
++        """
++        from gateway.run import _AGENT_PENDING_SENTINEL
++
++        idle_events: list[dict] = []
++        requeue: list[dict] = []
++        with registry.completion_routing_lock:
++            try:
++                scan_count = registry.completion_queue.qsize()
++            except Exception:
++                scan_count = 0
++            for _ in range(max(0, scan_count)):
++                try:
++                    evt = registry.completion_queue.get_nowait()
++                except Exception:
++                    break
++                if evt.get("type") != "async_delegation":
++                    requeue.append(evt)
++                    continue
++
++                self._enrich_async_delegation_routing(evt)
++                session_key = str(evt.get("session_key") or "").strip()
++                parent = (getattr(self, "_running_agents", None) or {}).get(session_key)
++                delivery = str(evt.get("result_delivery") or "after_turn").strip().lower()
++                event_turn = str(evt.get("parent_turn_id") or "")
++                same_active_turn = bool(
++                    parent is not None
++                    and parent is not _AGENT_PENDING_SENTINEL
++                    and event_turn
++                    and str(getattr(parent, "_active_turn_id", "") or "") == event_turn
++                )
++
++                # A pending sentinel has not published the parent agent/turn yet,
++                # so it cannot be proven idle.  Any event for a live parent stays
++                # queued unless it is an inject event for some *other* turn.
++                if (
++                    parent is _AGENT_PENDING_SENTINEL
++                    or (parent is not None and delivery != "inject")
++                    or same_active_turn
++                ):
++                    requeue.append(evt)
++                else:
++                    idle_events.append(evt)
++
++            for evt in requeue:
