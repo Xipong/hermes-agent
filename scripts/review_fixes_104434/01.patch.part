@@ -1,0 +1,150 @@
++                registry.completion_queue.put(evt)
++        return idle_events
++
+     async def _async_delegation_watcher(self, interval: float = 2.0) -> None:
+         """Drain async-delegation completions and inject them as new turns (IDLE case).
+ 
+@@ -1345,17 +1401,7 @@ class GatewayNotificationsMixin:
+         from tools.process_registry import process_registry as _pr
+         while self._running:
+             with _log_suppressed(logging.DEBUG, "Async delegation watcher error: %s"):
+-                # Take async-delegation events only; requeue watch/completion events for their own drains.
+-                requeue = []
+-                async_events = []
+-                while not _pr.completion_queue.empty():
+-                    try:
+-                        evt = _pr.completion_queue.get_nowait()
+-                    except Exception:
+-                        break
+-                    (async_events if evt.get("type") == "async_delegation" else requeue).append(evt)
+-                for evt in requeue:
+-                    _pr.completion_queue.put(evt)
++                async_events = self._reserve_idle_async_delegation_events(_pr)
+                 # A fan-out finishing together yields N completions for one session; group by full route +
+                 # parent session so each group becomes ONE consolidated turn.
+                 # A same-tick drain often carries several completions for the SAME originating session (a
+@@ -1363,17 +1409,18 @@ class GatewayNotificationsMixin:
+                 # coalesce. See #70300.
+                 groups: dict[tuple[str, ...], list[dict]] = {}
+                 for evt in async_events:
+-                    self._enrich_async_delegation_routing(evt)
+                     groups.setdefault(self._event_route_key(evt, self._ASYNC_GROUP_KEY_FIELDS), []).append(evt)
+                 for group in groups.values():
+                     try:
+                         delivered = await self._deliver_async_delegation_group(group)
+                         if delivered is False:
++                            with _pr.completion_routing_lock:
++                                for evt in group:
++                                    _pr.completion_queue.put(evt)
++                    except Exception as e:
++                        with _pr.completion_routing_lock:
+                             for evt in group:
+                                 _pr.completion_queue.put(evt)
+-                    except Exception as e:
+-                        for evt in group:
+-                            _pr.completion_queue.put(evt)
+                         logger.error("Async delegation injection error: %s", e)
+             await asyncio.sleep(interval)
+ 
+diff --git a/tests/agent/test_delegation_delivery.py b/tests/agent/test_delegation_delivery.py
+index 4f3dd5b..e40ab43 100644
+--- a/tests/agent/test_delegation_delivery.py
++++ b/tests/agent/test_delegation_delivery.py
+@@ -1081,6 +1081,141 @@ def test_restart_does_not_redeliver_committed_carrier_without_ack(tmp_path, monk
+     db.close()
+ 
+ 
++@pytest.mark.parametrize("consumer", ["poller", "post_turn"])
++def test_reconciled_carrier_claim_rejection_leaves_tui_runnable(
++    tmp_path, monkeypatch, consumer,
++):
++    """A restart receipt rejection must not reserve ``session['running']``.
++
++    Exercise both TUI consumers named in the review: the background notification
++    poller and the immediate post-turn safety drain.  The durable row is still
++    ``pending`` when queued, but the committed tool transcript is authoritative;
++    its claim reconciles to ``delivered`` and no synthetic turn is dispatched.
++    """
++    from tui_gateway import server
++
++    monkeypatch.setattr(ad, "_db_path", lambda: tmp_path / "receipt.db")
++    db = SessionDB(db_path=tmp_path / "receipt.db")
++    db.create_session("parent-session", source="tui", model="test")
++    delegation_id = _record()
++    assert _complete_unit(delegation_id, _child(0, "receipt already committed"))
++    agent = _tool_boundary_agent()
++    messages = [{
++        "role": "tool", "tool_call_id": "tc", "tool_name": "terminal",
++        "content": "original",
++    }]
++    assert attach_ready_injects_to_tool_results(agent, messages, 1) == 1
++    event = agent._pending_delegation_inject_claims[0]["event"]
++    db.append_message(
++        "parent-session", "tool", messages[0]["content"], tool_call_id="tc",
++        tool_name="terminal", display_metadata=messages[0]["display_metadata"],
++    )
++
++    # Hard exit after transcript commit and before durable acknowledgement.
++    heartbeat = agent._delegation_inject_claim_heartbeat
++    heartbeat["stop"].set()
++    heartbeat["thread"].join(timeout=1)
++    agent._pending_delegation_inject_claims = []
++    ad._reset_for_tests()
++    process_registry.completion_queue.put(event)
++
++    sid = f"review-{consumer}"
++    session = {
++        "session_key": event["session_key"],
++        "history_lock": threading.Lock(),
++        "running": False,
++        "_finalized": False,
++    }
++    server._sessions[sid] = session
++    monkeypatch.setattr(server, "_get_db", lambda: None)
++    monkeypatch.setattr(server, "_emit", lambda *_args, **_kwargs: None)
++    monkeypatch.setattr(
++        server, "_run_prompt_submit",
++        lambda *_args, **_kwargs: pytest.fail("reconciled carrier was redelivered"),
++    )
++    monkeypatch.setattr(server, "_drain_queued_prompt", lambda *_args, **_kwargs: False)
++    monkeypatch.setattr(
++        server, "_dispatch_followup_turn",
++        lambda *_args, **_kwargs: pytest.fail("reconciled carrier started a follow-up"),
++    )
++    try:
++        if consumer == "poller":
++            stop = threading.Event()
++            stop.set()  # one bounded shutdown drain
++            server._notification_poller_loop(stop, sid, session)
++        else:
++            server._run_post_turn_followups("rid", sid, session, {}, None)
++
++        assert session["running"] is False
++        assert process_registry.completion_queue.empty()
++        assert _event_state(delegation_id) == ("delivered", 1)
++    finally:
++        server._sessions.pop(sid, None)
++        db.close()
++
++
++def test_tui_busy_dequeue_cannot_hide_ready_inject_from_tool_boundary(monkeypatch):
++    """A busy TUI requeues under routing ownership before the active drain proceeds."""
++    from tui_gateway import server
++
++    delegation_id = _record()
++    assert _complete_unit(delegation_id, _child(0, "tui race result"))
++    event = _queue_contents()[0]
++    agent = _tool_boundary_agent()
++    messages = [{"role": "tool", "tool_call_id": "tc", "content": "foreground result"}]
++    session = {
++        "session_key": event["session_key"],
++        "history_lock": threading.Lock(),
++        "running": True,
++        "_finalized": False,
++    }
++
++    tui_dequeued = threading.Event()
++    release_tui = threading.Event()
++    original_owns = server._session_owns_notification_event
++
++    def paused_owns(sid, candidate_session, candidate):
