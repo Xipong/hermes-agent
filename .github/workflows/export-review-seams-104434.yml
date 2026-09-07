@@ -1,0 +1,36 @@
+name: Export PR 104434 review-seam sources
+on:
+  push:
+    branches: [automation/port-76230-over-104299]
+    paths: [.github/workflows/export-review-seams-104434.yml]
+permissions:
+  contents: read
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - name: Export pinned source snapshots and feature delta
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/review-seams
+          base=c5594ec4b34097cafbe24deb6dfd9ac4b21d411d
+          head=51a71be34cc926d75cc4e72fb297b4665de1765a
+          main=e9bccc90a5e314ddf6dd4bd3772d50cb40027275
+          git fetch --depth=1 origin "$base" "$head"
+          git fetch --depth=1 https://github.com/NousResearch/hermes-agent.git "$main"
+          git archive "$main" | gzip -1 > /tmp/review-seams/main.tar.gz
+          git archive "$base" | gzip -1 > /tmp/review-seams/base.tar.gz
+          git diff --binary "$base" "$head" > /tmp/review-seams/feature.patch
+          git diff --name-only "$base" "$head" > /tmp/review-seams/feature-paths.txt
+          git show -s --format=fuller "$main" > /tmp/review-seams/main-commit.txt
+          git show -s --format=fuller "$head" > /tmp/review-seams/head-commit.txt
+          sha256sum /tmp/review-seams/* > /tmp/review-seams/checksums.txt
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: review-seams-104434-sources
+          path: /tmp/review-seams/
+          retention-days: 3
