@@ -1,0 +1,167 @@
+name: Validate and publish PR 104434 ownership review fixes
+on:
+  push:
+    branches: [automation/port-76230-over-104299]
+    paths: [.github/workflows/review-seams-104434.yml]
+permissions:
+  contents: write
+concurrency:
+  group: review-seams-104434
+  cancel-in-progress: false
+jobs:
+  validate-and-publish:
+    if: github.repository == 'Xipong/hermes-agent'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      OLD_HEAD: 51a71be34cc926d75cc4e72fb297b4665de1765a
+      OLD_BASE: c5594ec4b34097cafbe24deb6dfd9ac4b21d411d
+      MAIN: e9bccc90a5e314ddf6dd4bd3772d50cb40027275
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v7
+        with:
+          enable-cache: true
+      - name: Prepare exact snapshots and audited patch inputs
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/review-seams
+          cp scripts/review_seams_104434/integrate.py /tmp/review-seams/integrate.py
+          cp scripts/review_seams_104434/review_probes.py /tmp/review-seams/review_probes.py
+          cat scripts/review_seams_104434/*.patch.part > /tmp/review-seams/fixup.patch
+          echo 'c15044cb47948072f60dab986b1a5ae123d2c5d57afbb59350374adff6ac87e6  /tmp/review-seams/integrate.py' | sha256sum -c -
+          echo '5f3a737ec7971e3d6b37eb9ba4847605b413f4984e0075a7629dd06b3c0c9db3  /tmp/review-seams/fixup.patch' | sha256sum -c -
+          git fetch --depth=1 origin "$OLD_BASE" "$OLD_HEAD"
+          git fetch --depth=1 https://github.com/NousResearch/hermes-agent.git "$MAIN"
+          git branch snapshot-head "$OLD_HEAD"
+          git branch snapshot-main "$MAIN"
+          git diff --binary "$OLD_BASE" "$OLD_HEAD" > /tmp/review-seams/feature.patch
+          git switch --detach "$OLD_HEAD"
+      - name: Install isolated locked Python 3.11 environment
+        run: |
+          uv sync --locked --python 3.11 --extra dev --extra messaging --extra anthropic
+          uv pip install 'pexpect==4.9.0'
+      - name: RED - reproduce both reviewer failures on the original head
+        run: |
+          set -euo pipefail
+          cp /tmp/review-seams/review_probes.py tests/agent/test_review_104434_faults.py
+          set +e
+          scripts/run_tests.sh -j 1 tests/agent/test_review_104434_faults.py \
+            --file-retries 0 --file-timeout 180 --tb=short > /tmp/review-seams/red.txt 2>&1
+          status=$?
+          set -e
+          cat /tmp/review-seams/red.txt
+          test "$status" -ne 0
+          grep -Eq '0 tests passed, 2 failed|2 failed' /tmp/review-seams/red.txt
+          grep -q 'EXCLUSIVE_EVIDENCE' /tmp/review-seams/red.txt
+          grep -q 'durable_first' /tmp/review-seams/red.txt
+          rm tests/agent/test_review_104434_faults.py
+      - name: Integrate current-main behavior and apply both ownership repairs
+        run: |
+          set -euo pipefail
+          git switch --detach "$MAIN"
+          set +e
+          git apply --3way /tmp/review-seams/feature.patch
+          status=$?
+          set -e
+          test "$status" -eq 1
+          expected=$'agent/tool_executor.py\ntui_gateway/prompt_turn.py\ntui_gateway/session_notifications.py'
+          test "$(git diff --name-only --diff-filter=U)" = "$expected"
+          python /tmp/review-seams/integrate.py "$PWD"
+          git add -u
+          git apply --check /tmp/review-seams/fixup.patch
+          git apply /tmp/review-seams/fixup.patch
+          git add -u
+          git diff --cached --check
+          test -z "$(git diff --cached --name-only -- .github scripts)"
+          git diff --cached --full-index --binary "$MAIN" > /tmp/review-seams/validated.patch
+          echo '067404e87dd8b274d4e84a76ffa3bbb3ae295b4194c4703f1ea1ddb6b95fafda  /tmp/review-seams/validated.patch' | sha256sum -c -
+          git diff --cached --stat "$MAIN" | tee /tmp/review-seams/diff-stat.txt
+          git diff --cached --name-only "$MAIN" | grep '\.py$' > /tmp/review-seams/python-files.txt
+      - name: Refresh locked dependencies and lint/compile changed code
+        run: |
+          set -euo pipefail
+          uv sync --locked --python 3.11 --extra dev --extra messaging --extra anthropic
+          uv pip install 'pexpect==4.9.0'
+          uv run ruff check $(cat /tmp/review-seams/python-files.txt)
+          uv run python -m py_compile $(cat /tmp/review-seams/python-files.txt)
+      - name: GREEN - original reviewer probes now pass
+        run: |
+          set -euo pipefail
+          cp /tmp/review-seams/review_probes.py tests/agent/test_review_104434_faults.py
+          scripts/run_tests.sh -j 1 tests/agent/test_review_104434_faults.py \
+            --file-retries 0 --file-timeout 180 --tb=short 2>&1 | tee /tmp/review-seams/green.txt
+          rm tests/agent/test_review_104434_faults.py
+      - name: Validate retained contracts and current-main persistence/delegation/TUI seams
+        run: |
+          set -euo pipefail
+          scripts/run_tests.sh -j 4 \
+            tests/agent/test_delegation_delivery.py \
+            tests/gateway/test_completion_delivery.py \
+            tests/gateway/test_background_process_notifications.py \
+            tests/tools/test_async_delegation.py \
+            tests/tools/test_async_batch_task_failure_notice.py \
+            tests/tools/test_process_registry.py \
+            tests/tools/test_restored_delegation_ownership.py \
+            tests/tools/test_delegate.py \
+            tests/cli/test_cli_async_delegation_delivery.py \
+            tests/cli/test_completion_backlog.py \
+            tests/cli/test_tool_progress_scrollback.py \
+            tests/test_cli_quiet_stdout_leak.py \
+            tests/tui_gateway/test_delegation_session_lifecycle.py \
+            tests/test_tui_gateway_server.py \
+            tests/run_agent/test_tool_call_incremental_persistence.py \
+            tests/run_agent/test_in_place_persist_marker_98450.py \
+            tests/agent/test_iteration_budget_warning.py \
+            tests/agent/test_turn_finalizer_final_response_persistence.py \
+            tests/test_hermes_state.py \
+            --file-retries 0 --file-timeout 300 --tb=short 2>&1 | tee /tmp/review-seams/matrix.txt
+      - name: Repeat new ownership proofs without multiplying committed tests
+        run: |
+          set -euo pipefail
+          for i in 1 2 3 4 5; do
+            scripts/run_tests.sh -j 1 tests/agent/test_delegation_delivery.py \
+              --file-retries 0 --file-timeout 180 \
+              -k 'exact_claim_fences or preparation_failures' --tb=short
+          done | tee /tmp/review-seams/repeat.txt
+          git diff --cached --full-index --binary "$MAIN" > /tmp/review-seams/rechecked.patch
+          cmp /tmp/review-seams/validated.patch /tmp/review-seams/rechecked.patch
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        name: Fresh publication checkout isolated from test environment
+        with:
+          repository: Xipong/hermes-agent
+          ref: feat/subagent-inject-over-104299-validated
+          path: publish
+          fetch-depth: 1
+      - name: Publish validated integration retaining all existing commits and author lineage
+        working-directory: publish
+        run: |
+          set -euo pipefail
+          branch=feat/subagent-inject-over-104299-validated
+          test "$(git rev-parse HEAD)" = "$OLD_HEAD"
+          git fetch --depth=1 https://github.com/NousResearch/hermes-agent.git "$MAIN"
+          git switch --detach "$MAIN"
+          git apply /tmp/review-seams/validated.patch
+          git add -A
+          git diff --cached --check
+          git diff --cached --full-index --binary "$MAIN" > /tmp/review-seams/publication.patch
+          cmp /tmp/review-seams/validated.patch /tmp/review-seams/publication.patch
+          tree=$(git write-tree)
+          git config user.name Xipong
+          git config user.email 217837358+Xipong@users.noreply.github.com
+          sha=$(git commit-tree "$tree" -p "$OLD_HEAD" -p "$MAIN" \
+            -m 'fix(delegation): fence carrier writes and preserve ownership across preparation failures' \
+            -m 'Integrate current main while retaining the original #76230/#104299/#104373 lineage. Validate exact delivery tokens inside the transcript write transaction and serialize receipt reconciliation with takeover. Register every accepted claim before preparation can fail; retain queue or RAM retry ownership on every exit. Preserve consolidated-default/opt-in-independent completions, runner-start stall accounting, executor growth, TUI backlog batching and ownership-once routing. Keep CLI inject visibility. Add two invariant tests covering both insertion orderings and preparation failure phases.')
+          test "$(git rev-parse "$sha^1")" = "$OLD_HEAD"
+          test "$(git rev-parse "$sha^2")" = "$MAIN"
+          git push "--force-with-lease=refs/heads/$branch:$OLD_HEAD" origin "$sha:refs/heads/$branch"
+          echo "$sha" | tee /tmp/review-seams/published-sha.txt
+          git show -s --format=fuller "$sha" > /tmp/review-seams/published-commit.txt
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
+        with:
+          name: review-seams-104434-validation
+          path: /tmp/review-seams/
+          retention-days: 3
