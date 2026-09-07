@@ -1,0 +1,42 @@
+name: Export exact PR 104434 CI failure
+on:
+  push:
+    branches: [automation/port-76230-over-104299]
+    paths: [.github/workflows/export-ci-failure-104434.yml]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Read failed upstream job log
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/ci-failure
+          gh api /repos/NousResearch/hermes-agent/actions/jobs/101840489996/logs > /tmp/ci-failure/job.log
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          root = Path('/tmp/ci-failure')
+          text = (root/'job.log').read_text(encoding='utf-8-sig')
+          lines = text.splitlines()
+          failures = sorted(set(re.findall(r'FAILED (tests/[^\s]+)', text)))
+          (root/'failed-nodes.txt').write_text('\n'.join(failures))
+          print('\n'.join(failures))
+          marks = [i for i,l in enumerate(lines) if '=== Failure output ===' in l]
+          if marks:
+              (root/'failure-tail.txt').write_text('\n'.join(lines[marks[-1]:]))
+          summaries = [l for l in lines if '=== Summary:' in l or ' timed out' in l or 'ERROR collecting' in l]
+          print('\n'.join(summaries))
+          (root/'summary.txt').write_text('\n'.join(summaries))
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: ci-failure-104434
+          path: /tmp/ci-failure/
+          retention-days: 2
