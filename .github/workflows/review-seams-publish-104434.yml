@@ -1,0 +1,161 @@
+name: Baseline-checked publication of PR 104434 review fixes
+on:
+  push:
+    branches: [automation/port-76230-over-104299]
+    paths: [.github/workflows/review-seams-publish-104434.yml]
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: review-seams-104434
+  cancel-in-progress: false
+jobs:
+  verify-and-publish:
+    if: github.repository == 'Xipong/hermes-agent'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      MAIN: e9bccc90a5e314ddf6dd4bd3772d50cb40027275
+      OLD_HEAD: 51a71be34cc926d75cc4e72fb297b4665de1765a
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          repository: NousResearch/hermes-agent
+          ref: e9bccc90a5e314ddf6dd4bd3772d50cb40027275
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v7
+      - name: Retrieve the byte-verified patch and red-green evidence from the preceding run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/review-publication
+          gh api /repos/Xipong/hermes-agent/actions/artifacts/10030004417/zip > /tmp/review-publication/input.zip
+          echo 'f5f9b990e2a28f059da322de3d1aa74fa1941557673951176bd882c59ce7ea3a  /tmp/review-publication/input.zip' | sha256sum -c -
+          python - <<'PY'
+          from pathlib import Path
+          import zipfile
+          root = Path('/tmp/review-publication')
+          with zipfile.ZipFile(root / 'input.zip') as z:
+              for name in ('validated.patch', 'red.txt', 'green.txt', 'matrix.txt'):
+                  (root / ('previous-' + name if name != 'validated.patch' else name)).write_bytes(z.read(name))
+          PY
+          echo '067404e87dd8b274d4e84a76ffa3bbb3ae295b4194c4703f1ea1ddb6b95fafda  /tmp/review-publication/validated.patch' | sha256sum -c -
+      - name: Install the same locked environment
+        run: |
+          uv sync --locked --python 3.11 --extra dev --extra messaging --extra anthropic
+          uv pip install 'pexpect==4.9.0'
+      - name: Probe the unchanged main SQL-trace test before applying this PR
+        run: |
+          set +e
+          scripts/run_tests.sh -j 1 tests/test_hermes_state.py \
+            --file-retries 0 --file-timeout 180 \
+            -k test_search_projection_skips_context_enrichment_queries --tb=short \
+            > /tmp/review-publication/main-baseline.txt 2>&1
+          echo "$?" > /tmp/review-publication/main-baseline.exit
+          cat /tmp/review-publication/main-baseline.txt
+      - name: Apply the exact audited integration and lint it
+        run: |
+          set -euo pipefail
+          git apply /tmp/review-publication/validated.patch
+          git add -A
+          git diff --cached --check
+          git diff --cached --full-index --binary "$MAIN" > /tmp/review-publication/rechecked.patch
+          cmp /tmp/review-publication/validated.patch /tmp/review-publication/rechecked.patch
+          changed=$(git diff --cached --name-only "$MAIN" | grep '\.py$')
+          uv run ruff check $changed
+          uv run python -m py_compile $changed
+      - name: Run the complete affected matrix and compare any failure to clean main
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          import subprocess
+          root = Path('/tmp/review-publication')
+          paths = '''tests/agent/test_delegation_delivery.py
+          tests/gateway/test_completion_delivery.py
+          tests/gateway/test_background_process_notifications.py
+          tests/tools/test_async_delegation.py
+          tests/tools/test_async_batch_task_failure_notice.py
+          tests/tools/test_process_registry.py
+          tests/tools/test_restored_delegation_ownership.py
+          tests/tools/test_delegate.py
+          tests/cli/test_cli_async_delegation_delivery.py
+          tests/cli/test_completion_backlog.py
+          tests/cli/test_tool_progress_scrollback.py
+          tests/test_cli_quiet_stdout_leak.py
+          tests/tui_gateway/test_delegation_session_lifecycle.py
+          tests/test_tui_gateway_server.py
+          tests/run_agent/test_tool_call_incremental_persistence.py
+          tests/run_agent/test_in_place_persist_marker_98450.py
+          tests/agent/test_iteration_budget_warning.py
+          tests/agent/test_turn_finalizer_final_response_persistence.py
+          tests/test_hermes_state.py'''.split()
+          with (root / 'matrix.txt').open('w', encoding='utf-8') as output:
+              result = subprocess.run(['scripts/run_tests.sh', '-j', '4', *paths,
+                  '--file-retries', '0', '--file-timeout', '300', '--tb=short'],
+                  stdout=output, stderr=subprocess.STDOUT)
+          text = (root / 'matrix.txt').read_text(encoding='utf-8')
+          print(text)
+          if result.returncode:
+              baseline = (root / 'main-baseline.txt').read_text(encoding='utf-8')
+              failed = set(re.findall(r'FAILED (tests/[^\s]+)', text))
+              baseline_failed = set(re.findall(r'FAILED (tests/[^\s]+)', baseline))
+              known = {'tests/test_hermes_state.py::TestFTS5Search::test_search_projection_skips_context_enrichment_queries'}
+              assert result.returncode == 1 and failed == baseline_failed == known, (failed, baseline_failed)
+              assert (root / 'main-baseline.exit').read_text().strip() == '1'
+              assert 'assert 0 == 1' in text and 'assert 0 == 1' in baseline
+              assert re.search(r'=== Summary: 19 files, \d+ tests passed, 1 failed', text)
+              note = 'One unchanged SQL-trace assertion fails identically on clean main and the integrated tree. No test was removed or skipped; see both raw logs. All other affected tests pass.'
+          else:
+              note = 'The complete affected matrix passed. See raw logs for counts.'
+          print(note)
+          (root / 'baseline-assessment.txt').write_text(note, encoding='utf-8')
+          PY
+      - name: Repeat both new correctness proofs five times
+        run: |
+          set -euo pipefail
+          for i in 1 2 3 4 5; do
+            scripts/run_tests.sh -j 1 tests/agent/test_delegation_delivery.py \
+              --file-retries 0 --file-timeout 180 \
+              -k 'exact_claim_fences or preparation_failures' --tb=short
+          done | tee /tmp/review-publication/repeat.txt
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        name: Fresh publication checkout
+        with:
+          repository: Xipong/hermes-agent
+          ref: feat/subagent-inject-over-104299-validated
+          path: publish
+          fetch-depth: 1
+      - name: Publish without rewriting the existing six-commit feature history
+        working-directory: publish
+        run: |
+          set -euo pipefail
+          branch=feat/subagent-inject-over-104299-validated
+          test "$(git rev-parse HEAD)" = "$OLD_HEAD"
+          git fetch --depth=1 https://github.com/NousResearch/hermes-agent.git "$MAIN"
+          git switch --detach "$MAIN"
+          git apply /tmp/review-publication/validated.patch
+          git add -A
+          git diff --cached --check
+          test -z "$(git diff --cached --name-only -- .github scripts)"
+          git diff --cached --full-index --binary "$MAIN" > /tmp/review-publication/publication.patch
+          cmp /tmp/review-publication/validated.patch /tmp/review-publication/publication.patch
+          tree=$(git write-tree)
+          git config user.name Xipong
+          git config user.email 217837358+Xipong@users.noreply.github.com
+          sha=$(git commit-tree "$tree" -p "$OLD_HEAD" -p "$MAIN" \
+            -m 'fix(delegation): fence carrier writes and preserve ownership across preparation failures' \
+            -m 'Integrate current main while retaining the original #76230/#104299/#104373 lineage. Validate exact delivery tokens inside the transcript write transaction and serialize receipt reconciliation with takeover. Register every accepted claim before preparation can fail; retain queue or RAM retry ownership on every exit. Preserve consolidated-default/opt-in-independent completions, runner-start stall accounting, executor growth, TUI backlog batching and ownership-once routing. Keep CLI inject visibility. Add two invariant tests covering both insertion orderings and preparation failure phases.')
+          test "$(git rev-parse "$sha^1")" = "$OLD_HEAD"
+          test "$(git rev-parse "$sha^2")" = "$MAIN"
+          git push "--force-with-lease=refs/heads/$branch:$OLD_HEAD" origin "$sha:refs/heads/$branch"
+          echo "$sha" | tee /tmp/review-publication/published-sha.txt
+          git show -s --format=fuller "$sha" > /tmp/review-publication/published-commit.txt
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
+        with:
+          name: review-seams-104434-baseline-checked
+          path: /tmp/review-publication/
+          retention-days: 3
