@@ -1,0 +1,115 @@
+name: Restore CLI inject delivery notice in PR 104434
+on:
+  push:
+    branches: [automation/port-76230-over-104299]
+    paths:
+      - .github/workflows/cli-inject-notice-104434.yml
+      - scripts/cli_inject_notice_104434/apply.py
+permissions:
+  contents: write
+concurrency:
+  group: cli-inject-notice-104434
+  cancel-in-progress: true
+jobs:
+  validate-and-publish:
+    if: github.repository == 'Xipong/hermes-agent'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39
+        with:
+          enable-cache: true
+      - name: Build display-only fix on exact PR head
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/cli-inject-notice
+          cp scripts/cli_inject_notice_104434/apply.py /tmp/cli-inject-notice/apply.py
+          git fetch --depth=1 origin 63117f9d9b8bb24a511e43722ed5a3af6577b5a1
+          git switch --detach 63117f9d9b8bb24a511e43722ed5a3af6577b5a1
+          python /tmp/cli-inject-notice/apply.py "$PWD"
+          git add \
+            agent/delegation_inject.py \
+            hermes_cli/cli_stream_mixin.py \
+            tests/agent/test_delegation_delivery.py \
+            tests/cli/test_cli_async_delegation_delivery.py
+          git diff --cached --check
+          test -z "$(git diff --cached --name-only -- .github scripts)"
+          git diff --cached --stat | tee /tmp/cli-inject-notice/diff-stat.txt
+          git diff --cached --binary > /tmp/cli-inject-notice/validated.patch
+          python -m py_compile \
+            agent/delegation_inject.py \
+            hermes_cli/cli_stream_mixin.py \
+            tests/agent/test_delegation_delivery.py \
+            tests/cli/test_cli_async_delegation_delivery.py
+      - name: Install locked test environment
+        run: uv sync --locked --python 3.11 --extra dev --extra messaging --extra anthropic
+      - name: Ruff changed files
+        run: |
+          uv run ruff check \
+            agent/delegation_inject.py \
+            hermes_cli/cli_stream_mixin.py \
+            tests/agent/test_delegation_delivery.py \
+            tests/cli/test_cli_async_delegation_delivery.py
+      - name: Confirm minimal carrier collection is unchanged
+        run: |
+          set -o pipefail
+          uv run pytest --collect-only -q tests/agent/test_delegation_delivery.py \
+            2>&1 | tee /tmp/cli-inject-notice/collection.txt
+          grep -Eq '15 tests collected' /tmp/cli-inject-notice/collection.txt
+      - name: Run only delivery and CLI display contracts
+        run: |
+          set -o pipefail
+          uv run pytest -q \
+            tests/agent/test_delegation_delivery.py \
+            tests/cli/test_cli_async_delegation_delivery.py \
+            tests/cli/test_tool_progress_scrollback.py \
+            tests/test_cli_quiet_stdout_leak.py \
+            --tb=short 2>&1 | tee /tmp/cli-inject-notice/tests.txt
+      - name: Repeat real-loop delivery display proof
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 5); do
+            uv run pytest -q \
+              tests/agent/test_delegation_delivery.py::test_run_conversation_inject_transport_normalize_and_ack \
+              tests/agent/test_delegation_delivery.py::test_tool_boundary_flush_failure_restores_carrier_and_requeues_event \
+              tests/cli/test_cli_async_delegation_delivery.py::test_cli_completion_drain_uses_visible_session_identity \
+              --tb=short
+          done | tee /tmp/cli-inject-notice/repeat.txt
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        name: Fresh publication checkout
+        with:
+          repository: Xipong/hermes-agent
+          ref: feat/subagent-inject-over-104299-validated
+          path: publish
+          fetch-depth: 1
+      - name: Publish exact validated patch with head lease
+        working-directory: publish
+        run: |
+          set -euo pipefail
+          branch=feat/subagent-inject-over-104299-validated
+          expected=63117f9d9b8bb24a511e43722ed5a3af6577b5a1
+          test "$(git rev-parse HEAD)" = "$expected"
+          git apply /tmp/cli-inject-notice/validated.patch
+          git add \
+            agent/delegation_inject.py \
+            hermes_cli/cli_stream_mixin.py \
+            tests/agent/test_delegation_delivery.py \
+            tests/cli/test_cli_async_delegation_delivery.py
+          git diff --cached --binary > /tmp/cli-inject-notice/publication.patch
+          cmp /tmp/cli-inject-notice/validated.patch /tmp/cli-inject-notice/publication.patch
+          git config user.name Xipong
+          git config user.email 217837358+Xipong@users.noreply.github.com
+          git commit \
+            -m 'fix(cli): show successful same-turn delegation delivery' \
+            -m 'After a tool-boundary inject is durably acknowledged, emit a display-only delegation.injected progress event. The interactive CLI renders a compact completion line without adding another conversation message or model turn. Failed/unpersisted carriers emit nothing; ordinary after_turn delivery is unchanged. Fold coverage into the existing minimal carrier and CLI delivery tests.'
+          test "$(git rev-parse HEAD^)" = "$expected"
+          git push "--force-with-lease=refs/heads/$branch:$expected" \
+            origin "HEAD:refs/heads/$branch"
+          git rev-parse HEAD | tee /tmp/cli-inject-notice/published-sha.txt
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: cli-inject-notice-validation
+          path: /tmp/cli-inject-notice/
+          retention-days: 3
