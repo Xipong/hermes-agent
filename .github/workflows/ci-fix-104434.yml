@@ -1,0 +1,112 @@
+name: Validate and publish PR 104434 CI repair
+on:
+  push:
+    branches: [automation/port-76230-over-104299]
+    paths: [.github/workflows/ci-fix-104434.yml]
+permissions:
+  contents: write
+concurrency:
+  group: ci-fix-104434
+  cancel-in-progress: false
+jobs:
+  validate-and-publish:
+    if: github.repository == 'Xipong/hermes-agent'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      EXPECTED: 7d950ae5b5ffef0bbc4bfb86cb0f95dc8ca91552
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8
+        with:
+          version: '0.9.28'
+          enable-cache: true
+      - name: Prepare exact tested head and patch
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/ci-fix-104434
+          sed 's/^ diff --git /diff --git /' scripts/ci_fix_104434/test-seams.patch > /tmp/ci-fix-104434/fix.patch
+          echo '2402dfddf08223ea24e8ef18a67dee8025ec55d0c2bb41ea69a5f7a7970da056  /tmp/ci-fix-104434/fix.patch' | sha256sum -c -
+          git fetch --depth=1 origin "$EXPECTED"
+          git switch --detach "$EXPECTED"
+          uv sync --locked --python 3.11.14 --extra dev --extra messaging --extra anthropic
+          uv pip install 'pexpect==4.9.0'
+      - name: RED - reproduce both exact upstream failures
+        run: |
+          set +e
+          scripts/run_tests.sh -j 2 tests/cli/test_subagent_notification_display.py tests/gateway/test_relay_delivery_followups.py --file-retries 0 --tb=short > /tmp/ci-fix-104434/red.txt 2>&1
+          status=$?
+          set -e
+          test "$status" -eq 1
+          grep -q 'missing 1 required positional argument' /tmp/ci-fix-104434/red.txt
+          grep -q "has no attribute 'completion_routing_lock'" /tmp/ci-fix-104434/red.txt
+          grep '=== Summary:' /tmp/ci-fix-104434/red.txt
+      - name: Apply test-only repair and lint
+        run: |
+          set -euo pipefail
+          git apply --check /tmp/ci-fix-104434/fix.patch
+          git apply /tmp/ci-fix-104434/fix.patch
+          uv run ruff check tests/cli/test_subagent_notification_display.py tests/gateway/test_relay_delivery_followups.py
+          uv run python -m py_compile tests/cli/test_subagent_notification_display.py tests/gateway/test_relay_delivery_followups.py
+          git add tests/cli/test_subagent_notification_display.py tests/gateway/test_relay_delivery_followups.py
+          git diff --cached --check
+          git diff --cached --binary > /tmp/ci-fix-104434/validated.patch
+          git diff --cached --stat
+      - name: GREEN - retained notification, ownership, carrier and TUI contracts
+        run: |
+          set +e
+          scripts/run_tests.sh -j 4 \
+            tests/cli/test_subagent_notification_display.py \
+            tests/gateway/test_relay_delivery_followups.py \
+            tests/agent/test_delegation_delivery.py \
+            tests/gateway/test_completion_delivery.py \
+            tests/gateway/test_background_process_notifications.py \
+            tests/tools/test_async_delegation.py \
+            tests/tools/test_process_registry.py \
+            tests/cli/test_cli_async_delegation_delivery.py \
+            tests/cli/test_completion_backlog.py \
+            tests/cli/test_tool_progress_scrollback.py \
+            tests/test_cli_quiet_stdout_leak.py \
+            tests/tui_gateway/test_delegation_session_lifecycle.py \
+            tests/test_tui_gateway_server.py \
+            --file-retries 0 --file-timeout 300 --tb=short > /tmp/ci-fix-104434/green.txt 2>&1
+          status=$?
+          grep -E '=== Summary:|FAILED ' /tmp/ci-fix-104434/green.txt | tail -25
+          exit "$status"
+      - name: Repeat the repaired test files without retries
+        run: |
+          set -euo pipefail
+          for i in 1 2 3 4 5; do
+            scripts/run_tests.sh -j 2 tests/cli/test_subagent_notification_display.py tests/gateway/test_relay_delivery_followups.py --file-retries 0 --tb=short > /tmp/ci-fix-104434/repeat-$i.txt 2>&1
+            grep '=== Summary:' /tmp/ci-fix-104434/repeat-$i.txt
+          done
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        name: Fresh publication checkout
+        with:
+          repository: Xipong/hermes-agent
+          ref: feat/subagent-inject-over-104299-validated
+          path: publish
+      - name: Publish exact validated tests to the existing PR
+        working-directory: publish
+        run: |
+          set -euo pipefail
+          branch=feat/subagent-inject-over-104299-validated
+          test "$(git rev-parse HEAD)" = "$EXPECTED"
+          git apply /tmp/ci-fix-104434/validated.patch
+          git add tests/cli/test_subagent_notification_display.py tests/gateway/test_relay_delivery_followups.py
+          git diff --cached --binary > /tmp/ci-fix-104434/publication.patch
+          cmp /tmp/ci-fix-104434/validated.patch /tmp/ci-fix-104434/publication.patch
+          git diff --cached --check
+          git config user.name Xipong
+          git config user.email 217837358+Xipong@users.noreply.github.com
+          git commit -m 'test(delegation): exercise current notification routing contracts' -m 'Repair both full-CI regressions after the notification routing integration. Exercise the real ProcessRegistry queue and routing lock rather than incomplete test doubles; route display assertions through the same reservation and ordered batch handler as the TUI poller. Preserve payload/display separation, exact claim handoff, single delivery, and relay scope/user metadata checks. No production changes, skipped tests, or new test cases.'
+          git push "--force-with-lease=refs/heads/$branch:$EXPECTED" origin "HEAD:refs/heads/$branch"
+          git rev-parse HEAD | tee /tmp/ci-fix-104434/published-sha.txt
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
+        with:
+          name: ci-fix-104434-validation
+          path: /tmp/ci-fix-104434/
+          retention-days: 3
