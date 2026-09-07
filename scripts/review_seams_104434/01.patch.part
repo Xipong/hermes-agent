@@ -1,0 +1,165 @@
+diff --git a/agent/session_persistence.py b/agent/session_persistence.py
+index 4817209..9b35e48 100644
+--- a/agent/session_persistence.py
++++ b/agent/session_persistence.py
+@@ -173,6 +173,14 @@ def _db_flush_row(agent, msg: Dict, is_current_turn_user: bool) -> Dict[str, Any
+     }
+     if isinstance(msg.get("_row_id"), int):
+         row["_row_id"] = msg["_row_id"]
++    if msg.get("_delegation_event_ids"):
++        # Only the current RAM owner can authorize a fresh carrier insertion.
++        # _message_row_params does not serialize this admission-only field.
++        row["_delegation_delivery_claims"] = {
++            entry["event_id"]: entry["claim_id"]
++            for entry in getattr(agent, "_pending_delegation_inject_claims", ())
++            if entry.get("message") is msg and entry.get("event_id") in msg["_delegation_event_ids"]
++        }
+     return row
+ 
+ 
+@@ -202,16 +210,40 @@ def _db_flush_collect(agent, messages: List[Dict], conversation_history: Optiona
+ 
+ 
+ def _db_flush_write(agent, batch_rows: List[Dict[str, Any]], batch_msgs: List[Dict]) -> None:
+-    """One transaction for the turn's new rows: on failure nothing lands and no markers are stamped."""
++    """One transaction for the new rows; a lost carrier claim falls back to ordinary tool text."""
+     if not batch_rows:
+         return
+-    agent._session_db.append_messages_batch(
+-        session_id=agent.session_id, messages=batch_rows,
+-        compression_lock_holder=getattr(agent, "_active_compression_lock_holder", None),
+-        turn_lease_holder=getattr(agent, "_active_session_turn_lease_holder", None),
+-        turn_lease_ttl_seconds=getattr(agent, "_active_session_turn_lease_ttl_seconds", 300.0) or 300.0,
+-    )
+-    sync_flushed_message_markers(batch_msgs, batch_rows)
++    from hermes_state_errors import DelegationClaimLostError
++
++    def write():
++        return agent._session_db.append_messages_batch(
++            session_id=agent.session_id, messages=batch_rows,
++            compression_lock_holder=getattr(agent, "_active_compression_lock_holder", None),
++            turn_lease_holder=getattr(agent, "_active_session_turn_lease_holder", None),
++            turn_lease_ttl_seconds=getattr(agent, "_active_session_turn_lease_ttl_seconds", 300.0) or 300.0,
++        )
++
++    try:
++        try:
++            write()
++        except DelegationClaimLostError:
++            # The whole write transaction rolled back. Drop only unsent carrier bytes;
++            # release_pending_injects uses exact-token CAS, never releasing a foreign owner.
++            from agent.delegation_inject import release_pending_injects
++            release_pending_injects(agent, agent._session_messages,
++                                    turn_id=str(getattr(agent, "_active_turn_id", "") or ""))
++            for msg, row in zip(batch_msgs, batch_rows):
++                if "_delegation_delivery_claims" in row:
++                    if msg.get("_delegation_event_ids"):
++                        raise  # rollback did not restore this carrier: fail closed
++                    row.clear()
++                    row.update(_db_flush_row(agent, msg, False))
++            write()  # one bounded fallback; ordinary persistence failures still propagate
++        sync_flushed_message_markers(batch_msgs, batch_rows)
++    finally:
++        # Admission tokens must not escape through JSONL diversion on a failed DB.
++        for row in batch_rows:
++            row.pop("_delegation_delivery_claims", None)
+ 
+ 
+ def _db_flush_adopt_compression_tip(agent) -> bool:
+diff --git a/hermes_state_errors.py b/hermes_state_errors.py
+index 17dd4b5..3028817 100644
+--- a/hermes_state_errors.py
++++ b/hermes_state_errors.py
+@@ -217,3 +217,7 @@ def classify_persistence_error(exc_or_str) -> str:
+     if is_disk_full_error(exc_or_str) or any(m in text for m in ("disk", "readonly", "read-only")):
+         return "disk"
+     return "unknown"
++
++
++class DelegationClaimLostError(RuntimeError):
++    """A fresh tool carrier no longer owns every exact durable delivery token."""
+diff --git a/hermes_state_messages.py b/hermes_state_messages.py
+index 07cb4c6..5e14086 100644
+--- a/hermes_state_messages.py
++++ b/hermes_state_messages.py
+@@ -309,6 +309,9 @@ class SessionMessagesMixin:
+             from agent.transcript_repair import resolve_and_repair_transcript_batch
+             inserted_rows = resolve_and_repair_transcript_batch(conn, session_id, messages,
+                 encode_content_fn=self._encode_content, decode_content_fn=self._decode_content)
++            if any("_delegation_delivery_claims" in msg for msg in inserted_rows):
++                from tools.async_delegation import validate_tool_carrier_claims
++                validate_tool_carrier_claims(conn, session_id, inserted_rows)
+             inserted, tool_calls_total = self._insert_message_rows(conn, session_id, inserted_rows)
+             self._bump_session_counters(conn, session_id, inserted, tool_calls_total, unit=False)
+             return inserted
+diff --git a/tools/async_delegation.py b/tools/async_delegation.py
+index 2827395..ef4f7b5 100644
+--- a/tools/async_delegation.py
++++ b/tools/async_delegation.py
+@@ -395,6 +395,34 @@ def get_event_delivery_state(evt: Dict[str, Any]) -> Optional[str]:
+     return row[0] if row else None
+ 
+ 
++def validate_tool_carrier_claims(conn, session_id: str, messages: list[dict]) -> None:
++    """Admit fresh carriers INSIDE SessionDB's existing BEGIN IMMEDIATE transaction.
++
++    Do not open a ledger connection or take _DB_LOCK here: this connection already
++    owns SQLite's writer lock. No schema or second ledger is involved. Private
++    tokens are admission inputs, never transcript metadata or provider content.
++    """
++    from hermes_state_errors import DelegationClaimLostError
++
++    for message in messages:
++        if "_delegation_delivery_claims" not in message:
++            continue  # ordinary append/import of historical metadata
++        claims = message["_delegation_delivery_claims"]
++        metadata = message.get("display_metadata") or {}
++        identities = metadata.get("delegation_event_ids") or []
++        if (message.get("role") != "tool" or metadata.get("delegation_delivery") != "tool_boundary"
++                or not isinstance(claims, dict) or not claims or set(claims) != set(identities)):
++            raise DelegationClaimLostError("Missing exact claim for fresh delegation carrier")
++        for event_id, token in claims.items():
++            row = conn.execute(
++                "SELECT delivery_state, delivery_claim, parent_session_id FROM async_delegations "
++                "WHERE delegation_id=?", (event_id,),
++            ).fetchone()
++            if (not token or row is None or row[0] != "pending"
++                    or row[1] != token or row[2] != session_id):
++                raise DelegationClaimLostError(f"Delegation carrier claim lost: {event_id}")
++
++
+ def get_event_delivery_claim_status(
+     evt: Dict[str, Any], claim_id: str,
+ ) -> tuple[Optional[str], bool]:
+@@ -440,6 +468,10 @@ def claim_completion_delivery(delegation_id: str, claim_id: str) -> bool:
+     """Claim one pending completion across competing consumers/processes."""
+     now = time.time()
+     with _DB_LOCK, _transaction() as conn:
++        # Serialize receipt reconciliation AND takeover with the transcript writer's
++        # claim fence. A SELECT before acquiring this lock could miss a just-committed
++        # carrier and subsequently steal its token with an otherwise valid CAS.
++        conn.execute("BEGIN IMMEDIATE")
+         row = conn.execute(
+             "SELECT delivery_state, event_json FROM async_delegations WHERE delegation_id=?", (delegation_id,)).fetchone()
+         if row is None:
+diff --git a/website/docs/user-guide/features/delegation.md b/website/docs/user-guide/features/delegation.md
+index 18f6df4..939b9a7 100644
+--- a/website/docs/user-guide/features/delegation.md
++++ b/website/docs/user-guide/features/delegation.md
+@@ -581,10 +581,12 @@ best-effort delivery at the next existing complete tool-result boundary of the o
+ parent turn. The ready report is clearly marked as background evidence on the last **new,
+ unsent** tool result before its first transcript commit. It is not a new user request.
+ 
+-The timing policy does not change completion grouping: an ungrouped task is eligible
+-when it finishes, while tasks sharing a `group` become eligible together only after
+-the whole group finishes. Each unit keeps its existing delegation identity and claim;
+-all units of one call still share one concurrency slot.
++The timing policy does not change completion grouping. By default, the whole call
++is one completion, eligible only when all its tasks finish. With
++`delegation.independent_completions: true`, ungrouped tasks report individually
++and tasks sharing a `group` report together. `result_delivery="inject"` never
++implicitly enables independent completions; every configured unit keeps its
++existing durable identity and shares the call's capacity slot.
+ 
+ The default (including unknown or missing values) remains `after_turn`. An `inject` result
+ that misses a boundary, cannot fit the ordinary tool-result budget or cannot be durably
