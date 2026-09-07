@@ -11,18 +11,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Read failed upstream job log
+      - name: Read failed upstream job log into a file
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           mkdir -p /tmp/ci-failure
-          gh api /repos/NousResearch/hermes-agent/actions/jobs/101840489996/logs > /tmp/ci-failure/job.log
+          gh api --allow-escape-sequences /repos/NousResearch/hermes-agent/actions/jobs/101840489996/logs > /tmp/ci-failure/job.log
           python - <<'PY'
           from pathlib import Path
           import re
           root = Path('/tmp/ci-failure')
           text = (root/'job.log').read_text(encoding='utf-8-sig')
+          text = re.sub(r'\x1b\[[0-?]*[ -/]*[@-~]', '', text)
+          text = ''.join(c for c in text if c in '\n\t\r' or ord(c) >= 32)
+          (root/'job.log').write_text(text)
           lines = text.splitlines()
           failures = sorted(set(re.findall(r'FAILED (tests/[^\s]+)', text)))
           (root/'failed-nodes.txt').write_text('\n'.join(failures))
