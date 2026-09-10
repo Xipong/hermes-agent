@@ -1,0 +1,189 @@
+name: MCP legacy network fail-closed validation
+on:
+  push:
+    branches: [work/mcp-legacy-network-failclosed-20260911]
+    paths:
+      - .mcp-regression/apply.py
+      - .github/workflows/mcp-legacy-network-regression.yml
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          path: input
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          repository: Xipong/hermes-agent
+          ref: feat/mcp-wsl-windows-loopback-final-20260910
+          path: source
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39
+        with:
+          version: '0.9.28'
+          enable-cache: true
+          cache-dependency-glob: source/uv.lock
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '26'
+          cache: npm
+          cache-dependency-path: source/package-lock.json
+      - name: Install locked dependencies
+        working-directory: source
+        run: |
+          uv sync --locked --python 3.11 --extra dev --extra mcp --extra acp
+          npm ci --ignore-scripts
+      - name: Prove the regression on the current PR head
+        shell: bash
+        working-directory: source
+        run: |
+          set -euo pipefail
+          python ../input/.mcp-regression/apply.py --tests-only
+          set +e
+          uv run --no-sync python -m pytest -q --tb=short \
+            tests/tools/test_mcp_windows_policy.py::test_wsl_legacy_omission_stays_local_and_explicit_auto_or_windows_can_bridge \
+            tests/tools/test_mcp_windows.py::test_legacy_omission_never_opens_windows_bridge_or_sends_authorization \
+            tests/tools/test_mcp_network_oauth.py::test_legacy_omitted_network_device_oauth_sends_nothing_to_windows_canary \
+            tests/hermes_cli/test_mcp_network_surfaces.py::test_disk_schema_cache_cannot_replay_another_networks_tools
+          py_red=$?
+          (cd apps/desktop && node ../../node_modules/vitest/vitest.mjs run --project ui \
+            src/api/mcp-network.test.ts src/lib/mcp-probe-cache.test.ts)
+          desktop_red=$?
+          (cd web && node ../node_modules/vitest/vitest.mjs run src/lib/mcp-network.test.ts)
+          web_red=$?
+          set -e
+          test "$py_red" -ne 0
+          test "$desktop_red" -ne 0
+          test "$web_red" -ne 0
+          git reset --hard HEAD
+      - name: Apply fix and run Python regressions
+        shell: bash
+        working-directory: source
+        run: |
+          set -euo pipefail
+          python ../input/.mcp-regression/apply.py
+          uv run --no-sync ruff format --check \
+            tools/mcp_windows.py tools/mcp_tool_transport.py tools/mcp_tool_server_run.py \
+            tools/mcp_oauth_manager.py tools/mcp_schema_cache.py acp_adapter/server.py \
+            hermes_cli/mcp_config.py hermes_cli/mcp_catalog.py hermes_cli/web_server_mcp.py \
+            tests/tools/test_mcp_windows.py tests/tools/test_mcp_windows_policy.py \
+            tests/tools/test_mcp_network_oauth.py tests/hermes_cli/test_mcp_network_surfaces.py
+          uv run --no-sync ruff check \
+            tools/mcp_windows.py tools/mcp_tool_transport.py tools/mcp_tool_server_run.py \
+            tools/mcp_oauth_manager.py tools/mcp_schema_cache.py acp_adapter/server.py \
+            hermes_cli/mcp_config.py hermes_cli/mcp_catalog.py hermes_cli/web_server_mcp.py \
+            tests/tools/test_mcp_windows.py tests/tools/test_mcp_windows_policy.py \
+            tests/tools/test_mcp_network_oauth.py tests/hermes_cli/test_mcp_network_surfaces.py
+          bash scripts/run_tests.sh -j 4 --file-timeout 180 \
+            tests/tools/test_mcp_windows.py tests/tools/test_mcp_windows_policy.py \
+            tests/tools/test_mcp_network_oauth.py tests/hermes_cli/test_mcp_network_surfaces.py \
+            tests/tools/test_mcp_preflight_content_type.py tests/tools/test_mcp_sse_transport.py \
+            tests/tools/test_mcp_schema_cache.py tests/tools/test_mcp_oauth_manager.py \
+            tests/tools/test_mcp_device_flow.py tests/hermes_cli/test_mcp_config.py \
+            tests/hermes_cli/test_mcp_catalog.py tests/hermes_cli/test_agent_import.py \
+            tests/acp_adapter/test_acp_mcp_discovery.py -q --tb=short
+      - name: Run Desktop and dashboard regressions
+        shell: bash
+        working-directory: source
+        run: |
+          set -euo pipefail
+          node node_modules/prettier/bin/prettier.cjs --check \
+            apps/desktop/src/api/mcp.ts apps/desktop/src/api/mcp-network.test.ts \
+            apps/desktop/src/lib/mcp-probe-cache.ts apps/desktop/src/lib/mcp-probe-cache.test.ts \
+            web/src/components/McpNetworkFields.tsx web/src/lib/mcp-server-create.ts web/src/lib/mcp-network.test.ts
+          node node_modules/eslint/bin/eslint.js --max-warnings 0 \
+            apps/desktop/src/api/mcp.ts apps/desktop/src/api/mcp-network.test.ts \
+            apps/desktop/src/lib/mcp-probe-cache.ts apps/desktop/src/lib/mcp-probe-cache.test.ts \
+            web/src/components/McpNetworkFields.tsx web/src/lib/mcp-server-create.ts web/src/lib/mcp-network.test.ts
+          (cd apps/desktop && node ../../node_modules/vitest/vitest.mjs run --project ui \
+            src/api src/lib/mcp-probe-cache.test.ts src/lib/mcp-import.test.ts src/lib/mcp-servers.test.ts)
+          (cd web && node ../node_modules/vitest/vitest.mjs run \
+            src/lib/mcp-network.test.ts src/lib/mcp-server-create.test.ts src/lib/mcp-oauth.test.ts)
+          node node_modules/typescript/bin/tsc -p apps/desktop --noEmit
+          node node_modules/typescript/bin/tsc -p web --noEmit
+          git diff --check
+      - name: Package the exact tested product patch
+        working-directory: source
+        shell: bash
+        run: |
+          mkdir -p validation-output
+          git diff --binary > validation-output/candidate.patch
+          sha256sum validation-output/candidate.patch > validation-output/candidate.sha256
+          git diff --stat > validation-output/stat.txt
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: mcp-legacy-failclosed-linux
+          path: source/validation-output/
+          retention-days: 7
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          path: input
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          repository: Xipong/hermes-agent
+          ref: feat/mcp-wsl-windows-loopback-final-20260910
+          path: source
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39
+        with:
+          version: '0.9.28'
+          enable-cache: true
+          cache-dependency-glob: source/uv.lock
+      - name: Install, apply, and test on native Windows
+        shell: bash
+        working-directory: source
+        run: |
+          set -euo pipefail
+          uv sync --locked --python 3.11 --extra dev --extra mcp --extra acp
+          uv run --no-sync python ../input/.mcp-regression/apply.py
+          uv run --no-sync ruff check \
+            tools/mcp_windows.py tools/mcp_tool_transport.py tools/mcp_tool_server_run.py \
+            tools/mcp_oauth_manager.py tools/mcp_schema_cache.py acp_adapter/server.py \
+            hermes_cli/mcp_config.py hermes_cli/mcp_catalog.py hermes_cli/web_server_mcp.py \
+            tests/tools/test_mcp_windows.py tests/tools/test_mcp_windows_policy.py \
+            tests/tools/test_mcp_network_oauth.py tests/hermes_cli/test_mcp_network_surfaces.py
+          "${ProgramFiles}/Git/bin/bash.exe" scripts/run_tests.sh -j 4 --file-timeout 180 \
+            tests/tools/test_mcp_windows.py tests/tools/test_mcp_windows_policy.py \
+            tests/tools/test_mcp_network_oauth.py tests/hermes_cli/test_mcp_network_surfaces.py \
+            tests/tools/test_mcp_preflight_content_type.py tests/tools/test_mcp_sse_transport.py \
+            tests/tools/test_mcp_oauth_manager.py tests/tools/test_mcp_device_flow.py \
+            tests/hermes_cli/test_mcp_config.py tests/hermes_cli/test_mcp_catalog.py \
+            tests/hermes_cli/test_agent_import.py tests/acp_adapter/test_acp_mcp_discovery.py \
+            -q --tb=short
+          git diff --check
+
+  publish:
+    needs: [linux, windows]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          repository: Xipong/hermes-agent
+          ref: feat/mcp-wsl-windows-loopback-final-20260910
+          fetch-depth: 0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: mcp-legacy-failclosed-linux
+          path: /tmp/mcp-regression
+      - name: Publish the validated fix to PR 107713
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "5e2369e70784b037ee62adde850e99926c5bd06e"
+          sha256sum -c /tmp/mcp-regression/candidate.sha256
+          git apply /tmp/mcp-regression/candidate.patch
+          git diff --check
+          git config user.name Xipong
+          git config user.email 217837358+Xipong@users.noreply.github.com
+          git add -A
+          git commit -m 'fix(mcp): keep legacy loopback configs in their original namespace'
+          git push origin HEAD:refs/heads/feat/mcp-wsl-windows-loopback-final-20260910
