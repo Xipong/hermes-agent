@@ -63,7 +63,7 @@ jobs:
       - name: Baseline and patched Desktop tests
         working-directory: source
         run: python ../input/.mcp-validation/revision.py desktop
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64875d1fc6a0a
         if: always()
         with:
           name: mcp-desktop
@@ -82,7 +82,7 @@ jobs:
         with:
           name: mcp-desktop
           path: /tmp/mcp-validated
-      - name: Publish two clean product branches without validation harness
+      - name: Publish clean product branches without validation harness
         shell: bash
         run: |
           set -euo pipefail
@@ -90,15 +90,20 @@ jobs:
           git config user.email 217837358+Xipong@users.noreply.github.com
           base=564aef2946c436500a5e80ee117b66b789b3f99a
           patch=/tmp/mcp-validated/candidate.patch
-          git switch -c fix/desktop-mcp-config-ownership-20260910 "$base"
+          desktop=fix/desktop-mcp-config-ownership-20260910
+          git switch -c "$desktop" "$base"
           git apply --include=apps/desktop/src/api/config.ts --include=apps/desktop/src/api/config.test.ts --include=apps/desktop/src/app/skills/mcp-tab.tsx --include=apps/desktop/src/app/skills/mcp-tab.test.tsx "$patch"
           git add apps/desktop/src/api/config.ts apps/desktop/src/api/config.test.ts apps/desktop/src/app/skills/mcp-tab.tsx apps/desktop/src/app/skills/mcp-tab.test.tsx
           git diff --cached --check
           git commit -m 'fix(desktop): preserve MCP config deadlines and profile ownership'
-          git push origin HEAD:refs/heads/fix/desktop-mcp-config-ownership-20260910
-          git switch -c feat/mcp-wsl-windows-loopback-20260910 "$base"
+          if git show-ref --verify --quiet "refs/remotes/origin/$desktop"; then
+            git diff --exit-code "origin/$desktop" HEAD
+          else
+            git push origin "HEAD:refs/heads/$desktop"
+          fi
+          git switch -c feat/mcp-wsl-windows-loopback-final-20260910 "$base"
           git apply --exclude=apps/desktop/src/api/config.ts --exclude=apps/desktop/src/api/config.test.ts --exclude=apps/desktop/src/app/skills/mcp-tab.tsx --exclude=apps/desktop/src/app/skills/mcp-tab.test.tsx "$patch"
           git add tools/mcp_windows.py tools/mcp_tool_transport.py tools/mcp_tool_server_run.py tests/tools/test_mcp_windows.py tests/tools/test_mcp_windows_policy.py apps/desktop/src/lib/mcp-probe-cache.ts apps/desktop/src/lib/mcp-probe-cache.test.ts cli-config.yaml.example website/docs/reference/mcp-config-reference.md website/docs/user-guide/features/mcp.md
           git diff --cached --check
           git commit -m 'feat(mcp): reach Windows loopback servers from WSL without LAN exposure'
-          git push origin HEAD:refs/heads/feat/mcp-wsl-windows-loopback-20260910
+          git push origin HEAD:refs/heads/feat/mcp-wsl-windows-loopback-final-20260910
