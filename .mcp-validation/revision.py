@@ -4,8 +4,6 @@ Neither this harness nor its workflow enters either product PR.
 from pathlib import Path
 import sys
 
-# The canonical runner emits UTF-8 box drawing; Windows' redirected console
-# encoding must not terminate the harness while it prints a captured log.
 sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
@@ -13,9 +11,34 @@ sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 def harden_helper():
     p = ROOT / 'tools/mcp_windows.py'
     text = p.read_text(encoding='utf-8')
-    # PowerShell exposes Task<VoidTaskResult>.GetResult() as a pipeline object
-    # even though C# sees a void operation. stdout must remain protocol-only.
-    text = text.replace('    $connect.GetAwaiter().GetResult()', '    [void]$connect.GetAwaiter().GetResult()')
+    old_connect = '''$client = [System.Net.Sockets.TcpClient]::new()
+try {{
+    $connect = $client.ConnectAsync('{host}', {port})
+    if (-not $connect.Wait(10000)) {{ throw 'Windows loopback connection timed out' }}
+    $connect.GetAwaiter().GetResult()'''
+    new_connect = '''$client = $null
+try {{
+    # Windows PowerShell's .NET Framework default TcpClient is IPv4-only.
+    # Resolve localhost to fixed loopback literals, never an arbitrary DNS IP.
+    $addresses = if ('{host}' -eq 'localhost') {{ @('127.0.0.1', '::1') }} else {{ @('{host}') }}
+    foreach ($address in $addresses) {{
+        $family = if ($address -eq '::1') {{ [System.Net.Sockets.AddressFamily]::InterNetworkV6 }} else {{ [System.Net.Sockets.AddressFamily]::InterNetwork }}
+        $candidate = [System.Net.Sockets.TcpClient]::new($family)
+        try {{
+            $connect = $candidate.ConnectAsync($address, {port})
+            if (-not $connect.Wait(10000)) {{ throw 'Windows loopback connection timed out' }}
+            # PowerShell must not emit the Task's VoidTaskResult to stdout.
+            [void]$connect.GetAwaiter().GetResult()
+            $client = $candidate
+            break
+        }} catch {{
+            $candidate.Dispose()
+        }}
+    }}
+    if ($null -eq $client) {{ throw 'Windows loopback connection failed' }}'''
+    assert old_connect in text
+    text = text.replace(old_connect, new_connect)
+    text = text.replace('    $client.Dispose()\n}}', '    if ($null -ne $client) {{ $client.Dispose() }}\n}}')
     start = text.index('    if not isinstance(network, str)')
     end = text.index('    if not wsl or endpoint is None or network == "local":', start)
     validation = text[start:end]
@@ -32,6 +55,18 @@ def harden_helper():
     assert old in text
     text = text.replace(old, new)
     p.write_text(text, encoding='utf-8')
+    test = ROOT / 'tests/tools/test_mcp_windows.py'
+    text = test.read_text(encoding='utf-8')
+    text = text.replace('async def test_native_powershell_bridge_carries_binary_bytes_and_exits_on_stdin_eof():', '''@pytest.mark.parametrize("host,bind_host", [("127.0.0.1", "127.0.0.1"), ("localhost", "127.0.0.1"),
+                                          ("::1", "::1"), ("localhost", "::1")])
+async def test_native_powershell_bridge_carries_binary_bytes_and_exits_on_stdin_eof(host, bind_host):''')
+    text = text.replace('    import socketserver\n', '    import socket\n    import socketserver\n')
+    text = text.replace('    with socketserver.ThreadingTCPServer(("127.0.0.1", 0), Echo) as server:', '''    class EchoServer(socketserver.ThreadingTCPServer):
+        address_family = socket.AF_INET6 if ":" in bind_host else socket.AF_INET
+
+    with EchoServer((bind_host, 0), Echo) as server:''')
+    text = text.replace('mcp_windows._windows_tunnel_command("127.0.0.1", server.server_address[1])', 'mcp_windows._windows_tunnel_command(host, server.server_address[1])')
+    test.write_text(text, encoding='utf-8')
 
 
 def complete_validation():
