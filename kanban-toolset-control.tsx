@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Codicon } from '@/components/ui/codicon'
 import { Switch } from '@/components/ui/switch'
 import { Tip } from '@/components/ui/tooltip'
-import { getToolsets, type ProfileScope, profileScopeKey, setToolsetEnabled } from '@/hermes'
+import { getApiRequestConnection, getApiRequestProfile, getToolsets, type ProfileScope, profileScopeKey, setToolsetEnabled } from '@/hermes'
 import { useI18n } from '@/i18n'
 import { queryClient } from '@/lib/query-client'
 import { notify, notifyError } from '@/store/notifications'
@@ -21,7 +21,8 @@ export function KanbanToolsetControl({ profile, scopeLabel }: { profile: Profile
   const query = useQuery({
     queryKey: [...TOOLSETS_QUERY_KEY, scopeKey],
     queryFn: () => getToolsets(profile),
-    retry: false
+    retry: false,
+    staleTime: 0
   }, queryClient)
   const row = query.data?.find(toolset => toolset.name === 'kanban')
   const mutation = useMutation({
@@ -68,7 +69,12 @@ export function KanbanToolsetControl({ profile, scopeLabel }: { profile: Profile
         checked={row?.enabled ?? false}
         disabled={!row || failed || query.isFetching || pending}
         onCheckedChange={enabled => mutation.mutate({
-          enabled, profile: typeof profile === 'object' && profile ? { ...profile } : profile,
+          enabled,
+          // Pin ambient legacy scopes before onMutate yields to the event loop.
+          profile: typeof profile === 'object' && profile ? { ...profile } : {
+            connectionId: getApiRequestConnection(),
+            profile: profile === undefined ? getApiRequestProfile() : profile
+          },
           scopeKey, label: scopeLabel
         })}
       />

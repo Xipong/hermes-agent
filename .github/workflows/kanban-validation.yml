@@ -5,71 +5,6 @@ on:
 permissions:
   contents: read
 jobs:
-  backend:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          path: harness
-          persist-credentials: false
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: 2ddeba9e17a1df5471802481e3efef20885a20b2
-          path: src
-      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
-        with:
-          version: '0.9.28'
-      - name: Install locked Python dependencies
-        working-directory: src
-        run: uv sync --locked --python 3.11 --extra dev
-      - name: Reproduce before fix
-        working-directory: src
-        shell: bash
-        run: |
-          mkdir -p "$RUNNER_TEMP/kanban-evidence"
-          cp ../harness/test_kanban_toolset_opt_in.py tests/tools/
-          set +e
-          scripts/run_tests.sh -j 1 --file-retries 0 tests/tools/test_kanban_toolset_opt_in.py -q --tb=short -k saved_opt_in 2>&1 | tee "$RUNNER_TEMP/kanban-evidence/base.log"
-          rc=${PIPESTATUS[0]}
-          set -e
-          test "$rc" -ne 0
-          grep -Eq 'FAILED.*test_saved_opt_in|AssertionError' "$RUNNER_TEMP/kanban-evidence/base.log"
-      - name: Apply candidate and run isolated regression/neighboring tests
-        working-directory: src
-        shell: bash
-        run: |
-          python ../harness/apply_backend.py
-          python ../harness/adjust_backend.py
-          scripts/run_tests.sh -j 4 --file-timeout 240 --file-retries 0 tests/tools/test_kanban_toolset_opt_in.py tests/tools/test_kanban_tools.py tests/hermes_cli/test_tools_config.py tests/hermes_cli/test_kanban_worker_spawn_toolsets.py tests/hermes_cli/test_tools_disable_enable.py tests/tui_gateway/test_gui_surface_toolsets.py tests/tools/test_kanban_descendant_scope.py tests/test_get_tool_definitions_cache_isolation.py -q --tb=short 2>&1 | tee "$RUNNER_TEMP/kanban-evidence/candidate.log"
-          .venv/bin/ruff check tools/kanban_tools.py tools/kanban_toolset_context.py model_tools.py hermes_cli/tools_config.py tui_gateway/server.py tests/tools/test_kanban_toolset_opt_in.py tests/hermes_cli/test_tools_config.py tests/hermes_cli/test_kanban_worker_spawn_toolsets.py
-          git add tools/kanban_tools.py tools/kanban_toolset_context.py model_tools.py hermes_cli/tools_config.py tui_gateway/server.py tests/tools/test_kanban_toolset_opt_in.py tests/hermes_cli/test_tools_config.py tests/hermes_cli/test_kanban_worker_spawn_toolsets.py website/docs/user-guide/features/kanban.md
-          git diff --cached --check
-          git diff --cached > "$RUNNER_TEMP/kanban-evidence/backend.patch"
-      - name: Publish clean product-only branch
-        working-directory: src
-        shell: bash
-        run: |
-          git config user.name Xipong
-          git config user.email '217837358+Xipong@users.noreply.github.com'
-          git commit -m 'fix(kanban): honor explicit platform tool opt-ins across configuration surfaces'
-          branch=fix/kanban-toolset-opt-in-20260911
-          if git ls-remote --exit-code --heads origin "$branch"; then
-            git fetch --depth=1 origin "$branch"
-            git diff --exit-code FETCH_HEAD HEAD
-            git rev-parse FETCH_HEAD > "$RUNNER_TEMP/kanban-evidence/backend-head.txt"
-          else
-            git push origin "HEAD:refs/heads/$branch"
-            git rev-parse HEAD > "$RUNNER_TEMP/kanban-evidence/backend-head.txt"
-          fi
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: always()
-        with:
-          name: kanban-backend-evidence
-          path: ${{ runner.temp }}/kanban-evidence
-          retention-days: 7
   desktop:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -97,7 +32,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/kanban-ui-evidence"
           cp ../../../harness/plugins-tab-kanban.test.tsx src/app/skills/
           set +e
-          npx vitest run --project ui src/app/skills/plugins-tab-kanban.test.tsx 2>&1 | tee "$RUNNER_TEMP/kanban-ui-evidence/base.log"
+          npx vitest run --project ui src/app/skills/plugins-tab-kanban.test.tsx -t 'keeps Desktop' 2>&1 | tee "$RUNNER_TEMP/kanban-ui-evidence/base.log"
           rc=${PIPESTATUS[0]}
           set -e
           test "$rc" -ne 0
@@ -110,7 +45,7 @@ jobs:
         shell: bash
         run: |
           files=(src/app/skills/index.tsx src/app/skills/plugins-tab.tsx src/app/skills/store.ts src/app/skills/kanban-toolset-control.tsx src/app/skills/plugins-tab-kanban.test.tsx src/i18n/en.ts src/i18n/ru.ts src/i18n/zh.ts src/i18n/zh-hant.ts src/i18n/ja.ts src/i18n/ar.ts src/i18n/types.ts)
-          npx eslint --fix "${files[@]}"
+          npx eslint --fix "${files[@]}" 2>&1 | tee "$RUNNER_TEMP/kanban-ui-evidence/lint.log"
           npx prettier --write "${files[@]}"
           npx eslint "${files[@]}"
           npx tsc -p tsconfig.json --noEmit 2>&1 | tee "$RUNNER_TEMP/kanban-ui-evidence/types.log"

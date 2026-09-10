@@ -1,8 +1,11 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
+import type * as PluginStore from '@/contrib/plugins-store'
+import type * as HermesApi from '@/hermes'
+
 import { $pluginRecords, setPluginEnabled } from '@/contrib/plugins-store'
-import { getToolsets, profileScopeKey, setToolsetEnabled } from '@/hermes'
+import { getToolsets, profileScopeKey, setApiRequestConnection, setToolsetEnabled } from '@/hermes'
 import { queryClient } from '@/lib/query-client'
 import { $agentPlugins, $agentPluginsStatus } from '@/store/agent-plugins'
 import { notify, notifyError } from '@/store/notifications'
@@ -11,12 +14,12 @@ import type { ToolsetInfo } from '@/types/hermes'
 import { PluginsTab } from './plugins-tab'
 
 vi.mock('@/hermes', async importOriginal => ({
-  ...(await importOriginal<typeof import('@/hermes')>()),
+  ...(await importOriginal<typeof HermesApi>()),
   getToolsets: vi.fn(),
   setToolsetEnabled: vi.fn()
 }))
 vi.mock('@/contrib/plugins-store', async importOriginal => ({
-  ...(await importOriginal<typeof import('@/contrib/plugins-store')>()),
+  ...(await importOriginal<typeof PluginStore>()),
   setPluginEnabled: vi.fn(async () => undefined)
 }))
 vi.mock('@/store/notifications', () => ({ notify: vi.fn(), notifyError: vi.fn() }))
@@ -34,6 +37,7 @@ const agentSwitch = () => screen.getByRole('switch', { name: 'Agent in planner: 
 
 beforeEach(() => {
   vi.clearAllMocks()
+  setApiRequestConnection(scopeA.connectionId)
   queryClient.clear()
   $agentPlugins.set([])
   $agentPluginsStatus.set('ready')
@@ -41,20 +45,22 @@ beforeEach(() => {
   vi.mocked(getToolsets).mockResolvedValue([kanban()])
   vi.mocked(setToolsetEnabled).mockResolvedValue({ ok: true, name: 'kanban', enabled: true })
 })
-afterEach(() => { cleanup(); queryClient.clear() })
+afterEach(() => { cleanup(); queryClient.clear(); setApiRequestConnection(null) })
 
-it('keeps Desktop separate and binds an in-flight tool grant to its connection/profile', async () => {
+it.each(['explicit', 'legacy'] as const)('keeps Desktop separate and binds an in-flight tool grant to its %s scope', async mode => {
+  const profileA = mode === 'legacy' ? scopeA.profile : scopeA
   let finish!: (value: { ok: boolean; name: string; enabled: boolean }) => void
   const save = new Promise<{ ok: boolean; name: string; enabled: boolean }>(resolve => { finish = resolve })
   vi.mocked(setToolsetEnabled).mockReturnValue(save)
-  const { rerender } = render(<PluginsTab profile={scopeA} scopeLabel="planner" />)
+  const { rerender } = render(<PluginsTab profile={profileA} scopeLabel="planner" />)
   await waitFor(() => expect(agentSwitch().disabled).toBe(false))
-  expect(getToolsets).toHaveBeenCalledWith(scopeA)
+  expect(getToolsets).toHaveBeenCalledWith(profileA)
   expect(setToolsetEnabled).not.toHaveBeenCalled()
   fireEvent.click(screen.getByRole('switch', { name: 'Desktop: Kanban' }))
   expect(setPluginEnabled).toHaveBeenCalledWith('kanban', false)
   expect(setToolsetEnabled).not.toHaveBeenCalled()
   fireEvent.click(agentSwitch())
+  setApiRequestConnection(scopeB.connectionId)
   await waitFor(() => expect(setToolsetEnabled).toHaveBeenCalledWith('kanban', true, scopeA))
   expect(agentSwitch().getAttribute('aria-checked')).toBe('true')
   rerender(<PluginsTab profile={scopeB} scopeLabel="planner" />)
