@@ -39,7 +39,9 @@ jobs:
           grep -Eq 'Unable to find|TestingLibraryElementError' "$RUNNER_TEMP/kanban-ui-evidence/base.log"
       - name: Apply Desktop candidate
         working-directory: src
-        run: python ../harness/apply_desktop.py
+        run: |
+          python ../harness/apply_desktop.py
+          python ../harness/adjust_desktop.py
       - name: Format, lint, typecheck and execute UI tests
         working-directory: src/apps/desktop
         shell: bash
