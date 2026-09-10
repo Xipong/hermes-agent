@@ -1,44 +1,115 @@
-name: Desktop observability workspace
+name: Desktop observability validation
 
 on:
   push:
     branches: [work/desktop-observability-20260910]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  dependencies:
+  validate:
+    if: startsWith(github.event.head_commit.message, 'publish:')
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        pr: [1, 2, 3]
+    env:
+      PR_NUMBER: ${{ matrix.pr }}
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
     steps:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24'
-      - name: Install pinned workspace dependencies
+      - name: Apply the reviewed patch to the pinned upstream commit
         shell: bash
-        env:
-          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
-          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
         run: |
           set -euo pipefail
-          mkdir source
+          curl --fail --silent --show-error --location "https://raw.githubusercontent.com/Xipong/hermes-agent/${GITHUB_SHA}/.github/desktop-observability-patches.json" > bundle.json
+          python3 - <<'PY'
+          import base64, gzip, hashlib, json, os, pathlib, re
+          bundle = json.loads(pathlib.Path('bundle.json').read_text())
+          entry = next(p for p in bundle['prs'] if p['number'] == int(os.environ['PR_NUMBER']))
+          assert re.fullmatch(r'[0-9a-f]{40}', bundle['base'])
+          assert re.fullmatch(r'(fix|feat)/desktop-[a-z0-9-]+', entry['branch'])
+          assert all(p.startswith('apps/desktop/src/') and '..' not in p.split('/') for p in entry['files'])
+          patch = gzip.decompress(base64.b64decode(entry['patch'], validate=True))
+          assert hashlib.sha256(patch).hexdigest() == entry['sha256']
+          pathlib.Path('change.patch').write_bytes(patch)
+          pathlib.Path('entry.json').write_text(json.dumps(entry))
+          pathlib.Path('base.txt').write_text(bundle['base'])
+          PY
+          mkdir source receipts
           cd source
           git init
-          git remote add origin https://github.com/NousResearch/hermes-agent.git
-          git -c protocol.version=2 fetch --filter=blob:none --depth=1 origin 16a408534c4c2364e8e8f14ea7cef82aa80b4505
+          git remote add upstream https://github.com/NousResearch/hermes-agent.git
+          git -c protocol.version=2 fetch --filter=blob:none --depth=1 upstream "$(cat ../base.txt)"
           git sparse-checkout init --cone
-          git sparse-checkout set apps ui-tui web tests-js .github
+          git sparse-checkout set apps ui-tui web tests-js tests/fixtures .github
           git checkout --detach FETCH_HEAD
-          npm ci --ignore-scripts --no-audit --no-fund
-          mkdir -p test-runtime
-          cp "$(command -v node)" test-runtime/node
-          find . -type d -name node_modules -prune -print0 > dependency-paths
-          printf 'test-runtime\0' >> dependency-paths
-          tar --null -T dependency-paths -czf ../desktop-dependencies.tar.gz
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+          git apply --check ../change.patch
+          git apply ../change.patch
+          git add apps/desktop/src
+          python3 - <<'PY'
+          import json, pathlib, subprocess
+          expected = set(json.loads(pathlib.Path('../entry.json').read_text())['files'])
+          actual = set(subprocess.check_output(['git', 'diff', '--cached', '--name-only'], text=True).splitlines())
+          assert actual == expected, (actual, expected)
+          PY
+          git diff --cached --check
+          git rev-parse HEAD | tee ../receipts/base.txt
+          git diff --cached --stat | tee ../receipts/change-stat.txt
+      - name: Install pinned dependencies without lifecycle scripts
+        working-directory: source
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Run regression suite, renderer typecheck, lint and formatting
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' | tee ../receipts/tests.txt
+          import json, pathlib, subprocess
+          entry = json.loads(pathlib.Path('../entry.json').read_text())
+          subprocess.run(['node', '../../node_modules/vitest/vitest.mjs', 'run', '--project', 'ui', '--maxWorkers=2', *entry['tests']], cwd='apps/desktop', check=True)
+          PY
+          node node_modules/typescript/bin/tsc -p apps/desktop --noEmit 2>&1 | tee ../receipts/typecheck.txt
+          git diff --cached --name-only -z | xargs -0 node node_modules/eslint/bin/eslint.js --max-warnings 0 2>&1 | tee ../receipts/lint.txt
+          git diff --cached --name-only -z | xargs -0 node node_modules/prettier/bin/prettier.cjs --check 2>&1 | tee ../receipts/format.txt
+          git diff --check
+          git diff --exit-code
+      - name: Publish only the validated product change to a new fork branch
+        working-directory: source
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          branch=$(python3 -c 'import json; print(json.load(open("../entry.json"))["branch"])')
+          message=$(python3 -c 'import json; p=json.load(open("../entry.json")); print(p["message"] + "\n\nFixes NousResearch/hermes-agent#" + str(p["issue"]))')
+          git config user.name Xipong
+          git config user.email 217837358+Xipong@users.noreply.github.com
+          git commit -m "$message"
+          remote=https://github.com/Xipong/hermes-agent.git
+          if git ls-remote --exit-code --heads "$remote" "$branch"; then
+            git fetch --depth=1 "$remote" "$branch"
+            test "$(git rev-parse HEAD^{tree})" = "$(git rev-parse FETCH_HEAD^{tree})"
+            echo 'The already-published branch has exactly the validated tree; not overwriting it.'
+            git rev-parse FETCH_HEAD | tee ../receipts/head.txt
+          else
+            auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+            echo "::add-mask::$auth"
+            git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" push "$remote" "HEAD:refs/heads/$branch"
+            git rev-parse HEAD | tee ../receipts/head.txt
+          fi
+          printf '%s\n' "$branch" | tee ../receipts/branch.txt
+      - name: Preserve validation receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: desktop-observability-dependencies
-          path: desktop-dependencies.tar.gz
-          retention-days: 1
-          if-no-files-found: error
+          name: desktop-pr-${{ matrix.pr }}-validation
+          path: receipts/
+          retention-days: 7
+          if-no-files-found: warn
