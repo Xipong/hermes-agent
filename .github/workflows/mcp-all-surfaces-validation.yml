@@ -2,7 +2,7 @@ name: MCP all surfaces validation
 on:
   push:
     branches: [work/mcp-all-surfaces-validation-20260911]
-    paths: [.mcp-expand/**, .github/workflows/mcp-all-surfaces-validation.yml, tests/hermes_cli/test_mcp_network_surfaces.py, tests/tools/test_mcp_network_oauth.py]
+    paths: [.mcp-expand/recheck.py]
 permissions:
   contents: read
 jobs:
@@ -14,9 +14,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with: {path: input}
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           repository: Xipong/hermes-agent
           ref: 3e19aab72403a73b7cf274dc062b25e00a4e004d
@@ -28,11 +28,11 @@ jobs:
           cache-dependency-glob: source/uv.lock
       - name: Install locked dependencies
         working-directory: source
-        run: uv sync --locked --python 3.11 --extra dev --extra mcp
+        run: uv sync --locked --python 3.11 --extra dev --extra mcp --extra acp
       - name: Prove red and green across MCP boundaries
         shell: bash
         working-directory: source
-        run: uv run --no-sync python ../input/.mcp-expand/run.py python
+        run: uv run --no-sync python ../input/.mcp-expand/recheck.py python
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
@@ -43,9 +43,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with: {path: input}
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           repository: Xipong/hermes-agent
           ref: 3e19aab72403a73b7cf274dc062b25e00a4e004d
@@ -60,7 +60,7 @@ jobs:
         run: npm ci --ignore-scripts
       - name: Prove frontend propagation and check both applications
         working-directory: source
-        run: python ../input/.mcp-expand/run.py ui
+        run: python ../input/.mcp-expand/recheck.py ui
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
@@ -73,21 +73,17 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with: {fetch-depth: 0}
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with: {pattern: expanded-mcp-*, path: /tmp/mcp-expanded}
-      - name: Publish validated product-only follow-up to the existing PR
+      - name: Publish validated clean product tree for the existing PR
         shell: bash
         run: |
           set -euo pipefail
           cmp /tmp/mcp-expanded/expanded-mcp-ui/python.patch /tmp/mcp-expanded/expanded-mcp-ubuntu-24.04/python.patch
           cmp /tmp/mcp-expanded/expanded-mcp-ui/python.patch /tmp/mcp-expanded/expanded-mcp-windows-latest/python.patch
-          branch=feat/mcp-wsl-windows-loopback-final-20260910
-          expected=3e19aab72403a73b7cf274dc062b25e00a4e004d
-          git fetch origin "$branch"
-          test "$(git rev-parse FETCH_HEAD)" = "$expected"
-          git switch -c validated-mcp-surfaces "$expected"
+          git switch -c work/validated-mcp-all-surfaces-clean-20260911 3e19aab72403a73b7cf274dc062b25e00a4e004d
           git apply /tmp/mcp-expanded/expanded-mcp-ui/candidate.patch
           python - <<'PY'
           import json, subprocess
@@ -100,4 +96,4 @@ jobs:
           git config user.name Xipong
           git config user.email 217837358+Xipong@users.noreply.github.com
           git commit -m 'feat(mcp): propagate network routing across setup auth and session surfaces'
-          git push origin "HEAD:refs/heads/$branch"
+          git push origin HEAD:refs/heads/work/validated-mcp-all-surfaces-clean-20260911
