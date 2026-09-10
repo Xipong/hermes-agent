@@ -2,23 +2,70 @@ name: MCP Desktop WSL validation
 on:
   push:
     branches: [work/mcp-desktop-wsl-validation-20260910]
-    paths:
-      - .github/workflows/mcp-desktop-wsl-validation.yml
-      - .mcp-validation/**
+    paths: [.mcp-validation/run.py]
 permissions:
   contents: read
 jobs:
-  source:
-    runs-on: ubuntu-24.04
+  python:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          path: input
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           repository: NousResearch/hermes-agent
           ref: 564aef2946c436500a5e80ee117b66b789b3f99a
-      - name: Package pinned source for regression development
-        run: git archive --format=tar HEAD | gzip > /tmp/hermes-mcp-source.tar.gz
-      - uses: actions/upload-artifact@v4
+          path: source
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39
         with:
-          name: hermes-mcp-pinned-source
-          path: /tmp/hermes-mcp-source.tar.gz
-          retention-days: 3
+          version: '0.9.28'
+          enable-cache: true
+          cache-dependency-glob: source/uv.lock
+      - name: Install locked runtime and test dependencies
+        working-directory: source
+        run: uv sync --locked --python 3.11 --extra dev --extra mcp
+      - name: Baseline and patched MCP tests
+        shell: bash
+        working-directory: source
+        run: uv run --no-sync python ../input/.mcp-validation/run.py python
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: mcp-python-${{ matrix.os }}
+          path: source/validation-output/
+          retention-days: 5
+  desktop:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          path: input
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          repository: NousResearch/hermes-agent
+          ref: 564aef2946c436500a5e80ee117b66b789b3f99a
+          path: source
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '26'
+          cache: npm
+          cache-dependency-path: source/package-lock.json
+      - name: Install workspace dependencies
+        working-directory: source
+        run: npm ci --ignore-scripts
+      - name: Baseline and patched Desktop tests
+        working-directory: source
+        run: python ../input/.mcp-validation/run.py desktop
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: mcp-desktop
+          path: source/validation-output/
+          retention-days: 5
