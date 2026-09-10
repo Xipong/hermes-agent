@@ -19,6 +19,11 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           repository: Xipong/hermes-agent
+          ref: 9422ffe3d4bbd98c471aae94da2a832ff53ad226
+          path: patch-input
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          repository: Xipong/hermes-agent
           ref: 5e2369e70784b037ee62adde850e99926c5bd06e
           path: source
       - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39
@@ -45,6 +50,11 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with: {path: input}
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          repository: Xipong/hermes-agent
+          ref: 9422ffe3d4bbd98c471aae94da2a832ff53ad226
+          path: patch-input
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           repository: Xipong/hermes-agent
