@@ -12,7 +12,7 @@ jobs:
     env:
       ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
-      BASE_SHA: a08e5e70efa0eee0905e01615b97e9bea1dff04d
+      BASE_SHA: 67764dc0863349a384c16425e73ee8571f3a94b7
     steps:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -31,7 +31,7 @@ jobs:
           PY
           cd source
           git init
-          git remote add origin https://github.com/Xipong/hermes-agent.git
+          git remote add origin https://github.com/NousResearch/hermes-agent.git
           git -c protocol.version=2 fetch --filter=blob:none --depth=1 origin "$BASE_SHA"
           git sparse-checkout init --cone
           git sparse-checkout set apps ui-tui web tests-js tests/fixtures .github
@@ -47,9 +47,11 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
+          set +e
           node ../../node_modules/vitest/vitest.mjs run --project ui --maxWorkers=2 src/lib/chat-messages.interim-preservation.test.ts src/app/session/hooks/use-message-stream/interim-history.test.tsx --reporter=default --reporter=json --outputFile=../../../receipts/red.json 2>&1 | tee ../../../receipts/red.txt
           rc=${PIPESTATUS[0]}
-          test "$rc" -ne 0 || exit 1
+          set -e
+          test "$rc" -ne 0
           python3 - <<'PY'
           import json
           result = json.load(open('../../../receipts/red.json'))
@@ -87,24 +89,28 @@ jobs:
           xargs node node_modules/prettier/bin/prettier.cjs --check < ../receipts/files.txt 2>&1 | tee ../receipts/format.txt
           git diff --check
           git diff --exit-code
-      - name: Publish tested product files to the existing PR without rewriting history
+      - name: Publish tested product files on a standalone branch
         working-directory: source
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          branch=fix/codex-commentary-cli-channel
+          branch=fix/desktop-interim-commentary-preservation
           remote=https://github.com/Xipong/hermes-agent.git
-          current=$(git ls-remote --heads "$remote" "$branch" | cut -f1)
-          test "$current" = "$BASE_SHA"
           git config user.name Xipong
           git config user.email 217837358+Xipong@users.noreply.github.com
           git commit -m 'fix(desktop): preserve interim commentary across history and tool boundaries'
-          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
-          echo "::add-mask::$auth"
-          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" push "$remote" "HEAD:refs/heads/$branch"
-          git rev-parse HEAD | tee ../receipts/head.txt
+          if git ls-remote --exit-code --heads "$remote" "$branch"; then
+            git fetch --depth=1 "$remote" "$branch"
+            test "$(git rev-parse HEAD^{tree})" = "$(git rev-parse FETCH_HEAD^{tree})"
+            git rev-parse FETCH_HEAD | tee ../receipts/head.txt
+          else
+            auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+            echo "::add-mask::$auth"
+            git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" push "$remote" "HEAD:refs/heads/$branch"
+            git rev-parse HEAD | tee ../receipts/head.txt
+          fi
       - name: Preserve reproduction and validation receipts
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
