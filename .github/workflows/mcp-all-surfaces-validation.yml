@@ -46,7 +46,7 @@ jobs:
           retention-days: 7
   ui:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with: {path: input}
@@ -60,24 +60,17 @@ jobs:
           repository: Xipong/hermes-agent
           ref: 5e2369e70784b037ee62adde850e99926c5bd06e
           path: source
-      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39
-        with:
-          version: '0.9.28'
-          enable-cache: true
-          cache-dependency-glob: source/uv.lock
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '26'
           cache: npm
           cache-dependency-path: source/package-lock.json
-      - name: Install locked Python and workspace dependencies
+      - name: Install workspace dependencies
         working-directory: source
-        run: |
-          uv sync --locked --python 3.11 --extra dev --extra mcp --extra acp
-          npm ci --ignore-scripts
+        run: npm ci --ignore-scripts
       - name: Prove RED and GREEN across Desktop and dashboard
         working-directory: source
-        run: uv run --no-sync python ../input/.mcp-expand/recheck.py ui
+        run: python ../input/.mcp-expand/recheck.py ui
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
@@ -93,21 +86,21 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           repository: Xipong/hermes-agent
-          ref: feat/mcp-wsl-windows-loopback-final-20260910
+          ref: 5e2369e70784b037ee62adde850e99926c5bd06e
           fetch-depth: 0
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with: {pattern: legacy-network-*, path: /tmp/mcp-regression}
-      - name: Publish exact validated fix to PR 107713
+      - name: Replace the noisy fix commit with the exact minimal validated patch
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "5e2369e70784b037ee62adde850e99926c5bd06e"
-          cmp /tmp/mcp-regression/legacy-network-ui/python.patch /tmp/mcp-regression/legacy-network-ubuntu-24.04/python.patch
-          cmp /tmp/mcp-regression/legacy-network-ui/python.patch /tmp/mcp-regression/legacy-network-windows-latest/python.patch
+          cmp /tmp/mcp-regression/legacy-network-ui/candidate.patch /tmp/mcp-regression/legacy-network-ubuntu-24.04/candidate.patch
+          cmp /tmp/mcp-regression/legacy-network-ui/candidate.patch /tmp/mcp-regression/legacy-network-windows-latest/candidate.patch
           git apply /tmp/mcp-regression/legacy-network-ui/candidate.patch
           git diff --check
           git config user.name Xipong
           git config user.email 217837358+Xipong@users.noreply.github.com
           git add -A
           git commit -m 'fix(mcp): keep legacy loopback configs in their original namespace'
-          git push origin HEAD:refs/heads/feat/mcp-wsl-windows-loopback-final-20260910
+          git push --force-with-lease=refs/heads/feat/mcp-wsl-windows-loopback-final-20260910:88e55b0cc8d9a748cbcafd72cb57043b027e0cf1 \
+            origin HEAD:refs/heads/feat/mcp-wsl-windows-loopback-final-20260910
