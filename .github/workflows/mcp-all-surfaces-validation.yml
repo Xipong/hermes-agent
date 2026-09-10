@@ -46,7 +46,7 @@ jobs:
           retention-days: 7
   ui:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with: {path: input}
@@ -60,17 +60,24 @@ jobs:
           repository: Xipong/hermes-agent
           ref: 5e2369e70784b037ee62adde850e99926c5bd06e
           path: source
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39
+        with:
+          version: '0.9.28'
+          enable-cache: true
+          cache-dependency-glob: source/uv.lock
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '26'
           cache: npm
           cache-dependency-path: source/package-lock.json
-      - name: Install workspace dependencies
+      - name: Install locked Python and workspace dependencies
         working-directory: source
-        run: npm ci --ignore-scripts
+        run: |
+          uv sync --locked --python 3.11 --extra dev --extra mcp --extra acp
+          npm ci --ignore-scripts
       - name: Prove RED and GREEN across Desktop and dashboard
         working-directory: source
-        run: python ../input/.mcp-expand/recheck.py ui
+        run: uv run --no-sync python ../input/.mcp-expand/recheck.py ui
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: always()
         with:
@@ -95,8 +102,8 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "5e2369e70784b037ee62adde850e99926c5bd06e"
-          cmp /tmp/mcp-regression/legacy-network-ui/candidate.patch /tmp/mcp-regression/legacy-network-ubuntu-24.04/candidate.patch
-          cmp /tmp/mcp-regression/legacy-network-ui/candidate.patch /tmp/mcp-regression/legacy-network-windows-latest/candidate.patch
+          cmp /tmp/mcp-regression/legacy-network-ui/python.patch /tmp/mcp-regression/legacy-network-ubuntu-24.04/python.patch
+          cmp /tmp/mcp-regression/legacy-network-ui/python.patch /tmp/mcp-regression/legacy-network-windows-latest/python.patch
           git apply /tmp/mcp-regression/legacy-network-ui/candidate.patch
           git diff --check
           git config user.name Xipong
