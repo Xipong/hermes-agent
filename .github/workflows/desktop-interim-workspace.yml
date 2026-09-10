@@ -1,0 +1,115 @@
+name: Desktop interim preservation validation
+on:
+  push:
+    branches: [work/desktop-interim-preservation-20260910]
+permissions:
+  contents: write
+jobs:
+  validate:
+    if: startsWith(github.event.head_commit.message, 'validate:')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      BASE_SHA: a08e5e70efa0eee0905e01615b97e9bea1dff04d
+    steps:
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+      - name: Fetch pinned source and regression fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir source receipts fixtures
+          python3 - <<'PY'
+          import os, pathlib, urllib.request
+          root = 'https://raw.githubusercontent.com/Xipong/hermes-agent/' + os.environ['GITHUB_SHA'] + '/.github/interim-workspace/'
+          for name in ['apply_fix.py', 'interim-preservation.test.ts.txt', 'interim-history.test.tsx.txt']:
+              with urllib.request.urlopen(root + name, timeout=60) as response:
+                  pathlib.Path('fixtures', name).write_bytes(response.read())
+          PY
+          cd source
+          git init
+          git remote add origin https://github.com/Xipong/hermes-agent.git
+          git -c protocol.version=2 fetch --filter=blob:none --depth=1 origin "$BASE_SHA"
+          git sparse-checkout init --cone
+          git sparse-checkout set apps ui-tui web tests-js tests/fixtures .github
+          git checkout --detach FETCH_HEAD
+          git rev-parse HEAD | tee ../receipts/base.txt
+          cp ../fixtures/interim-preservation.test.ts.txt apps/desktop/src/lib/chat-messages.interim-preservation.test.ts
+          cp ../fixtures/interim-history.test.tsx.txt apps/desktop/src/app/session/hooks/use-message-stream/interim-history.test.tsx
+      - name: Install pinned workspace dependencies
+        working-directory: source
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Prove regressions on unchanged Desktop production code
+        working-directory: source/apps/desktop
+        shell: bash
+        run: |
+          set -uo pipefail
+          node ../../node_modules/vitest/vitest.mjs run --project ui --maxWorkers=2 src/lib/chat-messages.interim-preservation.test.ts src/app/session/hooks/use-message-stream/interim-history.test.tsx --reporter=default --reporter=json --outputFile=../../../receipts/red.json 2>&1 | tee ../../../receipts/red.txt
+          rc=${PIPESTATUS[0]}
+          test "$rc" -ne 0 || exit 1
+          python3 - <<'PY'
+          import json
+          result = json.load(open('../../../receipts/red.json'))
+          assert result['numFailedTests'] > 0, result
+          assert result['numTotalTests'] >= 20, result
+          print('RED witness:', result['numFailedTests'], 'failed /', result['numTotalTests'], 'tests')
+          PY
+      - name: Apply the reviewed product patch and format touched files
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 ../fixtures/apply_fix.py
+          git add apps/desktop/src
+          git diff --cached --name-only > ../receipts/files.txt
+          test "$(wc -l < ../receipts/files.txt)" -eq 6
+          xargs node node_modules/prettier/bin/prettier.cjs --write < ../receipts/files.txt
+          git add apps/desktop/src
+          git diff --cached --check
+          git diff --cached --stat | tee ../receipts/change-stat.txt
+          git diff --cached > ../receipts/change.patch
+      - name: Test the actual stream hook and surrounding projection/runtime suites
+        working-directory: source/apps/desktop
+        shell: bash
+        run: |
+          set -euo pipefail
+          node ../../node_modules/vitest/vitest.mjs run --project ui --maxWorkers=2 src/app/session/hooks/use-message-stream src/lib/chat-messages src/lib/tool-run-continuity.test.ts src/lib/chat-runtime.test.ts src/app/chat/runtime-repository.test.ts --reporter=default --reporter=json --outputFile=../../../receipts/green.json 2>&1 | tee ../../../receipts/green.txt
+      - name: Check renderer types, lint, formatting and patch scope
+        working-directory: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          node node_modules/typescript/bin/tsc -p apps/desktop --noEmit 2>&1 | tee ../receipts/typecheck.txt
+          xargs node node_modules/eslint/bin/eslint.js --max-warnings 0 < ../receipts/files.txt 2>&1 | tee ../receipts/lint.txt
+          xargs node node_modules/prettier/bin/prettier.cjs --check < ../receipts/files.txt 2>&1 | tee ../receipts/format.txt
+          git diff --check
+          git diff --exit-code
+      - name: Publish tested product files to the existing PR without rewriting history
+        working-directory: source
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          branch=fix/codex-commentary-cli-channel
+          remote=https://github.com/Xipong/hermes-agent.git
+          current=$(git ls-remote --heads "$remote" "$branch" | cut -f1)
+          test "$current" = "$BASE_SHA"
+          git config user.name Xipong
+          git config user.email 217837358+Xipong@users.noreply.github.com
+          git commit -m 'fix(desktop): preserve interim commentary across history and tool boundaries'
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          echo "::add-mask::$auth"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" push "$remote" "HEAD:refs/heads/$branch"
+          git rev-parse HEAD | tee ../receipts/head.txt
+      - name: Preserve reproduction and validation receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: desktop-interim-validation
+          path: receipts/
+          retention-days: 7
+          if-no-files-found: warn
