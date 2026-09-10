@@ -1,0 +1,24 @@
+name: Kanban opt-in validation
+on:
+  push:
+    branches: [work/kanban-opt-in-validation-20260911]
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: NousResearch/hermes-agent
+          ref: 2ddeba9e17a1df5471802481e3efef20885a20b2
+          persist-credentials: false
+      - name: Package the public audited source for local inspection
+        run: git archive HEAD | gzip > "$RUNNER_TEMP/hermes-source.tar.gz"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kanban-source
+          path: ${{ runner.temp }}/hermes-source.tar.gz
+          retention-days: 2
+          compression-level: 0
