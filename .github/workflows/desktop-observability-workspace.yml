@@ -1,0 +1,35 @@
+name: Desktop observability workspace
+
+on:
+  push:
+    branches: [work/desktop-observability-20260910]
+
+permissions:
+  contents: read
+
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Collect pinned desktop sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir source
+          cd source
+          git init
+          git remote add origin https://github.com/NousResearch/hermes-agent.git
+          git -c protocol.version=2 fetch --filter=blob:none --depth=1 origin 16a408534c4c2364e8e8f14ea7cef82aa80b4505
+          git sparse-checkout init --cone
+          git sparse-checkout set apps/desktop apps/shared tests-js .github
+          git checkout --detach FETCH_HEAD
+          git rev-parse HEAD > SOURCE_COMMIT
+          tar --exclude=.git -czf ../desktop-source.tar.gz .
+      - name: Upload sources for the isolated development environment
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: desktop-observability-source
+          path: desktop-source.tar.gz
+          retention-days: 1
+          if-no-files-found: error
