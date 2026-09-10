@@ -1,0 +1,103 @@
+name: MCP all surfaces validation
+on:
+  push:
+    branches: [work/mcp-all-surfaces-validation-20260911]
+    paths: [.mcp-expand/**, .github/workflows/mcp-all-surfaces-validation.yml, tests/hermes_cli/test_mcp_network_surfaces.py, tests/tools/test_mcp_network_oauth.py]
+permissions:
+  contents: read
+jobs:
+  python:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with: {path: input}
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          repository: Xipong/hermes-agent
+          ref: 3e19aab72403a73b7cf274dc062b25e00a4e004d
+          path: source
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39
+        with:
+          version: '0.9.28'
+          enable-cache: true
+          cache-dependency-glob: source/uv.lock
+      - name: Install locked dependencies
+        working-directory: source
+        run: uv sync --locked --python 3.11 --extra dev --extra mcp
+      - name: Prove red and green across MCP boundaries
+        shell: bash
+        working-directory: source
+        run: uv run --no-sync python ../input/.mcp-expand/run.py python
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: expanded-mcp-${{ matrix.os }}
+          path: source/validation-output/
+          retention-days: 7
+  ui:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with: {path: input}
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          repository: Xipong/hermes-agent
+          ref: 3e19aab72403a73b7cf274dc062b25e00a4e004d
+          path: source
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '26'
+          cache: npm
+          cache-dependency-path: source/package-lock.json
+      - name: Install workspace dependencies
+        working-directory: source
+        run: npm ci --ignore-scripts
+      - name: Prove frontend propagation and check both applications
+        working-directory: source
+        run: python ../input/.mcp-expand/run.py ui
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: expanded-mcp-ui
+          path: source/validation-output/
+          retention-days: 7
+  publish:
+    needs: [python, ui]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with: {fetch-depth: 0}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with: {pattern: expanded-mcp-*, path: /tmp/mcp-expanded}
+      - name: Publish validated product-only follow-up to the existing PR
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmp /tmp/mcp-expanded/expanded-mcp-ui/python.patch /tmp/mcp-expanded/expanded-mcp-ubuntu-24.04/python.patch
+          cmp /tmp/mcp-expanded/expanded-mcp-ui/python.patch /tmp/mcp-expanded/expanded-mcp-windows-latest/python.patch
+          branch=feat/mcp-wsl-windows-loopback-final-20260910
+          expected=3e19aab72403a73b7cf274dc062b25e00a4e004d
+          git fetch origin "$branch"
+          test "$(git rev-parse FETCH_HEAD)" = "$expected"
+          git switch -c validated-mcp-surfaces "$expected"
+          git apply /tmp/mcp-expanded/expanded-mcp-ui/candidate.patch
+          python - <<'PY'
+          import json, subprocess
+          from pathlib import Path
+          files = json.loads(Path('/tmp/mcp-expanded/expanded-mcp-ui/files.json').read_text())
+          assert files and all(not name.startswith(('.github/', '.mcp-expand/')) for name in files)
+          subprocess.run(['git', 'add', '--', *files], check=True)
+          PY
+          git diff --cached --check
+          git config user.name Xipong
+          git config user.email 217837358+Xipong@users.noreply.github.com
+          git commit -m 'feat(mcp): propagate network routing across setup auth and session surfaces'
+          git push origin "HEAD:refs/heads/$branch"
