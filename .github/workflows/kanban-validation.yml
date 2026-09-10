@@ -5,20 +5,60 @@ on:
 permissions:
   contents: read
 jobs:
-  source:
+  backend:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: NousResearch/hermes-agent
-          ref: 2ddeba9e17a1df5471802481e3efef20885a20b2
+          path: harness
           persist-credentials: false
-      - name: Package the public audited source for local inspection
-        run: git archive HEAD | gzip > "$RUNNER_TEMP/hermes-source.tar.gz"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          name: kanban-source
-          path: ${{ runner.temp }}/hermes-source.tar.gz
-          retention-days: 2
-          compression-level: 0
+          ref: 2ddeba9e17a1df5471802481e3efef20885a20b2
+          path: src
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          version: '0.9.28'
+      - name: Install locked Python dependencies
+        working-directory: src
+        run: uv sync --locked --python 3.11 --extra dev
+      - name: Reproduce before fix (real imports and config writers)
+        working-directory: src
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/kanban-evidence"
+          cp ../harness/test_kanban_toolset_opt_in.py tests/tools/
+          set +e
+          scripts/run_tests.sh -j 1 --file-retries 0 tests/tools/test_kanban_toolset_opt_in.py -q --tb=short -k saved_opt_in 2>&1 | tee "$RUNNER_TEMP/kanban-evidence/base.log"
+          rc=${PIPESTATUS[0]}
+          set -e
+          test "$rc" -ne 0
+          grep -Eq 'FAILED.*test_saved_opt_in|AssertionError' "$RUNNER_TEMP/kanban-evidence/base.log"
+      - name: Apply candidate and execute regression plus neighboring tests
+        working-directory: src
+        shell: bash
+        run: |
+          python ../harness/apply_backend.py
+          scripts/run_tests.sh -j 4 --file-timeout 240 --file-retries 0 tests/tools/test_kanban_toolset_opt_in.py tests/tools/test_kanban_tools.py tests/hermes_cli/test_tools_config.py tests/hermes_cli/test_kanban_worker_spawn_toolsets.py -q --tb=short 2>&1 | tee "$RUNNER_TEMP/kanban-evidence/candidate.log"
+          .venv/bin/ruff check tools/kanban_tools.py tools/kanban_toolset_context.py model_tools.py hermes_cli/tools_config.py tui_gateway/server.py tests/tools/test_kanban_toolset_opt_in.py
+          git add tools/kanban_tools.py tools/kanban_toolset_context.py model_tools.py hermes_cli/tools_config.py tui_gateway/server.py tests/tools/test_kanban_toolset_opt_in.py website/docs/user-guide/features/kanban.md
+          git diff --cached --check
+          git diff --cached > "$RUNNER_TEMP/kanban-evidence/backend.patch"
+      - name: Publish clean product-only branch
+        working-directory: src
+        shell: bash
+        run: |
+          git config user.name Xipong
+          git config user.email '217837358+Xipong@users.noreply.github.com'
+          git commit -m 'fix(kanban): honor explicit platform tool opt-ins across configuration surfaces'
+          git push origin HEAD:refs/heads/fix/kanban-toolset-opt-in-20260911
+          git rev-parse HEAD | tee "$RUNNER_TEMP/kanban-evidence/backend-head.txt"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: kanban-backend-evidence
+          path: ${{ runner.temp }}/kanban-evidence
+          retention-days: 7
