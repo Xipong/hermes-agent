@@ -1,0 +1,24 @@
+name: MCP Desktop WSL validation
+on:
+  push:
+    branches: [work/mcp-desktop-wsl-validation-20260910]
+    paths:
+      - .github/workflows/mcp-desktop-wsl-validation.yml
+      - .mcp-validation/**
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: NousResearch/hermes-agent
+          ref: 564aef2946c436500a5e80ee117b66b789b3f99a
+      - name: Package pinned source for regression development
+        run: git archive --format=tar HEAD | gzip > /tmp/hermes-mcp-source.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hermes-mcp-pinned-source
+          path: /tmp/hermes-mcp-source.tar.gz
+          retention-days: 3
