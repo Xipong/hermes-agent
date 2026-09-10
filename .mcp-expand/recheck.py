@@ -72,10 +72,10 @@ def reset() -> None:
     subprocess.run(["git", "reset", "--hard", "HEAD"], check=True)
 
 
-def update_existing_web_expectations() -> None:
-    """New structured entries explicitly persist auto; update old exact-object tests."""
-    path = ROOT / "web/src/lib/mcp-server-create.test.ts"
-    text = path.read_text(encoding="utf-8")
+def finish_minimal_patch() -> None:
+    """Update old exact-object tests and one lint-only blank line, nothing else."""
+    web_test = ROOT / "web/src/lib/mcp-server-create.test.ts"
+    text = web_test.read_text(encoding="utf-8")
     replacements = {
         '      url: "https://mcp.linear.app/mcp",\n      auth:': (
             '      url: "https://mcp.linear.app/mcp",\n      network: "auto",\n      auth:'
@@ -91,51 +91,13 @@ def update_existing_web_expectations() -> None:
     for old, new in replacements.items():
         assert text.count(old) == 1, old
         text = text.replace(old, new)
-    path.write_text(text, encoding="utf-8")
+    web_test.write_text(text, encoding="utf-8")
 
-
-def format_python() -> dict[str, int]:
-    results = {
-        "ruff-format-write": run(
-            "ruff-format-write", ["uv", "run", "--no-sync", "ruff", "format", *PYTHON_CHANGED]
-        )
-    }
-    results["ruff-format-check"] = run(
-        "ruff-format-check",
-        ["uv", "run", "--no-sync", "ruff", "format", "--check", *PYTHON_CHANGED],
-    )
-    results["ruff"] = run(
-        "ruff", ["uv", "run", "--no-sync", "ruff", "check", *PYTHON_CHANGED]
-    )
-    return results
-
-
-def format_frontend() -> dict[str, int]:
-    results = {
-        "prettier-write": run(
-            "prettier-write",
-            ["node", "node_modules/prettier/bin/prettier.cjs", "--write", *TS_CHANGED],
-        ),
-        "eslint-fix": run(
-            "eslint-fix",
-            ["node", "node_modules/eslint/bin/eslint.js", "--fix", *TS_CHANGED],
-        ),
-    }
-    results["prettier-check"] = run(
-        "prettier-check",
-        ["node", "node_modules/prettier/bin/prettier.cjs", "--check", *TS_CHANGED],
-    )
-    results["eslint-check"] = run(
-        "eslint-check",
-        [
-            "node",
-            "node_modules/eslint/bin/eslint.js",
-            "--max-warnings",
-            "0",
-            *TS_CHANGED,
-        ],
-    )
-    return results
+    desktop_test = ROOT / "apps/desktop/src/api/mcp-network.test.ts"
+    text = desktop_test.read_text(encoding="utf-8")
+    old = "    )\n    expect(imported).toEqual(["
+    assert text.count(old) == 1
+    desktop_test.write_text(text.replace(old, "    )\n\n    expect(imported).toEqual([", 1), encoding="utf-8")
 
 
 mode = sys.argv[1]
@@ -161,8 +123,10 @@ if mode == "python":
     results["red"] = run("red", pytest + red_tests + ["-q", "--tb=short"])
     reset()
     apply_patch()
-    update_existing_web_expectations()
-    results.update(format_python())
+    finish_minimal_patch()
+    results["ruff"] = run(
+        "ruff", ["uv", "run", "--no-sync", "ruff", "check", *PYTHON_CHANGED]
+    )
 
     selection = [
         "tests/tools/test_mcp_windows.py",
@@ -203,10 +167,18 @@ elif mode == "ui":
     )
     reset()
     apply_patch()
-    update_existing_web_expectations()
-    results.update(format_python())
-    results.update(format_frontend())
+    finish_minimal_patch()
 
+    results["eslint"] = run(
+        "eslint",
+        [
+            "node",
+            "node_modules/eslint/bin/eslint.js",
+            "--max-warnings",
+            "0",
+            *TS_CHANGED,
+        ],
+    )
     results["green-desktop"] = run(
         "green-desktop",
         [
@@ -247,9 +219,6 @@ else:
 
 results["diff-check"] = run("diff-check", ["git", "diff", "--check"])
 (OUT / "candidate.patch").write_bytes(subprocess.check_output(["git", "diff", "--binary"]))
-(OUT / "python.patch").write_bytes(
-    subprocess.check_output(["git", "diff", "--binary", "--", "*.py"])
-)
 (OUT / "results.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
 (OUT / "stat.txt").write_text(
     subprocess.check_output(["git", "diff", "--stat"], text=True), encoding="utf-8"
