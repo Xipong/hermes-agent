@@ -2,6 +2,7 @@
 import json
 import os
 from pathlib import Path
+import re
 import runpy
 import shutil
 import subprocess
@@ -18,7 +19,6 @@ for name in NEW_PY:
     shutil.copyfile(INPUT / name, ROOT / name)
 runpy.run_path(str(INPUT / '.mcp-expand/apply.py'))
 runpy.run_path(str(INPUT / '.mcp-expand/ui-tests.py'))
-# A fake provider must allow the manager to attach its real profile identity.
 p = ROOT / NEW_PY[1]
 p.write_text(p.read_text(encoding='utf-8').replace('lambda *_: object()', 'lambda *_: type("FixtureProvider", (), {})()'), encoding='utf-8')
 if (INPUT / '.mcp-expand/refine.py').exists():
@@ -43,12 +43,23 @@ def run(label, argv, cwd=ROOT):
     return result.returncode
 
 
+def failures(label):
+    text = (OUT / (label + '.log')).read_text(encoding='utf-8', errors='replace')
+    return set(re.findall(r'(?m)^FAILED (\S+)', text))
+
+
 mode = sys.argv[1]
 results = {}
 bash = str(Path(os.environ.get('ProgramFiles', r'C:\Program Files')) / 'Git/bin/bash.exe') if sys.platform == 'win32' else 'bash'
 pytest = [bash, 'scripts/run_tests.sh', '-j', '4', '--file-timeout', '180']
 if mode == 'python':
     results['red'] = run('red', pytest + NEW_PY + ['-q', '--tb=short'])
+    if sys.platform == 'win32':
+        # This existing POSIX-mode assertion fails on NTFS. Prove the exact
+        # failure on unchanged production code; do not weaken or skip its test.
+        results['baseline-permissions'] = run('baseline-permissions', pytest + [
+            'tests/tools/test_mcp_schema_cache.py', '-q', '--tb=short',
+            '-k', 'test_cache_lives_under_hermes_home_cache_dir_with_0600'])
 elif mode == 'ui':
     results['red-desktop'] = run('red-desktop', ['node', '../../node_modules/vitest/vitest.mjs', 'run', '--project', 'ui', 'src/api/mcp-network.test.ts', '--reporter=json', '--outputFile=' + str(OUT / 'red-desktop.json')], ROOT / 'apps/desktop')
     results['red-web'] = run('red-web', ['node', '../node_modules/vitest/vitest.mjs', 'run', 'src/lib/mcp-network.test.ts', '--reporter=json', '--outputFile=' + str(OUT / 'red-web.json')], ROOT / 'web')
@@ -69,6 +80,10 @@ if mode == 'python':
         'tests/tools/test_mcp_preflight_content_type.py', 'tests/tools/test_mcp_sse_transport.py',
         'tests/tools/test_mcp_http_redirect_headers.py', 'tests/tools/test_mcp_client_cert.py']
     results['neighbors'] = run('neighbors', pytest + [name for name in candidates if (ROOT / name).exists()] + ['-q', '--tb=short'])
+    results['api-security-profile'] = run('api-security-profile', pytest + [
+        'tests/hermes_cli/test_dashboard_admin_endpoints.py',
+        'tests/hermes_cli/test_web_server_profile_unification.py',
+        'tests/hermes_cli/test_mcp_security.py', '-q', '--tb=short', '-k', 'mcp'])
     results['ruff'] = run('ruff', [sys.executable, '-m', 'ruff', 'check', *[p for p in changed if p.endswith('.py')]])
 else:
     for surface, prefix in [('desktop', 'apps/desktop'), ('web', 'web')]:
@@ -82,10 +97,19 @@ else:
     results['green-web'] = run('green-web', ['node', '../node_modules/vitest/vitest.mjs', 'run', 'src/lib/mcp-network.test.ts', 'src/lib/mcp-server-create.test.ts', 'src/lib/mcp-oauth.test.ts', '--reporter=json', '--outputFile=' + str(OUT / 'green-web.json')], ROOT / 'web')
 results['diff-check'] = run('diff-check', ['git', 'diff', '--check'])
 subprocess.run(['git', 'add', '-N', *NEW], check=True)
-(OUT / 'candidate.patch').write_bytes(subprocess.check_output(['git', 'diff', '--binary']))
-(OUT / 'python.patch').write_bytes(subprocess.check_output(['git', 'diff', '--binary', '--', '*.py']))
+# Fixed-length blob identities allow byte-for-byte artifact comparison across
+# Git versions whose default abbreviations differ (Windows uses 8 vs Linux 7).
+(OUT / 'candidate.patch').write_bytes(subprocess.check_output(['git', 'diff', '--binary', '--full-index']))
+(OUT / 'python.patch').write_bytes(subprocess.check_output(['git', 'diff', '--binary', '--full-index', '--', '*.py']))
 (OUT / 'files.json').write_text(json.dumps(changed, indent=2), encoding='utf-8')
 (OUT / 'results.json').write_text(json.dumps(results, indent=2), encoding='utf-8')
 print(results, flush=True)
+allowed = set()
+if mode == 'python' and sys.platform == 'win32':
+    expected = {'tests/tools/test_mcp_schema_cache.py::TestCacheFileLocation::test_cache_lives_under_hermes_home_cache_dir_with_0600'}
+    assert results['baseline-permissions'] == results['neighbors'] == 1, results
+    assert failures('baseline-permissions') == failures('neighbors') == expected
+    (OUT / 'verified-baseline-failure.json').write_text(json.dumps(sorted(expected)), encoding='utf-8')
+    allowed = {'baseline-permissions', 'neighbors'}
 assert all(value != 0 for key, value in results.items() if key.startswith('red')), results
-assert all(value == 0 for key, value in results.items() if not key.startswith('red')), results
+assert all(value == 0 for key, value in results.items() if not key.startswith('red') and key not in allowed), results
