@@ -55,7 +55,7 @@ describe('stored assistant commentary preservation', () => {
     const first = item('commentary', 'First ')
     first.content.push({ type: 'output_text', text: 'update.' })
     const [message] = toChatMessages([{
-      role: 'assistant', timestamp: 2,
+      role: 'assistant', content: '', timestamp: 2,
       codex_message_items: [first, item('commentary', 'Second update.'), item('final_answer', 'Final answer.')]
     }])
     expect(textParts(message.parts)).toEqual(['First update.', 'Second update.', 'Final answer.'])
@@ -63,7 +63,7 @@ describe('stored assistant commentary preservation', () => {
 
   it('normalizes phase spelling without exposing analysis', () => {
     expect(assistantText([{
-      role: 'assistant', timestamp: 2,
+      role: 'assistant', content: '', timestamp: 2,
       codex_message_items: [item(' Commentary ', 'Visible update.'), item(' ANALYSIS ', 'Hidden analysis.'), item('final_answer', 'Answer.')]
     }])).toBe('Visible update.Answer.')
   })
@@ -84,7 +84,7 @@ describe('stored assistant commentary preservation', () => {
 
   it('respects explicitly hidden and non-assistant rows', () => {
     const codex_message_items = [item('commentary', 'Do not surface this.')]
-    expect(toChatMessages([{ role: 'assistant', timestamp: 2, display_kind: 'hidden', codex_message_items }])).toEqual([])
+    expect(toChatMessages([{ role: 'assistant', content: '', timestamp: 2, display_kind: 'hidden', codex_message_items }])).toEqual([])
     expect(assistantText([{ role: 'user', content: 'User text.', timestamp: 2, codex_message_items }])).toBe('')
   })
 
@@ -93,14 +93,14 @@ describe('stored assistant commentary preservation', () => {
   })
 
   it('does not promote a reasoning-only row into an answer', () => {
-    const [message] = toChatMessages([{ role: 'assistant', timestamp: 2, reasoning: 'Only reasoning.' }])
+    const [message] = toChatMessages([{ role: 'assistant', content: '', timestamp: 2, reasoning: 'Only reasoning.' }])
     expect(chatMessageText(message)).toBe('')
     expect(message.parts).toEqual([reasoningPart('Only reasoning.', 2)])
   })
 
   it('rejects malformed and foreign-role items while keeping valid commentary', () => {
     expect(assistantText([{
-      role: 'assistant', timestamp: 2,
+      role: 'assistant', content: '', timestamp: 2,
       codex_message_items: JSON.stringify([
         null, 1, [], { ...item('commentary', 'Foreign text.'), role: 'user' },
         { ...item('commentary', 'Wrong type.'), type: 'reasoning' },
