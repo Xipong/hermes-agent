@@ -25,7 +25,7 @@ jobs:
           python3 - <<'PY'
           import os, pathlib, urllib.request
           root = 'https://raw.githubusercontent.com/Xipong/hermes-agent/' + os.environ['GITHUB_SHA'] + '/.github/interim-workspace/'
-          for name in ['apply_fix.py', 'interim-preservation.test.ts.txt', 'interim-history.test.tsx.txt']:
+          for name in ['apply_fix.py', 'finish_fix.py', 'interim-preservation.test.ts.txt', 'interim-history.test.tsx.txt']:
               with urllib.request.urlopen(root + name, timeout=60) as response:
                   pathlib.Path('fixtures', name).write_bytes(response.read())
           PY
@@ -64,10 +64,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 ../fixtures/apply_fix.py
+          python3 ../fixtures/finish_fix.py
           git add apps/desktop/src
           git diff --cached --name-only > ../receipts/files.txt
-          test "$(wc -l < ../receipts/files.txt)" -eq 6
+          test "$(wc -l < ../receipts/files.txt)" -eq 7
+          xargs node node_modules/prettier/bin/prettier.cjs --write < ../receipts/files.txt
+          xargs node node_modules/eslint/bin/eslint.js --fix --max-warnings 0 < ../receipts/files.txt
           xargs node node_modules/prettier/bin/prettier.cjs --write < ../receipts/files.txt
           git add apps/desktop/src
           git diff --cached --check
