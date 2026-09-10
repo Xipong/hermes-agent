@@ -1,12 +1,21 @@
-"""Fork-only second-pass validation: real Git Bash on Windows, policy tests,
-and strict gates. Neither this harness nor its workflow enters either PR.
+"""Fork-only validation: native Windows, routing policy and strict gates.
+Neither this harness nor its workflow enters either product PR.
 """
 from pathlib import Path
+import sys
+
+# The canonical runner emits UTF-8 box drawing; Windows' redirected console
+# encoding must not terminate the harness while it prints a captured log.
+sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
 
 def harden_helper():
     p = ROOT / 'tools/mcp_windows.py'
     text = p.read_text(encoding='utf-8')
+    # PowerShell exposes Task<VoidTaskResult>.GetResult() as a pipeline object
+    # even though C# sees a void operation. stdout must remain protocol-only.
+    text = text.replace('    $connect.GetAwaiter().GetResult()', '    [void]$connect.GetAwaiter().GetResult()')
     start = text.index('    if not isinstance(network, str)')
     end = text.index('    if not wsl or endpoint is None or network == "local":', start)
     validation = text[start:end]
