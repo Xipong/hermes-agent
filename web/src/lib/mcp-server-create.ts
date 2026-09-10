@@ -1,10 +1,12 @@
-import type { McpHttpAuth, McpServerCreate } from "@/lib/api";
+import type { McpHttpAuth, McpNetwork, McpServerCreate } from "@/lib/api";
 
 export type McpTransport = "http" | "stdio";
 
 export interface McpServerDraft {
   name: string;
   transport: McpTransport;
+  network: McpNetwork;
+  httpTransport: "http" | "sse";
   url: string;
   httpAuth: McpHttpAuth;
   bearerToken: string;
@@ -17,6 +19,8 @@ export function emptyMcpServerDraft(): McpServerDraft {
   return {
     name: "",
     transport: "http",
+    network: "auto",
+    httpTransport: "http",
     url: "",
     httpAuth: "none",
     bearerToken: "",
@@ -59,6 +63,9 @@ export function buildMcpServerCreate(draft: McpServerDraft): McpServerCreate {
     }
 
     const server: McpServerCreate = { name, url };
+    // Omitted defaults remain compatible with older backends/configs.
+    if (draft.network !== "auto") server.network = draft.network;
+    if (draft.httpTransport === "sse") server.transport = "sse";
     if (draft.httpAuth !== "none") server.auth = draft.httpAuth;
     if (draft.httpAuth === "header") {
       server.bearer_token = draft.bearerToken;
