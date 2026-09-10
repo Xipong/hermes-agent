@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-import shutil
 import subprocess
 import sys
 
@@ -39,6 +38,7 @@ TS_CHANGED = [
     "apps/desktop/src/lib/mcp-probe-cache.ts",
     "web/src/components/McpNetworkFields.tsx",
     "web/src/lib/mcp-network.test.ts",
+    "web/src/lib/mcp-server-create.test.ts",
     "web/src/lib/mcp-server-create.ts",
 ]
 
@@ -72,6 +72,72 @@ def reset() -> None:
     subprocess.run(["git", "reset", "--hard", "HEAD"], check=True)
 
 
+def update_existing_web_expectations() -> None:
+    """New structured entries explicitly persist auto; update old exact-object tests."""
+    path = ROOT / "web/src/lib/mcp-server-create.test.ts"
+    text = path.read_text(encoding="utf-8")
+    replacements = {
+        '      url: "https://mcp.linear.app/mcp",\n      auth:': (
+            '      url: "https://mcp.linear.app/mcp",\n      network: "auto",\n      auth:'
+        ),
+        '      url: "https://example.com/mcp",\n      auth: "oauth",': (
+            '      url: "https://example.com/mcp",\n      network: "auto",\n      auth: "oauth",'
+        ),
+        '      name: "public",\n      url: "https://example.com/mcp",\n    });': (
+            '      name: "public",\n      url: "https://example.com/mcp",\n'
+            '      network: "auto",\n    });'
+        ),
+    }
+    for old, new in replacements.items():
+        assert text.count(old) == 1, old
+        text = text.replace(old, new)
+    path.write_text(text, encoding="utf-8")
+
+
+def format_python() -> dict[str, int]:
+    results = {
+        "ruff-format-write": run(
+            "ruff-format-write", ["uv", "run", "--no-sync", "ruff", "format", *PYTHON_CHANGED]
+        )
+    }
+    results["ruff-format-check"] = run(
+        "ruff-format-check",
+        ["uv", "run", "--no-sync", "ruff", "format", "--check", *PYTHON_CHANGED],
+    )
+    results["ruff"] = run(
+        "ruff", ["uv", "run", "--no-sync", "ruff", "check", *PYTHON_CHANGED]
+    )
+    return results
+
+
+def format_frontend() -> dict[str, int]:
+    results = {
+        "prettier-write": run(
+            "prettier-write",
+            ["node", "node_modules/prettier/bin/prettier.cjs", "--write", *TS_CHANGED],
+        ),
+        "eslint-fix": run(
+            "eslint-fix",
+            ["node", "node_modules/eslint/bin/eslint.js", "--fix", *TS_CHANGED],
+        ),
+    }
+    results["prettier-check"] = run(
+        "prettier-check",
+        ["node", "node_modules/prettier/bin/prettier.cjs", "--check", *TS_CHANGED],
+    )
+    results["eslint-check"] = run(
+        "eslint-check",
+        [
+            "node",
+            "node_modules/eslint/bin/eslint.js",
+            "--max-warnings",
+            "0",
+            *TS_CHANGED,
+        ],
+    )
+    return results
+
+
 mode = sys.argv[1]
 results: dict[str, int] = {}
 bash = (
@@ -95,11 +161,9 @@ if mode == "python":
     results["red"] = run("red", pytest + red_tests + ["-q", "--tb=short"])
     reset()
     apply_patch()
+    update_existing_web_expectations()
+    results.update(format_python())
 
-    results["ruff-format"] = run(
-        "ruff-format", ["uv", "run", "--no-sync", "ruff", "format", "--check", *PYTHON_CHANGED]
-    )
-    results["ruff"] = run("ruff", ["uv", "run", "--no-sync", "ruff", "check", *PYTHON_CHANGED])
     selection = [
         "tests/tools/test_mcp_windows.py",
         "tests/tools/test_mcp_windows_policy.py",
@@ -139,11 +203,10 @@ elif mode == "ui":
     )
     reset()
     apply_patch()
+    update_existing_web_expectations()
+    results.update(format_python())
+    results.update(format_frontend())
 
-    prettier = ["node", "node_modules/prettier/bin/prettier.cjs", "--check", *TS_CHANGED]
-    eslint = ["node", "node_modules/eslint/bin/eslint.js", "--max-warnings", "0", *TS_CHANGED]
-    results["prettier"] = run("prettier", prettier)
-    results["eslint"] = run("eslint", eslint)
     results["green-desktop"] = run(
         "green-desktop",
         [
@@ -172,18 +235,25 @@ elif mode == "ui":
         cwd=ROOT / "web",
     )
     results["desktop-typecheck"] = run(
-        "desktop-typecheck", ["node", "node_modules/typescript/bin/tsc", "-p", "apps/desktop", "--noEmit"]
+        "desktop-typecheck",
+        ["node", "node_modules/typescript/bin/tsc", "-p", "apps/desktop", "--noEmit"],
     )
     results["web-typecheck"] = run(
-        "web-typecheck", ["node", "node_modules/typescript/bin/tsc", "-p", "web", "--noEmit"]
+        "web-typecheck",
+        ["node", "node_modules/typescript/bin/tsc", "-p", "web", "--noEmit"],
     )
 else:
     raise ValueError(mode)
 
 results["diff-check"] = run("diff-check", ["git", "diff", "--check"])
 (OUT / "candidate.patch").write_bytes(subprocess.check_output(["git", "diff", "--binary"]))
+(OUT / "python.patch").write_bytes(
+    subprocess.check_output(["git", "diff", "--binary", "--", "*.py"])
+)
 (OUT / "results.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
-(OUT / "stat.txt").write_text(subprocess.check_output(["git", "diff", "--stat"], text=True), encoding="utf-8")
+(OUT / "stat.txt").write_text(
+    subprocess.check_output(["git", "diff", "--stat"], text=True), encoding="utf-8"
+)
 print(results, flush=True)
 assert all(value != 0 for key, value in results.items() if key.startswith("red")), results
 assert all(value == 0 for key, value in results.items() if not key.startswith("red")), results
