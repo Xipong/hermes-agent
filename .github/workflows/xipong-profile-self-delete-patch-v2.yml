@@ -1,0 +1,134 @@
+name: Apply dashboard profile self-delete guard v2
+
+on:
+  push:
+    branches:
+      - fix/dashboard-reject-profile-self-delete
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply focused patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          source = Path('hermes_cli/web_routers/profiles.py')
+          text = source.read_text(encoding='utf-8')
+          old = '''@router.delete("/api/profiles/{name}")
+async def delete_profile_endpoint(name: str):
+    """The dashboard collects the user's confirmation in its own dialog, so ``yes=True``
+    always skips the CLI's interactive prompt."""
+    from hermes_cli import profiles as profiles_mod
+    with _profile_errors("DELETE /api/profiles/%s failed", name):
+        # Polls a running gateway's PID for up to 10 s, then rmtree()s the directory; on the
+        # loop that parks every request past the desktop's 10 s WebSocket ready-probe.
+        path = await run_in_threadpool(profiles_mod.delete_profile, name, yes=True)
+    return {"ok": True, "path": str(path)}
+'''
+          new = '''@router.delete("/api/profiles/{name}")
+async def delete_profile_endpoint(name: str):
+    """Delete a profile from a different management backend.
+
+    A dashboard serving from the target profile cannot safely remove its own HERMES_HOME:
+    the request returns while that process, its logging handlers and other profile-scoped
+    resources keep running against a directory that no longer exists (#103777).
+    """
+    from hermes_cli import profiles as profiles_mod
+    canon = profiles_mod.normalize_profile_name(name)
+    if canon != "default" and profiles_mod.profile_matches_home(canon):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Cannot delete profile '{canon}' from a dashboard currently running as that profile. "
+                "Open the default profile's dashboard or stop this backend, then retry."
+            ),
+        )
+    with _profile_errors("DELETE /api/profiles/%s failed", name):
+        # Polls a running gateway's PID for up to 10 s, then rmtree()s the directory; on the
+        # loop that parks every request past the desktop's 10 s WebSocket ready-probe.
+        path = await run_in_threadpool(profiles_mod.delete_profile, canon, yes=True)
+    return {"ok": True, "path": str(path)}
+'''
+          if text.count(old) != 1:
+              raise SystemExit(f'endpoint replacement count={text.count(old)}')
+          source.write_text(text.replace(old, new), encoding='utf-8')
+
+          Path('tests/hermes_cli/test_web_profile_self_delete.py').write_text('''"""Dashboard deletion cannot remove the serving backend's own profile home."""\n\nfrom __future__ import annotations\n\nimport asyncio\n\nimport pytest\n\npytest.importorskip("fastapi")\nfrom fastapi import HTTPException  # noqa: E402\n\nfrom hermes_cli import profiles as profiles_mod  # noqa: E402\nfrom hermes_cli.web_routers.profiles import delete_profile_endpoint  # noqa: E402\n\n\ndef test_delete_rejects_the_serving_profiles_own_home(monkeypatch):\n    deleted = []\n    monkeypatch.setattr(profiles_mod, "profile_matches_home", lambda name: name == "demo")\n    monkeypatch.setattr(profiles_mod, "delete_profile", lambda name, yes=False: deleted.append((name, yes)))\n\n    with pytest.raises(HTTPException) as raised:\n        asyncio.run(delete_profile_endpoint("DeMo"))\n\n    assert raised.value.status_code == 409\n    assert "currently running as that profile" in raised.value.detail\n    assert deleted == []\n\n\ndef test_delete_still_delegates_for_a_different_profile(monkeypatch, tmp_path):\n    target = tmp_path / "profiles" / "demo"\n    deleted = []\n    monkeypatch.setattr(profiles_mod, "profile_matches_home", lambda name: False)\n\n    def fake_delete(name, yes=False):\n        deleted.append((name, yes))\n        return target\n\n    monkeypatch.setattr(profiles_mod, "delete_profile", fake_delete)\n    result = asyncio.run(delete_profile_endpoint("DeMo"))\n\n    assert result == {"ok": True, "path": str(target)}\n    assert deleted == [("demo", True)]\n''', encoding='utf-8')
+
+          for workflow in (
+              '.github/workflows/xipong-profile-self-delete-patch.yml',
+              '.github/workflows/xipong-profile-self-delete-patch-v2.yml',
+          ):
+              Path(workflow).unlink(missing_ok=True)
+          PY
+
+      - name: Compile and smoke-test the guard
+        shell: bash
+        run: |
+          python -m py_compile hermes_cli/web_routers/profiles.py tests/hermes_cli/test_web_profile_self_delete.py
+          python - <<'PY'
+          import ast
+          import asyncio
+          import contextlib
+          import sys
+          import types
+          from pathlib import Path
+
+          tree = ast.parse(Path('hermes_cli/web_routers/profiles.py').read_text(encoding='utf-8'))
+          fn = next(n for n in tree.body if isinstance(n, ast.AsyncFunctionDef) and n.name == 'delete_profile_endpoint')
+          fn.decorator_list = []
+
+          class HTTPException(Exception):
+              def __init__(self, status_code, detail):
+                  self.status_code, self.detail = status_code, detail
+
+          deleted = []
+          profiles = types.SimpleNamespace(
+              normalize_profile_name=lambda value: value.strip().lower(),
+              profile_matches_home=lambda value: value == 'demo',
+              delete_profile=lambda name, yes=False: deleted.append((name, yes)),
+          )
+          package = types.ModuleType('hermes_cli')
+          package.profiles = profiles
+          sys.modules['hermes_cli'] = package
+
+          async def run_in_threadpool(func, *args, **kwargs):
+              return func(*args, **kwargs)
+
+          ns = {
+              'HTTPException': HTTPException,
+              '_profile_errors': lambda *a, **k: contextlib.nullcontext(),
+              'run_in_threadpool': run_in_threadpool,
+          }
+          exec(compile(ast.Module(body=[fn], type_ignores=[]), '<endpoint>', 'exec'), ns)
+          try:
+              asyncio.run(ns['delete_profile_endpoint']('DeMo'))
+          except HTTPException as exc:
+              assert exc.status_code == 409
+          else:
+              raise AssertionError('self-delete was admitted')
+          assert deleted == []
+
+          profiles.profile_matches_home = lambda value: False
+          profiles.delete_profile = lambda name, yes=False: Path('/tmp') / name
+          assert asyncio.run(ns['delete_profile_endpoint']('DeMo')) == {'ok': True, 'path': '/tmp/demo'}
+          PY
+
+      - name: Commit focused patch
+        shell: bash
+        run: |
+          git config user.name "Xipong"
+          git config user.email "217837358+Xipong@users.noreply.github.com"
+          git add -A
+          git commit -m "fix(dashboard): reject deleting the serving profile [profile-self-delete-patch-applied]"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
