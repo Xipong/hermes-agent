@@ -1,38 +1,35 @@
-import { useEffect, useRef, useState } from "react";
-import { Brain, Eye, Gauge, Lightbulb, Wrench } from "lucide-react";
-import { Spinner } from "@nous-research/ui/ui/components/spinner";
-import { api } from "@/lib/api";
-import type { ModelInfoResponse } from "@/lib/api";
-import { formatTokenCount } from "@/lib/format";
+import { useEffect, useRef, useState } from 'react'
+import { Brain, Eye, Gauge, Lightbulb, Wrench } from 'lucide-react'
+import { Spinner } from '@nous-research/ui/ui/components/spinner'
+import { api } from '@/lib/api'
+import type { ModelInfoResponse } from '@/lib/api-types'
+import { formatTokenCount } from '@/lib/format'
 
 interface ModelInfoCardProps {
   /** Current model string from config state — used to detect changes */
-  currentModel: string;
+  currentModel: string
   /** Bumped after config saves to trigger re-fetch */
-  refreshKey?: number;
+  refreshKey?: number
 }
 
-export function ModelInfoCard({
-  currentModel,
-  refreshKey = 0,
-}: ModelInfoCardProps) {
-  const [info, setInfo] = useState<ModelInfoResponse | null>(null);
-  const [loading, setLoading] = useState(false);
-  const lastFetchKeyRef = useRef("");
+export function ModelInfoCard({ currentModel, refreshKey = 0 }: ModelInfoCardProps) {
+  const [info, setInfo] = useState<ModelInfoResponse | null>(null)
+  const [loading, setLoading] = useState(false)
+  const lastFetchKeyRef = useRef('')
 
   useEffect(() => {
-    if (!currentModel) return;
+    if (!currentModel) return
     // Re-fetch when model changes OR when refreshKey bumps (after save)
-    const fetchKey = `${currentModel}:${refreshKey}`;
-    if (fetchKey === lastFetchKeyRef.current) return;
-    lastFetchKeyRef.current = fetchKey;
-    setLoading(true);
+    const fetchKey = `${currentModel}:${refreshKey}`
+    if (fetchKey === lastFetchKeyRef.current) return
+    lastFetchKeyRef.current = fetchKey
+    setLoading(true)
     api
       .getModelInfo()
       .then(setInfo)
       .catch(() => setInfo(null))
-      .finally(() => setLoading(false));
-  }, [currentModel, refreshKey]);
+      .finally(() => setLoading(false))
+  }, [currentModel, refreshKey])
 
   if (loading) {
     return (
@@ -40,13 +37,13 @@ export function ModelInfoCard({
         <Spinner className="text-xs" />
         Loading model info…
       </div>
-    );
+    )
   }
 
-  if (!info || !info.model || info.effective_context_length <= 0) return null;
+  if (!info || !info.model || info.effective_context_length <= 0) return null
 
-  const caps = info.capabilities;
-  const hasCaps = caps && Object.keys(caps).length > 0;
+  const caps = info.capabilities
+  const hasCaps = caps && Object.keys(caps).length > 0
 
   return (
     <div className="border border-border/60 bg-muted/30 px-3 py-2.5 space-y-2">
@@ -64,9 +61,7 @@ export function ModelInfoCard({
               (override — auto: {formatTokenCount(info.auto_context_length)})
             </span>
           ) : (
-            <span className="text-text-tertiary text-xs">
-              auto-detected
-            </span>
+            <span className="text-text-tertiary text-xs">auto-detected</span>
           )}
         </div>
       </div>
@@ -77,9 +72,7 @@ export function ModelInfoCard({
             <Lightbulb className="h-3.5 w-3.5" />
             <span className="font-medium">Max Output</span>
           </div>
-          <span className="font-mono font-semibold text-foreground">
-            {formatTokenCount(caps.max_output_tokens)}
-          </span>
+          <span className="font-mono font-semibold text-foreground">{formatTokenCount(caps.max_output_tokens)}</span>
         </div>
       )}
 
@@ -108,5 +101,5 @@ export function ModelInfoCard({
         </div>
       )}
     </div>
-  );
+  )
 }
