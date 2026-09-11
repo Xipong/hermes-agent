@@ -31,8 +31,11 @@ jobs:
           npm ci --ignore-scripts
           npm ci --prefix website --ignore-scripts
       - name: Apply the behavior-preserving split
+        shell: bash
         working-directory: source
-        run: python ../input/.refactor/apply.py
+        run: |
+          sed -i 's/TYPE_IMPORT_RE_TEMPLATE\.format(source=re\.escape(source))/TYPE_IMPORT_RE_TEMPLATE.replace("{source}", re.escape(source))/' ../input/.refactor/apply.py
+          python ../input/.refactor/apply.py
       - name: Format and lint changed TypeScript
         shell: bash
         working-directory: source
