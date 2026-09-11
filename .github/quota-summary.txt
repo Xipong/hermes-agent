@@ -1,0 +1,202 @@
++ git fetch origin fix/gemini-model-quota-108656
++ git rev-parse FETCH_HEAD
++ git worktree add --detach /tmp/hermes-quota-followup 706054b207d0331639d9371ed8f36f642aa38125
++ bash scripts/run_tests.sh tests/agent/test_auxiliary_quota_recovery.py -q --tb=short
+[100.0% |     3/~3 | ✓ 6 | ✗26] ✗ tests/agent/test_auxiliary_quota_recovery.py (6✓ 26✗, 17.1s)
+=== Summary: 1 files, 6 tests passed, 26 failed (100% complete) in 17.1s (8 workers) ===
+E   agent.gemini_native_adapter.GeminiAPIError: Gemini HTTP 429 (RESOURCE_EXHAUSTED): You exceeded your current quota, please check your plan and billing details.
+E   * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, limit: 250000, model: gemini-test-limited
+E   Please retry in 48.100581664s.
+E   
+E   Google reported a free tier quota limit for this request. Limits differ by model and quota window; this does not by itself establish that the daily allowance or API key is exhausted. Check the project's model quotas and billing: https://aistudio.google.com/apikey
+E   agent.gemini_native_adapter.GeminiAPIError: Gemini HTTP 429 (RESOURCE_EXHAUSTED): You exceeded your current quota, please check your plan and billing details.
+E   * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, limit: 250000, model: gemini-test-limited
+E   Please retry in 48.100581664s.
+E   
+E   Google reported a free tier quota limit for this request. Limits differ by model and quota window; this does not by itself establish that the daily allowance or API key is exhausted. Check the project's model quotas and billing: https://aistudio.google.com/apikey
+E   agent.gemini_native_adapter.GeminiAPIError: Gemini HTTP 429 (RESOURCE_EXHAUSTED): You exceeded your current quota, please check your plan and billing details.
+E   * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, limit: 250000, model: gemini-test-limited
+E   Please retry in 48.100581664s.
+E   
+E   Google reported a free tier quota limit for this request. Limits differ by model and quota window; this does not by itself establish that the daily allowance or API key is exhausted. Check the project's model quotas and billing: https://aistudio.google.com/apikey
+E   agent.gemini_native_adapter.GeminiAPIError: Gemini HTTP 429 (RESOURCE_EXHAUSTED): You exceeded your current quota, please check your plan and billing details.
+E   * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-test-limited
+E   Please retry in 48.100581664s.
+E   
+E   Google reported a free tier quota limit for this request. Limits differ by model and quota window; this does not by itself establish that the daily allowance or API key is exhausted. Check the project's model quotas and billing: https://aistudio.google.com/apikey
+E   agent.gemini_native_adapter.GeminiAPIError: Gemini HTTP 429 (RESOURCE_EXHAUSTED): You exceeded your current quota, please check your plan and billing details.
+E   * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-test-limited
+E   Please retry in 48.100581664s.
+E   
+E   Google reported a free tier quota limit for this request. Limits differ by model and quota window; this does not by itself establish that the daily allowance or API key is exhausted. Check the project's model quotas and billing: https://aistudio.google.com/apikey
+E   agent.gemini_native_adapter.GeminiAPIError: Gemini HTTP 429 (RESOURCE_EXHAUSTED): You exceeded your current quota, please check your plan and billing details.
+E   * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-test-limited
+E   Please retry in 48.100581664s.
+E   
+E   Google reported a free tier quota limit for this request. Limits differ by model and quota window; this does not by itself establish that the daily allowance or API key is exhausted. Check the project's model quotas and billing: https://aistudio.google.com/apikey
+E   agent.gemini_native_adapter.GeminiAPIError: Gemini HTTP 429 (RESOURCE_EXHAUSTED): You exceeded your current quota, please check your plan and billing details.
+E   * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, limit: 0, model: gemini-test-limited
+E   Please retry in 48.100581664s.
+E   
+E   This model has zero quota allowance for the project; a retry delay does not guarantee access. Choose an available model or check the project's quota tier.
+E   
+E   Google reported a free tier quota limit for this request. Limits differ by model and quota window; this does not by itself establish that the daily allowance or API key is exhausted. Check the project's model quotas and billing: https://aistudio.google.com/apikey
+E   agent.gemini_native_adapter.GeminiAPIError: Gemini HTTP 429 (RESOURCE_EXHAUSTED): You exceeded your current quota, please check your plan and billing details.
+E   * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, limit: 0, model: gemini-test-limited
+E   Please retry in 48.100581664s.
+E   
+E   This model has zero quota allowance for the project; a retry delay does not guarantee access. Choose an available model or check the project's quota tier.
+E   
+E   Google reported a free tier quota limit for this request. Limits differ by model and quota window; this does not by itself establish that the daily allowance or API key is exhausted. Check the project's model quotas and billing: https://aistudio.google.com/apikey
+E   agent.gemini_native_adapter.GeminiAPIError: Gemini HTTP 429 (RESOURCE_EXHAUSTED): You exceeded your current quota, please check your plan and billing details.
+E   * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, limit: 0, model: gemini-test-limited
+E   Please retry in 48.100581664s.
+E   
+E   This model has zero quota allowance for the project; a retry delay does not guarantee access. Choose an available model or check the project's quota tier.
+E   
+E   Google reported a free tier quota limit for this request. Limits differ by model and quota window; this does not by itself establish that the daily allowance or API key is exhausted. Check the project's model quotas and billing: https://aistudio.google.com/apikey
+E   agent.gemini_native_adapter.GeminiAPIError: Gemini HTTP 429 (RESOURCE_EXHAUSTED): You exceeded your current quota, please check your plan and billing details.
+E   * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, limit: 250000, model: gemini-test-limited
+E   Please retry in 48.100581664s.
+E   
+E   Google reported a free tier quota limit for this request. Limits differ by model and quota window; this does not by itself establish that the daily allowance or API key is exhausted. Check the project's model quotas and billing: https://aistudio.google.com/apikey
+E   agent.gemini_native_adapter.GeminiAPIError: Gemini HTTP 429 (RESOURCE_EXHAUSTED): You exceeded your current quota, please check your plan and billing details.
+E   * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, limit: 250000, model: gemini-test-limited
+E   Please retry in 48.100581664s.
+E   
+E   Google reported a free tier quota limit for this request. Limits differ by model and quota window; this does not by itself establish that the daily allowance or API key is exhausted. Check the project's model quotas and billing: https://aistudio.google.com/apikey
+E   agent.gemini_native_adapter.GeminiAPIError: Gemini HTTP 429 (RESOURCE_EXHAUSTED): You exceeded your current quota, please check your plan and billing details.
+E   * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, limit: 250000, model: gemini-test-limited
+E   Please retry in 48.100581664s.
+E   
+E   Google reported a free tier quota limit for this request. Limits differ by model and quota window; this does not by itself establish that the daily allowance or API key is exhausted. Check the project's model quotas and billing: https://aistudio.google.com/apikey
+E   AssertionError: assert not True
+E    +  where True = <function _is_provider_unhealthy at 0x7f9416cf4680>('nvidia')
+E    +    where <function _is_provider_unhealthy at 0x7f9416cf4680> = aux._is_provider_unhealthy
+E   AssertionError: assert not True
+E    +  where True = <function _is_provider_unhealthy at 0x7f9416cf4680>('nvidia')
+E    +    where <function _is_provider_unhealthy at 0x7f9416cf4680> = aux._is_provider_unhealthy
+E   AssertionError: assert not True
+E    +  where True = <function _is_provider_unhealthy at 0x7f9416cf4680>('nvidia')
+E    +    where <function _is_provider_unhealthy at 0x7f9416cf4680> = aux._is_provider_unhealthy
+E   AssertionError: assert not True
+E    +  where True = <function _is_provider_unhealthy at 0x7f9416cf4680>('nvidia')
+E    +    where <function _is_provider_unhealthy at 0x7f9416cf4680> = aux._is_provider_unhealthy
+E   AssertionError: assert not True
+E    +  where True = <function _is_provider_unhealthy at 0x7f9416cf4680>('nvidia')
+E    +    where <function _is_provider_unhealthy at 0x7f9416cf4680> = aux._is_provider_unhealthy
+E   AssertionError: assert not True
+E    +  where True = <function _is_provider_unhealthy at 0x7f9416cf4680>('nvidia')
+E    +    where <function _is_provider_unhealthy at 0x7f9416cf4680> = aux._is_provider_unhealthy
+E   AssertionError: assert not True
+E    +  where True = <function _is_payment_error at 0x7f9416cf4900>(GeminiAPIError('Gemini HTTP 429 (RESOURCE_EXHAUSTED): You exceeded your current quota, please check your plan and billing details.'))
+E    +    where <function _is_payment_error at 0x7f9416cf4900> = aux._is_payment_error
+E   AssertionError: assert not True
+E    +  where True = <function _is_payment_error at 0x7f9416cf4900>(GeminiAPIError('Gemini HTTP 429 (RESOURCE_EXHAUSTED): You exceeded your current quota, please check your plan and billing details.'))
+E    +    where <function _is_payment_error at 0x7f9416cf4900> = aux._is_payment_error
+E   assert not True
+E    +  where True = <function _is_payment_error at 0x7f9416cf4900>(GeminiAPIError("Gemini HTTP 429 (RESOURCE_EXHAUSTED): You exceeded your current quota, please check your plan and bill...y allowance or API key is exhausted. Check the project's model quotas and billing: https://aistudio.google.com/apikey"))
+E    +    where <function _is_payment_error at 0x7f9416cf4900> = aux._is_payment_error
+E   assert not True
+E    +  where True = <function _is_payment_error at 0x7f9416cf4900>(GeminiAPIError("Gemini HTTP 429 (RESOURCE_EXHAUSTED): You exceeded your current quota, please check your plan and bill...y allowance or API key is exhausted. Check the project's model quotas and billing: https://aistudio.google.com/apikey"))
+E    +    where <function _is_payment_error at 0x7f9416cf4900> = aux._is_payment_error
+E   assert None == 1789170819.392703 ± 0.001
+E     
+E     comparison failed
+E     Obtained: None
+E     Expected: 1789170819.392703 ± 0.001
+E   assert None == 1789170819.5495012 ± 0.001
+E     
+E     comparison failed
+E     Obtained: None
+E     Expected: 1789170819.5495012 ± 0.001
+E   AssertionError: assert not True
+E    +  where True = has_available()
+E    +    where has_available = <agent.credential_pool.CredentialPool object at 0x7f94134cce00>.has_available
+E    +      where <agent.credential_pool.CredentialPool object at 0x7f94134cce00> = load_pool('gemini')
+E   AssertionError: assert 240 is None
+E    +  where 240 = <function _arm_rate_limit_cooldown at 0x7f941369df80>(namespace(provider='gemini', model='gemini-test-healthy', _fallback_activated=True, _primary_runtime={'provider': 'gem...dline=('gemini', 'gemini-test-healthy', 421.255566417), _rate_limited_until=361.255572807, _rate_limit_backoff_count=3), <FailoverReason.upstream_rate_limit: 'upstream_rate_limit'>)
+E    +    where <FailoverReason.upstream_rate_limit: 'upstream_rate_limit'> = FailoverReason.upstream_rate_limit
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[tokens-sync]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[tokens-async]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[tokens-parallel]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[requests-sync]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[requests-async]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[requests-parallel]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[zero-sync]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[zero-async]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[zero-parallel]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[text-sync]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[text-async]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[text-parallel]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[worker-sync]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[worker-async]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[worker-parallel]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[cross-provider-sync]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[cross-provider-async]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[cross-provider-parallel]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[google-retryinfo-1]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[google-retryinfo-4]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[google-mixed-1]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[google-mixed-4]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[nvidia-retryafter-1]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[nvidia-retryafter-4]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[daily-1]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_fallback_model_failure_does_not_extend_primary_quota_deadline[gemini-gemini-test-healthy]
++ bash scripts/run_tests.sh tests/agent/test_auxiliary_anthropic_pool_fallback_regression.py tests/agent/test_auxiliary_client_anthropic_custom.py tests/agent/test_auxiliary_client_azure_foundry.py tests/agent/test_auxiliary_client_base_url_host_validation_52608.py tests/agent/test_auxiliary_client_bootstrap_skew.py tests/agent/test_auxiliary_client_nous_401_cache_key.py tests/agent/test_auxiliary_client_proxy_env.py tests/agent/test_auxiliary_client_resolve_dedup.py tests/agent/test_auxiliary_client_ssl_verify.py tests/agent/test_auxiliary_client_xai_oauth_recovery.py tests/agent/test_credential_pool_anthropic_refresh_race.py tests/agent/test_credential_pool_deferred_refresh.py tests/agent/test_credential_pool_key_rotation.py tests/agent/test_credential_pool_lease_refresh_reselect.py tests/agent/test_credential_pool_no_entries_log_throttle.py tests/agent/test_credential_pool_nous_refresh_stampede.py tests/agent/test_credential_pool_oat_authtype.py tests/agent/test_credential_pool_oauth_writethrough.py tests/agent/test_credential_pool_operations.py tests/agent/test_credential_pool_profile_oauth_fork.py tests/agent/test_credential_pool_provider_boundary.py tests/agent/test_credential_pool_quarantine_locking.py tests/agent/test_credential_pool_routing.py tests/agent/test_credential_pool_sole_cooldown.py tests/agent/test_credential_pool_unmatched_rotation_bound.py tests/agent/test_gemini_alias_native_route.py tests/agent/test_gemini_fast_fallback.py tests/agent/test_gemini_free_tier_gate.py tests/agent/test_gemini_schema.py tests/agent/test_gemini_standard_key_guidance.py tests/agent/test_gemini_type_arrays.py tests/agent/test_rate_limit_tracker.py tests/agent/test_auxiliary_quota_recovery.py tests/agent/test_gemini_quota_recovery.py tests/agent/test_auxiliary_client.py tests/agent/test_error_classifier.py tests/agent/test_credential_pool.py tests/agent/test_gemini_native_adapter.py -q --tb=short
+[  0.5% |     3/~555 | ✓3 | ✗0] ✓ tests/agent/test_auxiliary_anthropic_pool_fallback_regression.py (3✓, 1.4s)
+[  1.8% |    10/~555 | ✓10 | ✗ 0] ✓ tests/agent/test_auxiliary_client_base_url_host_validation_52608.py (7✓, 1.6s)
+[  2.2% |    12/~555 | ✓12 | ✗ 0] ✓ tests/agent/test_auxiliary_client_proxy_env.py (2✓, 1.9s)
+[  2.5% |    14/~555 | ✓14 | ✗ 0] ✓ tests/agent/test_auxiliary_client_bootstrap_skew.py (2✓, 2.0s)
+[  3.1% |    17/~555 | ✓17 | ✗ 0] ✓ tests/agent/test_auxiliary_client_anthropic_custom.py (3✓, 3.1s)
+[  3.4% |    19/~555 | ✓19 | ✗ 0] ✓ tests/agent/test_auxiliary_client_ssl_verify.py (2✓, 1.8s)
+[  4.3% |    24/~555 | ✓24 | ✗ 0] ✓ tests/agent/test_auxiliary_client_resolve_dedup.py (5✓, 2.1s)
+[  5.6% |    31/~555 | ✓31 | ✗ 0] ✓ tests/agent/test_auxiliary_client_azure_foundry.py (7✓, 3.5s)
+[  7.2% |    40/~555 | ✓40 | ✗ 0] ✓ tests/agent/test_auxiliary_client_xai_oauth_recovery.py (9✓, 1.5s)
+[  7.6% |    42/~555 | ✓42 | ✗ 0] ✓ tests/agent/test_auxiliary_client_nous_401_cache_key.py (2✓, 4.0s)
+[  7.9% |    44/~555 | ✓44 | ✗ 0] ✓ tests/agent/test_credential_pool_key_rotation.py (2✓, 1.3s)
+[  8.5% |    47/~555 | ✓47 | ✗ 0] ✓ tests/agent/test_credential_pool_lease_refresh_reselect.py (3✓, 1.6s)
+[  8.8% |    49/~555 | ✓49 | ✗ 0] ✓ tests/agent/test_credential_pool_deferred_refresh.py (2✓, 1.7s)
+[  9.4% |    52/~555 | ✓52 | ✗ 0] ✓ tests/agent/test_credential_pool_no_entries_log_throttle.py (3✓, 1.3s)
+[  9.9% |    55/~555 | ✓55 | ✗ 0] ✓ tests/agent/test_credential_pool_anthropic_refresh_race.py (3✓, 1.9s)
+[ 10.3% |    57/~555 | ✓57 | ✗ 0] ✓ tests/agent/test_credential_pool_oat_authtype.py (2✓, 1.3s)
+[ 11.0% |    61/~555 | ✓64 | ✗ 0] ✓ tests/agent/test_credential_pool_operations.py (7✓, 1.6s)
+[ 11.9% |    66/~555 | ✓69 | ✗ 0] ✓ tests/agent/test_credential_pool_oauth_writethrough.py (5✓, 2.0s)
+[ 16.6% |    92/~555 | ✓99 | ✗ 0] ✓ tests/agent/test_credential_pool_profile_oauth_fork.py (30✓, 2.5s)
+[ 17.1% |    95/~555 | ✓102 | ✗  0] ✓ tests/agent/test_credential_pool_quarantine_locking.py (3✓, 1.3s)
+[ 17.7% |    98/~555 | ✓105 | ✗  0] ✓ tests/agent/test_credential_pool_nous_refresh_stampede.py (3✓, 3.5s)
+[ 19.3% |   107/~555 | ✓114 | ✗  0] ✓ tests/agent/test_credential_pool_provider_boundary.py (9✓, 2.5s)
+[ 21.3% |   118/~555 | ✓125 | ✗  0] ✓ tests/agent/test_credential_pool_sole_cooldown.py (11✓, 1.4s)
+[ 21.6% |   120/~555 | ✓127 | ✗  0] ✓ tests/agent/test_credential_pool_unmatched_rotation_bound.py (2✓, 1.7s)
+[ 22.9% |   127/~555 | ✓134 | ✗  0] ✓ tests/agent/test_gemini_free_tier_gate.py (7✓, 1.5s)
+[ 31.5% |   175/~555 | ✓196 | ✗  0] ✓ tests/agent/test_credential_pool.py (62✓, 9.1s)
+[ 34.6% |   192/~555 | ✓213 | ✗  0] ✓ tests/agent/test_credential_pool_routing.py (17✓, 5.3s)
+[ 35.0% |   194/~555 | ✓215 | ✗  0] ✓ tests/agent/test_gemini_fast_fallback.py (2✓, 3.3s)
+[ 39.6% |   220/~555 | ✓244 | ✗  0] ✓ tests/agent/test_gemini_native_adapter.py (29✓, 1.9s)
+[ 39.8% |   221/~555 | ✓245 | ✗  0] ✓ tests/agent/test_gemini_alias_native_route.py (1✓, 4.7s)
+[ 41.4% |   230/~555 | ✓254 | ✗  0] ✓ tests/agent/test_gemini_schema.py (9✓, 2.1s)
+[ 43.1% |   239/~555 | ✓263 | ✗  0] ✓ tests/agent/test_rate_limit_tracker.py (9✓, 1.0s)
+[ 44.5% |   247/~555 | ✓271 | ✗  0] ✓ tests/agent/test_gemini_standard_key_guidance.py (8✓, 2.7s)
+[ 44.9% |   249/~555 | ✓370 | ✗  0] ✓ tests/agent/test_gemini_type_arrays.py (99✓, 2.2s)
+[ 45.4% |   252/~555 | ✓402 | ✗  0] ✓ tests/agent/test_auxiliary_quota_recovery.py (32✓, 15.1s)
+[ 45.8% |   254/~555 | ✓429 | ✗  0] ✓ tests/agent/test_gemini_quota_recovery.py (27✓, 7.1s)
+[ 78.7% |   437/~555 | ✓633 | ✗  0] ✓ tests/agent/test_auxiliary_client.py (204✓, 20.1s)
+[100.0% |   555/~555 | ✓782 | ✗  4] ✗ tests/agent/test_error_classifier.py (149✓ 4✗, 17.6s)
+=== Summary: 38 files, 782 tests passed, 4 failed (100% complete) in 25.9s (8 workers) ===
+E   AssertionError: assert <FailoverReason.overloaded: 'overloaded'> == <FailoverReason.rate_limit: 'rate_limit'>
+E    +  where <FailoverReason.overloaded: 'overloaded'> = ClassifiedError(reason=<FailoverReason.overloaded: 'overloaded'>, status_code=None, provider='nvidia', model='nvidia/n...2/32)', error_context={}, retryable=True, should_compress=False, should_rotate_credential=False, should_fallback=False).reason
+E    +  and   <FailoverReason.rate_limit: 'rate_limit'> = FailoverReason.rate_limit
+E   AssertionError: assert <FailoverReason.overloaded: 'overloaded'> == <FailoverReason.rate_limit: 'rate_limit'>
+E    +  where <FailoverReason.overloaded: 'overloaded'> = ClassifiedError(reason=<FailoverReason.overloaded: 'overloaded'>, status_code=None, provider='nvidia', model='nvidia/n...2/32)', error_context={}, retryable=True, should_compress=False, should_rotate_credential=False, should_fallback=False).reason
+E    +  and   <FailoverReason.rate_limit: 'rate_limit'> = FailoverReason.rate_limit
+E   AssertionError: assert <FailoverReason.overloaded: 'overloaded'> == <FailoverReason.rate_limit: 'rate_limit'>
+E    +  where <FailoverReason.overloaded: 'overloaded'> = ClassifiedError(reason=<FailoverReason.overloaded: 'overloaded'>, status_code=None, provider='nvidia', model='nvidia/n...2/32)', error_context={}, retryable=True, should_compress=False, should_rotate_credential=False, should_fallback=False).reason
+E    +  and   <FailoverReason.rate_limit: 'rate_limit'> = FailoverReason.rate_limit
+E   AssertionError: assert <FailoverReason.overloaded: 'overloaded'> == <FailoverReason.rate_limit: 'rate_limit'>
+E    +  where <FailoverReason.overloaded: 'overloaded'> = ClassifiedError(reason=<FailoverReason.overloaded: 'overloaded'>, status_code=None, provider='nvidia', model='nvidia/n...2/32)', error_context={}, retryable=True, should_compress=False, should_rotate_credential=False, should_fallback=False).reason
+E    +  and   <FailoverReason.rate_limit: 'rate_limit'> = FailoverReason.rate_limit
+FAILED tests/agent/test_error_classifier.py::TestClassifyApiError::test_resource_exhausted_separator_variants_without_status[resource exhausted]
+FAILED tests/agent/test_error_classifier.py::TestClassifyApiError::test_resource_exhausted_separator_variants_without_status[RESOURCE_EXHAUSTED]
+FAILED tests/agent/test_error_classifier.py::TestClassifyApiError::test_resource_exhausted_separator_variants_without_status[ResourceExhausted]
+FAILED tests/agent/test_error_classifier.py::TestClassifyApiError::test_resource_exhausted_separator_variants_without_status[resource-exhausted]
+WORKBENCH_ERROR: RuntimeError: command failed (1): ['bash', 'scripts/run_tests.sh', 'tests/agent/test_auxiliary_anthropic_pool_fallback_regression.py', 'tests/agent/test_auxiliary_client_anthropic_custom.py', 'tests/agent/test_auxiliary_client_azure_foundry.py', 'tests/agent/test_auxiliary_client_base_url_host_validation_52608.py', 'tests/agent/test_auxiliary_client_bootstrap_skew.py', 'tests/agent/test_auxiliary_client_nous_401_cache_key.py', 'tests/agent/test_auxiliary_client_proxy_env.py', 'tests/agent/test_auxiliary_client_resolve_dedup.py', 'tests/agent/test_auxiliary_client_ssl_verify.py', 'tests/agent/test_auxiliary_client_xai_oauth_recovery.py', 'tests/agent/test_credential_pool_anthropic_refresh_race.py', 'tests/agent/test_credential_pool_deferred_refresh.py', 'tests/agent/test_credential_pool_key_rotation.py', 'tests/agent/test_credential_pool_lease_refresh_reselect.py', 'tests/agent/test_credential_pool_no_entries_log_throttle.py', 'tests/agent/test_credential_pool_nous_refresh_stampede.py', 'tests/agent/test_credential_pool_oat_authtype.py', 'tests/agent/test_credential_pool_oauth_writethrough.py', 'tests/agent/test_credential_pool_operations.py', 'tests/agent/test_credential_pool_profile_oauth_fork.py', 'tests/agent/test_credential_pool_provider_boundary.py', 'tests/agent/test_credential_pool_quarantine_locking.py', 'tests/agent/test_credential_pool_routing.py', 'tests/agent/test_credential_pool_sole_cooldown.py', 'tests/agent/test_credential_pool_unmatched_rotation_bound.py', 'tests/agent/test_gemini_alias_native_route.py', 'tests/agent/test_gemini_fast_fallback.py', 'tests/agent/test_gemini_free_tier_gate.py', 'tests/agent/test_gemini_schema.py', 'tests/agent/test_gemini_standard_key_guidance.py', 'tests/agent/test_gemini_type_arrays.py', 'tests/agent/test_rate_limit_tracker.py', 'tests/agent/test_auxiliary_quota_recovery.py', 'tests/agent/test_gemini_quota_recovery.py', 'tests/agent/test_auxiliary_client.py', 'tests/agent/test_error_classifier.py', 'tests/agent/test_credential_pool.py', 'tests/agent/test_gemini_native_adapter.py', '-q', '--tb=short']

@@ -8,12 +8,6 @@ From https://github.com/Xipong/hermes-agent
 
 + git worktree add --detach /tmp/hermes-quota-followup 706054b207d0331639d9371ed8f36f642aa38125
 Preparing worktree (detached HEAD 706054b207)
-Updating files:  96% (12292/12695)
-Updating files:  97% (12315/12695)
-Updating files:  98% (12442/12695)
-Updating files:  99% (12569/12695)
-Updating files: 100% (12695/12695)
-Updating files: 100% (12695/12695), done.
 HEAD is now at 706054b207 fix(gemini): preserve model quota scope and provider retry deadlines
 
 + bash scripts/run_tests.sh tests/agent/test_auxiliary_quota_recovery.py -q --tb=short
@@ -21,17 +15,12 @@ HEAD is now at 706054b207 fix(gemini): preserve model quota scope and provider r
   (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)
 ▶ pre-compiling bytecode cache
 ▶ launching test runner
-Discovered 1 test files (~2 tests) under ['tests/agent/test_auxiliary_quota_recovery.py']; running with -j 8
-[100.0% |     2/~2 | ✓ 3 | ✗21] ✗ tests/agent/test_auxiliary_quota_recovery.py (3✓ 21✗, 13.8s)
+Discovered 1 test files (~3 tests) under ['tests/agent/test_auxiliary_quota_recovery.py']; running with -j 8
+[100.0% |     3/~3 | ✓ 6 | ✗26] ✗ tests/agent/test_auxiliary_quota_recovery.py (6✓ 26✗, 17.1s)
 
   ╔╍ Failed: tests/agent/test_auxiliary_quota_recovery.py ╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍
-  ║ tests/agent/test_auxiliary_quota_recovery.py:201: in test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls
-  ║     assert persisted.last_error_reset_at == pytest.approx(now[0] + delay)
-  ║ E   assert None == 1789170522.1460488 ± 1.8e+03
-  ║ E     
-  ║ E     comparison failed
-  ║ E     Obtained: None
-  ║ E     Expected: 1789170522.1460488 ± 1.8e+03
+  ║ E    +  where 240 = <function _arm_rate_limit_cooldown at 0x7f941369df80>(namespace(provider='gemini', model='gemini-test-healthy', _fallback_activated=True, _primary_runtime={'provider': 'gem...dline=('gemini', 'gemini-test-healthy', 421.255566417), _rate_limited_until=361.255572807, _rate_limit_backoff_count=3), <FailoverReason.upstream_rate_limit: 'upstream_rate_limit'>)
+  ║ E    +    where <FailoverReason.upstream_rate_limit: 'upstream_rate_limit'> = FailoverReason.upstream_rate_limit
   ║ =========================== short test summary info ============================
   ║ FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[tokens-sync]
   ║ FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[tokens-async]
@@ -51,30 +40,35 @@ Discovered 1 test files (~2 tests) under ['tests/agent/test_auxiliary_quota_reco
   ║ FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[cross-provider-sync]
   ║ FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[cross-provider-async]
   ║ FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[cross-provider-parallel]
-  ║ FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[google-retryinfo]
-  ║ FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[google-mixed]
-  ║ FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[nvidia-retryafter]
-  ║ 21 failed, 3 passed in 13.01s
+  ║ FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[google-retryinfo-1]
+  ║ FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[google-retryinfo-4]
+  ║ FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[google-mixed-1]
+  ║ FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[google-mixed-4]
+  ║ FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[nvidia-retryafter-1]
+  ║ FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[nvidia-retryafter-4]
+  ║ FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[daily-1]
+  ║ FAILED tests/agent/test_auxiliary_quota_recovery.py::test_fallback_model_failure_does_not_extend_primary_quota_deadline[gemini-gemini-test-healthy]
+  ║ 26 failed, 6 passed in 16.08s
   ║
   ║  Repro: python -m pytest tests/agent/test_auxiliary_quota_recovery.py -q --tb=short
   ╚╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍
 
 
-=== Summary: 1 files, 3 tests passed, 21 failed (100% complete) in 13.8s (8 workers) ===
+=== Summary: 1 files, 6 tests passed, 26 failed (100% complete) in 17.1s (8 workers) ===
   Durations cached to test_durations.json (1 files)
 
 === Per-file subprocess time distribution ===
   Files:   1
-  Total subprocess CPU-wall: 13.8s  (runner wall: 13.8s, parallelism: 8x)
-  P50: 13.81s  P90: 13.81s  P95: 13.81s  P99: 13.81s  Max: 13.81s
+  Total subprocess CPU-wall: 17.1s  (runner wall: 17.1s, parallelism: 8x)
+  P50: 17.14s  P90: 17.14s  P95: 17.14s  P99: 17.14s  Max: 17.14s
   <1s: 0 files (0%)  <2s: 0 files (0%)
   Top 10 slowest:
-     13.81s  tests/agent/test_auxiliary_quota_recovery.py
+     17.14s  tests/agent/test_auxiliary_quota_recovery.py
 
 === Failure output ===
 
 --- tests/agent/test_auxiliary_quota_recovery.py ---
-FFFFFFFFFFFFFFFFFFFFF...                                                 [100%]
+FFFFFFFFFFFFFFFFFFFFFFFF..F...F.                                         [100%]
 =================================== FAILURES ===================================
 _ test_auxiliary_quota_keeps_other_routes_and_credentials_usable[tokens-sync] __
 tests/agent/test_auxiliary_quota_recovery.py:156: in test_auxiliary_quota_keeps_other_routes_and_credentials_usable
@@ -120,7 +114,7 @@ E   Please retry in 48.100581664s.
 E   
 E   Google reported a free tier quota limit for this request. Limits differ by model and quota window; this does not by itself establish that the daily allowance or API key is exhausted. Check the project's model quotas and billing: https://aistudio.google.com/apikey
 ------------------------------ Captured log call -------------------------------
-WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:43.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 00:02:38.
 WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference: payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
 _ test_auxiliary_quota_keeps_other_routes_and_credentials_usable[tokens-async] _
 tests/agent/test_auxiliary_quota_recovery.py:156: in test_auxiliary_quota_keeps_other_routes_and_credentials_usable
@@ -176,7 +170,7 @@ E   Please retry in 48.100581664s.
 E   
 E   Google reported a free tier quota limit for this request. Limits differ by model and quota window; this does not by itself establish that the daily allowance or API key is exhausted. Check the project's model quotas and billing: https://aistudio.google.com/apikey
 ------------------------------ Captured log call -------------------------------
-WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:43.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 00:02:39.
 WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference (async): payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
 _ test_auxiliary_quota_keeps_other_routes_and_credentials_usable[tokens-parallel] _
 tests/agent/test_auxiliary_quota_recovery.py:153: in test_auxiliary_quota_keeps_other_routes_and_credentials_usable
@@ -239,13 +233,13 @@ E   Please retry in 48.100581664s.
 E   
 E   Google reported a free tier quota limit for this request. Limits differ by model and quota window; this does not by itself establish that the daily allowance or API key is exhausted. Check the project's model quotas and billing: https://aistudio.google.com/apikey
 ------------------------------ Captured log call -------------------------------
-WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:44.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 00:02:39.
 WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference: payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
-WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:44.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 00:02:39.
 WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference: payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
-WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:44.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 00:02:39.
 WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference: payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
-WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:44.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 00:02:39.
 WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference: payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
 _ test_auxiliary_quota_keeps_other_routes_and_credentials_usable[requests-sync] _
 tests/agent/test_auxiliary_quota_recovery.py:156: in test_auxiliary_quota_keeps_other_routes_and_credentials_usable
@@ -291,7 +285,7 @@ E   Please retry in 48.100581664s.
 E   
 E   Google reported a free tier quota limit for this request. Limits differ by model and quota window; this does not by itself establish that the daily allowance or API key is exhausted. Check the project's model quotas and billing: https://aistudio.google.com/apikey
 ------------------------------ Captured log call -------------------------------
-WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:45.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 00:02:40.
 WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference: payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
 _ test_auxiliary_quota_keeps_other_routes_and_credentials_usable[requests-async] _
 tests/agent/test_auxiliary_quota_recovery.py:156: in test_auxiliary_quota_keeps_other_routes_and_credentials_usable
@@ -347,7 +341,7 @@ E   Please retry in 48.100581664s.
 E   
 E   Google reported a free tier quota limit for this request. Limits differ by model and quota window; this does not by itself establish that the daily allowance or API key is exhausted. Check the project's model quotas and billing: https://aistudio.google.com/apikey
 ------------------------------ Captured log call -------------------------------
-WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:46.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 00:02:41.
 WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference (async): payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
 _ test_auxiliary_quota_keeps_other_routes_and_credentials_usable[requests-parallel] _
 tests/agent/test_auxiliary_quota_recovery.py:153: in test_auxiliary_quota_keeps_other_routes_and_credentials_usable
@@ -410,13 +404,13 @@ E   Please retry in 48.100581664s.
 E   
 E   Google reported a free tier quota limit for this request. Limits differ by model and quota window; this does not by itself establish that the daily allowance or API key is exhausted. Check the project's model quotas and billing: https://aistudio.google.com/apikey
 ------------------------------ Captured log call -------------------------------
-WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:46.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 00:02:41.
 WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference: payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
-WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:46.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 00:02:41.
 WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference: payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
-WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:46.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 00:02:41.
 WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference: payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
-WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:47.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 00:02:41.
 WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference: payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
 __ test_auxiliary_quota_keeps_other_routes_and_credentials_usable[zero-sync] ___
 tests/agent/test_auxiliary_quota_recovery.py:156: in test_auxiliary_quota_keeps_other_routes_and_credentials_usable
@@ -464,7 +458,7 @@ E   This model has zero quota allowance for the project; a retry delay does not 
 E   
 E   Google reported a free tier quota limit for this request. Limits differ by model and quota window; this does not by itself establish that the daily allowance or API key is exhausted. Check the project's model quotas and billing: https://aistudio.google.com/apikey
 ------------------------------ Captured log call -------------------------------
-WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:47.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 00:02:42.
 WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference: payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
 __ test_auxiliary_quota_keeps_other_routes_and_credentials_usable[zero-async] __
 tests/agent/test_auxiliary_quota_recovery.py:156: in test_auxiliary_quota_keeps_other_routes_and_credentials_usable
@@ -522,7 +516,7 @@ E   This model has zero quota allowance for the project; a retry delay does not 
 E   
 E   Google reported a free tier quota limit for this request. Limits differ by model and quota window; this does not by itself establish that the daily allowance or API key is exhausted. Check the project's model quotas and billing: https://aistudio.google.com/apikey
 ------------------------------ Captured log call -------------------------------
-WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:48.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 00:02:43.
 WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference (async): payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
 _ test_auxiliary_quota_keeps_other_routes_and_credentials_usable[zero-parallel] _
 tests/agent/test_auxiliary_quota_recovery.py:153: in test_auxiliary_quota_keeps_other_routes_and_credentials_usable
@@ -587,13 +581,13 @@ E   This model has zero quota allowance for the project; a retry delay does not 
 E   
 E   Google reported a free tier quota limit for this request. Limits differ by model and quota window; this does not by itself establish that the daily allowance or API key is exhausted. Check the project's model quotas and billing: https://aistudio.google.com/apikey
 ------------------------------ Captured log call -------------------------------
-WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:49.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 00:02:44.
 WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference: payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
-WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:49.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 00:02:44.
 WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference: payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
-WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:49.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 00:02:44.
 WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference: payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
-WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:49.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 00:02:44.
 WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference: payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
 __ test_auxiliary_quota_keeps_other_routes_and_credentials_usable[text-sync] ___
 tests/agent/test_auxiliary_quota_recovery.py:156: in test_auxiliary_quota_keeps_other_routes_and_credentials_usable
@@ -639,7 +633,7 @@ E   Please retry in 48.100581664s.
 E   
 E   Google reported a free tier quota limit for this request. Limits differ by model and quota window; this does not by itself establish that the daily allowance or API key is exhausted. Check the project's model quotas and billing: https://aistudio.google.com/apikey
 ------------------------------ Captured log call -------------------------------
-WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:49.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 00:02:44.
 WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference: payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
 __ test_auxiliary_quota_keeps_other_routes_and_credentials_usable[text-async] __
 tests/agent/test_auxiliary_quota_recovery.py:156: in test_auxiliary_quota_keeps_other_routes_and_credentials_usable
@@ -695,7 +689,7 @@ E   Please retry in 48.100581664s.
 E   
 E   Google reported a free tier quota limit for this request. Limits differ by model and quota window; this does not by itself establish that the daily allowance or API key is exhausted. Check the project's model quotas and billing: https://aistudio.google.com/apikey
 ------------------------------ Captured log call -------------------------------
-WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:50.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 00:02:45.
 WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference (async): payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
 _ test_auxiliary_quota_keeps_other_routes_and_credentials_usable[text-parallel] _
 tests/agent/test_auxiliary_quota_recovery.py:153: in test_auxiliary_quota_keeps_other_routes_and_credentials_usable
@@ -758,85 +752,118 @@ E   Please retry in 48.100581664s.
 E   
 E   Google reported a free tier quota limit for this request. Limits differ by model and quota window; this does not by itself establish that the daily allowance or API key is exhausted. Check the project's model quotas and billing: https://aistudio.google.com/apikey
 ------------------------------ Captured log call -------------------------------
-WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:51.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 00:02:46.
 WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference: payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
-WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:51.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 00:02:46.
 WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference: payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
-WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:51.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 00:02:46.
 WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference: payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
-WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:51.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 00:02:46.
 WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference: payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
 _ test_auxiliary_quota_keeps_other_routes_and_credentials_usable[worker-sync] __
 tests/agent/test_auxiliary_quota_recovery.py:159: in test_auxiliary_quota_keeps_other_routes_and_credentials_usable
     assert not aux._is_provider_unhealthy('nvidia')
 E   AssertionError: assert not True
-E    +  where True = <function _is_provider_unhealthy at 0x7fbf21f545e0>('nvidia')
-E    +    where <function _is_provider_unhealthy at 0x7fbf21f545e0> = aux._is_provider_unhealthy
+E    +  where True = <function _is_provider_unhealthy at 0x7f9416cf4680>('nvidia')
+E    +    where <function _is_provider_unhealthy at 0x7f9416cf4680> = aux._is_provider_unhealthy
 ------------------------------ Captured log call -------------------------------
-WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking nvidia unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:52.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking nvidia unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 00:02:47.
 _ test_auxiliary_quota_keeps_other_routes_and_credentials_usable[worker-async] _
 tests/agent/test_auxiliary_quota_recovery.py:159: in test_auxiliary_quota_keeps_other_routes_and_credentials_usable
     assert not aux._is_provider_unhealthy('nvidia')
 E   AssertionError: assert not True
-E    +  where True = <function _is_provider_unhealthy at 0x7fbf21f545e0>('nvidia')
-E    +    where <function _is_provider_unhealthy at 0x7fbf21f545e0> = aux._is_provider_unhealthy
+E    +  where True = <function _is_provider_unhealthy at 0x7f9416cf4680>('nvidia')
+E    +    where <function _is_provider_unhealthy at 0x7f9416cf4680> = aux._is_provider_unhealthy
 ------------------------------ Captured log call -------------------------------
-WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking nvidia unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:53.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking nvidia unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 00:02:48.
 _ test_auxiliary_quota_keeps_other_routes_and_credentials_usable[worker-parallel] _
 tests/agent/test_auxiliary_quota_recovery.py:159: in test_auxiliary_quota_keeps_other_routes_and_credentials_usable
     assert not aux._is_provider_unhealthy('nvidia')
 E   AssertionError: assert not True
-E    +  where True = <function _is_provider_unhealthy at 0x7fbf21f545e0>('nvidia')
-E    +    where <function _is_provider_unhealthy at 0x7fbf21f545e0> = aux._is_provider_unhealthy
+E    +  where True = <function _is_provider_unhealthy at 0x7f9416cf4680>('nvidia')
+E    +    where <function _is_provider_unhealthy at 0x7f9416cf4680> = aux._is_provider_unhealthy
 ------------------------------ Captured log call -------------------------------
-WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking nvidia unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:53.
-WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking nvidia unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:53.
-WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking nvidia unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:53.
-WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking nvidia unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:53.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking nvidia unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 00:02:49.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking nvidia unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 00:02:49.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking nvidia unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 00:02:49.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking nvidia unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 00:02:49.
 _ test_auxiliary_quota_keeps_other_routes_and_credentials_usable[cross-provider-sync] _
 tests/agent/test_auxiliary_quota_recovery.py:148: in test_auxiliary_quota_keeps_other_routes_and_credentials_usable
     assert not aux._is_provider_unhealthy('nvidia')
 E   AssertionError: assert not True
-E    +  where True = <function _is_provider_unhealthy at 0x7fbf21f545e0>('nvidia')
-E    +    where <function _is_provider_unhealthy at 0x7fbf21f545e0> = aux._is_provider_unhealthy
+E    +  where True = <function _is_provider_unhealthy at 0x7f9416cf4680>('nvidia')
+E    +    where <function _is_provider_unhealthy at 0x7f9416cf4680> = aux._is_provider_unhealthy
 ------------------------------ Captured log call -------------------------------
-WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking nvidia unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:53.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking nvidia unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 00:02:50.
 _ test_auxiliary_quota_keeps_other_routes_and_credentials_usable[cross-provider-async] _
 tests/agent/test_auxiliary_quota_recovery.py:148: in test_auxiliary_quota_keeps_other_routes_and_credentials_usable
     assert not aux._is_provider_unhealthy('nvidia')
 E   AssertionError: assert not True
-E    +  where True = <function _is_provider_unhealthy at 0x7fbf21f545e0>('nvidia')
-E    +    where <function _is_provider_unhealthy at 0x7fbf21f545e0> = aux._is_provider_unhealthy
+E    +  where True = <function _is_provider_unhealthy at 0x7f9416cf4680>('nvidia')
+E    +    where <function _is_provider_unhealthy at 0x7f9416cf4680> = aux._is_provider_unhealthy
 ------------------------------ Captured log call -------------------------------
-WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking nvidia unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:53.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking nvidia unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 00:02:50.
 _ test_auxiliary_quota_keeps_other_routes_and_credentials_usable[cross-provider-parallel] _
 tests/agent/test_auxiliary_quota_recovery.py:148: in test_auxiliary_quota_keeps_other_routes_and_credentials_usable
     assert not aux._is_provider_unhealthy('nvidia')
 E   AssertionError: assert not True
-E    +  where True = <function _is_provider_unhealthy at 0x7fbf21f545e0>('nvidia')
-E    +    where <function _is_provider_unhealthy at 0x7fbf21f545e0> = aux._is_provider_unhealthy
+E    +  where True = <function _is_provider_unhealthy at 0x7f9416cf4680>('nvidia')
+E    +    where <function _is_provider_unhealthy at 0x7f9416cf4680> = aux._is_provider_unhealthy
 ------------------------------ Captured log call -------------------------------
-WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking nvidia unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:53.
-_ test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[google-retryinfo] _
-tests/agent/test_auxiliary_quota_recovery.py:190: in test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking nvidia unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 00:02:50.
+_ test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[google-retryinfo-1] _
+tests/agent/test_auxiliary_quota_recovery.py:191: in test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls
     assert not aux._is_payment_error(error)
 E   AssertionError: assert not True
-E    +  where True = <function _is_payment_error at 0x7fbf21f54860>(GeminiAPIError('Gemini HTTP 429 (RESOURCE_EXHAUSTED): You exceeded your current quota, please check your plan and billing details.'))
-E    +    where <function _is_payment_error at 0x7fbf21f54860> = aux._is_payment_error
-_ test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[google-mixed] _
-tests/agent/test_auxiliary_quota_recovery.py:190: in test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls
+E    +  where True = <function _is_payment_error at 0x7f9416cf4900>(GeminiAPIError('Gemini HTTP 429 (RESOURCE_EXHAUSTED): You exceeded your current quota, please check your plan and billing details.'))
+E    +    where <function _is_payment_error at 0x7f9416cf4900> = aux._is_payment_error
+_ test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[google-retryinfo-4] _
+tests/agent/test_auxiliary_quota_recovery.py:191: in test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls
+    assert not aux._is_payment_error(error)
+E   AssertionError: assert not True
+E    +  where True = <function _is_payment_error at 0x7f9416cf4900>(GeminiAPIError('Gemini HTTP 429 (RESOURCE_EXHAUSTED): You exceeded your current quota, please check your plan and billing details.'))
+E    +    where <function _is_payment_error at 0x7f9416cf4900> = aux._is_payment_error
+_ test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[google-mixed-1] _
+tests/agent/test_auxiliary_quota_recovery.py:191: in test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls
     assert not aux._is_payment_error(error)
 E   assert not True
-E    +  where True = <function _is_payment_error at 0x7fbf21f54860>(GeminiAPIError("Gemini HTTP 429 (RESOURCE_EXHAUSTED): You exceeded your current quota, please check your plan and bill...y allowance or API key is exhausted. Check the project's model quotas and billing: https://aistudio.google.com/apikey"))
-E    +    where <function _is_payment_error at 0x7fbf21f54860> = aux._is_payment_error
-_ test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[nvidia-retryafter] _
-tests/agent/test_auxiliary_quota_recovery.py:201: in test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls
-    assert persisted.last_error_reset_at == pytest.approx(now[0] + delay)
-E   assert None == 1789170522.1460488 ± 1.8e+03
+E    +  where True = <function _is_payment_error at 0x7f9416cf4900>(GeminiAPIError("Gemini HTTP 429 (RESOURCE_EXHAUSTED): You exceeded your current quota, please check your plan and bill...y allowance or API key is exhausted. Check the project's model quotas and billing: https://aistudio.google.com/apikey"))
+E    +    where <function _is_payment_error at 0x7f9416cf4900> = aux._is_payment_error
+_ test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[google-mixed-4] _
+tests/agent/test_auxiliary_quota_recovery.py:191: in test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls
+    assert not aux._is_payment_error(error)
+E   assert not True
+E    +  where True = <function _is_payment_error at 0x7f9416cf4900>(GeminiAPIError("Gemini HTTP 429 (RESOURCE_EXHAUSTED): You exceeded your current quota, please check your plan and bill...y allowance or API key is exhausted. Check the project's model quotas and billing: https://aistudio.google.com/apikey"))
+E    +    where <function _is_payment_error at 0x7f9416cf4900> = aux._is_payment_error
+_ test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[nvidia-retryafter-1] _
+tests/agent/test_auxiliary_quota_recovery.py:202: in test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls
+    assert persisted.last_error_reset_at == pytest.approx(now[0] + delay, rel=0, abs=0.001)
+E   assert None == 1789170819.392703 ± 0.001
 E     
 E     comparison failed
 E     Obtained: None
-E     Expected: 1789170522.1460488 ± 1.8e+03
+E     Expected: 1789170819.392703 ± 0.001
+_ test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[nvidia-retryafter-4] _
+tests/agent/test_auxiliary_quota_recovery.py:202: in test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls
+    assert persisted.last_error_reset_at == pytest.approx(now[0] + delay, rel=0, abs=0.001)
+E   assert None == 1789170819.5495012 ± 0.001
+E     
+E     comparison failed
+E     Obtained: None
+E     Expected: 1789170819.5495012 ± 0.001
+_ test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[daily-1] _
+tests/agent/test_auxiliary_quota_recovery.py:214: in test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls
+    assert not load_pool(provider).has_available()
+E   AssertionError: assert not True
+E    +  where True = has_available()
+E    +    where has_available = <agent.credential_pool.CredentialPool object at 0x7f94134cce00>.has_available
+E    +      where <agent.credential_pool.CredentialPool object at 0x7f94134cce00> = load_pool('gemini')
+_ test_fallback_model_failure_does_not_extend_primary_quota_deadline[gemini-gemini-test-healthy] _
+tests/agent/test_auxiliary_quota_recovery.py:228: in test_fallback_model_failure_does_not_extend_primary_quota_deadline
+    assert _arm_rate_limit_cooldown(agent, FailoverReason.upstream_rate_limit) is None
+E   AssertionError: assert 240 is None
+E    +  where 240 = <function _arm_rate_limit_cooldown at 0x7f941369df80>(namespace(provider='gemini', model='gemini-test-healthy', _fallback_activated=True, _primary_runtime={'provider': 'gem...dline=('gemini', 'gemini-test-healthy', 421.255566417), _rate_limited_until=361.255572807, _rate_limit_backoff_count=3), <FailoverReason.upstream_rate_limit: 'upstream_rate_limit'>)
+E    +    where <FailoverReason.upstream_rate_limit: 'upstream_rate_limit'> = FailoverReason.upstream_rate_limit
 =========================== short test summary info ============================
 FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[tokens-sync]
 FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[tokens-async]
@@ -856,47 +883,63 @@ FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_
 FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[cross-provider-sync]
 FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[cross-provider-async]
 FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[cross-provider-parallel]
-FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[google-retryinfo]
-FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[google-mixed]
-FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[nvidia-retryafter]
-21 failed, 3 passed in 13.01s
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[google-retryinfo-1]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[google-retryinfo-4]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[google-mixed-1]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[google-mixed-4]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[nvidia-retryafter-1]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[nvidia-retryafter-4]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[daily-1]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_fallback_model_failure_does_not_extend_primary_quota_deadline[gemini-gemini-test-healthy]
+26 failed, 6 passed in 16.08s
 
-=== 1 file with test failures (21 tests failed) ===
-  tests/agent/test_auxiliary_quota_recovery.py  (21 tests failed)
+=== 1 file with test failures (26 tests failed) ===
+  tests/agent/test_auxiliary_quota_recovery.py  (26 tests failed)
 
-+ bash scripts/run_tests.sh tests/agent/test_auxiliary_quota_recovery.py tests/agent/test_gemini_quota_recovery.py tests/agent/test_auxiliary_client.py tests/agent/test_error_classifier.py tests/agent/test_credential_pool.py tests/agent/test_gemini_native_adapter.py -q --tb=short
++ bash scripts/run_tests.sh tests/agent/test_auxiliary_anthropic_pool_fallback_regression.py tests/agent/test_auxiliary_client_anthropic_custom.py tests/agent/test_auxiliary_client_azure_foundry.py tests/agent/test_auxiliary_client_base_url_host_validation_52608.py tests/agent/test_auxiliary_client_bootstrap_skew.py tests/agent/test_auxiliary_client_nous_401_cache_key.py tests/agent/test_auxiliary_client_proxy_env.py tests/agent/test_auxiliary_client_resolve_dedup.py tests/agent/test_auxiliary_client_ssl_verify.py tests/agent/test_auxiliary_client_xai_oauth_recovery.py tests/agent/test_credential_pool_anthropic_refresh_race.py tests/agent/test_credential_pool_deferred_refresh.py tests/agent/test_credential_pool_key_rotation.py tests/agent/test_credential_pool_lease_refresh_reselect.py tests/agent/test_credential_pool_no_entries_log_throttle.py tests/agent/test_credential_pool_nous_refresh_stampede.py tests/agent/test_credential_pool_oat_authtype.py tests/agent/test_credential_pool_oauth_writethrough.py tests/agent/test_credential_pool_operations.py tests/agent/test_credential_pool_profile_oauth_fork.py tests/agent/test_credential_pool_provider_boundary.py tests/agent/test_credential_pool_quarantine_locking.py tests/agent/test_credential_pool_routing.py tests/agent/test_credential_pool_sole_cooldown.py tests/agent/test_credential_pool_unmatched_rotation_bound.py tests/agent/test_gemini_alias_native_route.py tests/agent/test_gemini_fast_fallback.py tests/agent/test_gemini_free_tier_gate.py tests/agent/test_gemini_schema.py tests/agent/test_gemini_standard_key_guidance.py tests/agent/test_gemini_type_arrays.py tests/agent/test_rate_limit_tracker.py tests/agent/test_auxiliary_quota_recovery.py tests/agent/test_gemini_quota_recovery.py tests/agent/test_auxiliary_client.py tests/agent/test_error_classifier.py tests/agent/test_credential_pool.py tests/agent/test_gemini_native_adapter.py -q --tb=short
 ▶ running per-file parallel test suite via run_tests_parallel.py
   (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)
 ▶ pre-compiling bytecode cache
 ▶ launching test runner
-Discovered 6 test files (~379 tests) under ['tests/agent/test_auxiliary_quota_recovery.py', 'tests/agent/test_gemini_quota_recovery.py', 'tests/agent/test_auxiliary_client.py', 'tests/agent/test_error_classifier.py', 'tests/agent/test_credential_pool.py', 'tests/agent/test_gemini_native_adapter.py']; running with -j 8
-[  6.9% |    26/~379 | ✓29 | ✗ 0] ✓ tests/agent/test_gemini_native_adapter.py (29✓, 2.2s)
-[  7.4% |    28/~379 | ✓56 | ✗ 0] ✓ tests/agent/test_gemini_quota_recovery.py (27✓, 7.9s)
-[ 20.1% |    76/~379 | ✓118 | ✗  0] ✓ tests/agent/test_credential_pool.py (62✓, 8.5s)
-[ 20.6% |    78/~379 | ✓142 | ✗  0] ✓ tests/agent/test_auxiliary_quota_recovery.py (24✓, 10.8s)
-[ 68.9% |   261/~379 | ✓345 | ✗  1] ✗ tests/agent/test_auxiliary_client.py (203✓ 1✗, 15.6s)
-
-  ╔╍ Failed: tests/agent/test_auxiliary_client.py ╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍
-  ║ ........................................................................ [ 35%]
-  ║ ..........................................................F............. [ 70%]
-  ║ ............................................................             [100%]
-  ║ =================================== FAILURES ===================================
-  ║ _ TestAuxiliaryPoolRotationRetry.test_call_llm_rotates_explicit_codex_pool_on_429 _
-  ║ tests/agent/test_auxiliary_client.py:2873: in test_call_llm_rotates_explicit_codex_pool_on_429
-  ║     assert stale_client.chat.completions.create.call_count == 2
-  ║ E   AssertionError: assert 1 == 2
-  ║ E    +  where 1 = <MagicMock name='mock.chat.completions.create' id='140208349200352'>.call_count
-  ║ E    +    where <MagicMock name='mock.chat.completions.create' id='140208349200352'> = <MagicMock name='mock.chat.completions' id='140208349950128'>.create
-  ║ E    +      where <MagicMock name='mock.chat.completions' id='140208349950128'> = <MagicMock name='mock.chat' id='140208349952672'>.completions
-  ║ E    +        where <MagicMock name='mock.chat' id='140208349952672'> = <MagicMock id='140208371844784'>.chat
-  ║ =========================== short test summary info ============================
-  ║ FAILED tests/agent/test_auxiliary_client.py::TestAuxiliaryPoolRotationRetry::test_call_llm_rotates_explicit_codex_pool_on_429
-  ║ 1 failed, 203 passed in 14.46s
-  ║
-  ║  Repro: python -m pytest tests/agent/test_auxiliary_client.py -q --tb=short
-  ╚╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍
-
-[100.0% |   379/~379 | ✓494 | ✗  5] ✗ tests/agent/test_error_classifier.py (149✓ 4✗, 20.5s)
+Discovered 38 test files (~555 tests) under ['tests/agent/test_auxiliary_anthropic_pool_fallback_regression.py', 'tests/agent/test_auxiliary_client_anthropic_custom.py', 'tests/agent/test_auxiliary_client_azure_foundry.py', 'tests/agent/test_auxiliary_client_base_url_host_validation_52608.py', 'tests/agent/test_auxiliary_client_bootstrap_skew.py', 'tests/agent/test_auxiliary_client_nous_401_cache_key.py', 'tests/agent/test_auxiliary_client_proxy_env.py', 'tests/agent/test_auxiliary_client_resolve_dedup.py', 'tests/agent/test_auxiliary_client_ssl_verify.py', 'tests/agent/test_auxiliary_client_xai_oauth_recovery.py', 'tests/agent/test_credential_pool_anthropic_refresh_race.py', 'tests/agent/test_credential_pool_deferred_refresh.py', 'tests/agent/test_credential_pool_key_rotation.py', 'tests/agent/test_credential_pool_lease_refresh_reselect.py', 'tests/agent/test_credential_pool_no_entries_log_throttle.py', 'tests/agent/test_credential_pool_nous_refresh_stampede.py', 'tests/agent/test_credential_pool_oat_authtype.py', 'tests/agent/test_credential_pool_oauth_writethrough.py', 'tests/agent/test_credential_pool_operations.py', 'tests/agent/test_credential_pool_profile_oauth_fork.py', 'tests/agent/test_credential_pool_provider_boundary.py', 'tests/agent/test_credential_pool_quarantine_locking.py', 'tests/agent/test_credential_pool_routing.py', 'tests/agent/test_credential_pool_sole_cooldown.py', 'tests/agent/test_credential_pool_unmatched_rotation_bound.py', 'tests/agent/test_gemini_alias_native_route.py', 'tests/agent/test_gemini_fast_fallback.py', 'tests/agent/test_gemini_free_tier_gate.py', 'tests/agent/test_gemini_schema.py', 'tests/agent/test_gemini_standard_key_guidance.py', 'tests/agent/test_gemini_type_arrays.py', 'tests/agent/test_rate_limit_tracker.py', 'tests/agent/test_auxiliary_quota_recovery.py', 'tests/agent/test_gemini_quota_recovery.py', 'tests/agent/test_auxiliary_client.py', 'tests/agent/test_error_classifier.py', 'tests/agent/test_credential_pool.py', 'tests/agent/test_gemini_native_adapter.py']; running with -j 8
+[  0.5% |     3/~555 | ✓3 | ✗0] ✓ tests/agent/test_auxiliary_anthropic_pool_fallback_regression.py (3✓, 1.4s)
+[  1.8% |    10/~555 | ✓10 | ✗ 0] ✓ tests/agent/test_auxiliary_client_base_url_host_validation_52608.py (7✓, 1.6s)
+[  2.2% |    12/~555 | ✓12 | ✗ 0] ✓ tests/agent/test_auxiliary_client_proxy_env.py (2✓, 1.9s)
+[  2.5% |    14/~555 | ✓14 | ✗ 0] ✓ tests/agent/test_auxiliary_client_bootstrap_skew.py (2✓, 2.0s)
+[  3.1% |    17/~555 | ✓17 | ✗ 0] ✓ tests/agent/test_auxiliary_client_anthropic_custom.py (3✓, 3.1s)
+[  3.4% |    19/~555 | ✓19 | ✗ 0] ✓ tests/agent/test_auxiliary_client_ssl_verify.py (2✓, 1.8s)
+[  4.3% |    24/~555 | ✓24 | ✗ 0] ✓ tests/agent/test_auxiliary_client_resolve_dedup.py (5✓, 2.1s)
+[  5.6% |    31/~555 | ✓31 | ✗ 0] ✓ tests/agent/test_auxiliary_client_azure_foundry.py (7✓, 3.5s)
+[  7.2% |    40/~555 | ✓40 | ✗ 0] ✓ tests/agent/test_auxiliary_client_xai_oauth_recovery.py (9✓, 1.5s)
+[  7.6% |    42/~555 | ✓42 | ✗ 0] ✓ tests/agent/test_auxiliary_client_nous_401_cache_key.py (2✓, 4.0s)
+[  7.9% |    44/~555 | ✓44 | ✗ 0] ✓ tests/agent/test_credential_pool_key_rotation.py (2✓, 1.3s)
+[  8.5% |    47/~555 | ✓47 | ✗ 0] ✓ tests/agent/test_credential_pool_lease_refresh_reselect.py (3✓, 1.6s)
+[  8.8% |    49/~555 | ✓49 | ✗ 0] ✓ tests/agent/test_credential_pool_deferred_refresh.py (2✓, 1.7s)
+[  9.4% |    52/~555 | ✓52 | ✗ 0] ✓ tests/agent/test_credential_pool_no_entries_log_throttle.py (3✓, 1.3s)
+[  9.9% |    55/~555 | ✓55 | ✗ 0] ✓ tests/agent/test_credential_pool_anthropic_refresh_race.py (3✓, 1.9s)
+[ 10.3% |    57/~555 | ✓57 | ✗ 0] ✓ tests/agent/test_credential_pool_oat_authtype.py (2✓, 1.3s)
+[ 11.0% |    61/~555 | ✓64 | ✗ 0] ✓ tests/agent/test_credential_pool_operations.py (7✓, 1.6s)
+[ 11.9% |    66/~555 | ✓69 | ✗ 0] ✓ tests/agent/test_credential_pool_oauth_writethrough.py (5✓, 2.0s)
+[ 16.6% |    92/~555 | ✓99 | ✗ 0] ✓ tests/agent/test_credential_pool_profile_oauth_fork.py (30✓, 2.5s)
+[ 17.1% |    95/~555 | ✓102 | ✗  0] ✓ tests/agent/test_credential_pool_quarantine_locking.py (3✓, 1.3s)
+[ 17.7% |    98/~555 | ✓105 | ✗  0] ✓ tests/agent/test_credential_pool_nous_refresh_stampede.py (3✓, 3.5s)
+[ 19.3% |   107/~555 | ✓114 | ✗  0] ✓ tests/agent/test_credential_pool_provider_boundary.py (9✓, 2.5s)
+[ 21.3% |   118/~555 | ✓125 | ✗  0] ✓ tests/agent/test_credential_pool_sole_cooldown.py (11✓, 1.4s)
+[ 21.6% |   120/~555 | ✓127 | ✗  0] ✓ tests/agent/test_credential_pool_unmatched_rotation_bound.py (2✓, 1.7s)
+[ 22.9% |   127/~555 | ✓134 | ✗  0] ✓ tests/agent/test_gemini_free_tier_gate.py (7✓, 1.5s)
+[ 31.5% |   175/~555 | ✓196 | ✗  0] ✓ tests/agent/test_credential_pool.py (62✓, 9.1s)
+[ 34.6% |   192/~555 | ✓213 | ✗  0] ✓ tests/agent/test_credential_pool_routing.py (17✓, 5.3s)
+[ 35.0% |   194/~555 | ✓215 | ✗  0] ✓ tests/agent/test_gemini_fast_fallback.py (2✓, 3.3s)
+[ 39.6% |   220/~555 | ✓244 | ✗  0] ✓ tests/agent/test_gemini_native_adapter.py (29✓, 1.9s)
+[ 39.8% |   221/~555 | ✓245 | ✗  0] ✓ tests/agent/test_gemini_alias_native_route.py (1✓, 4.7s)
+[ 41.4% |   230/~555 | ✓254 | ✗  0] ✓ tests/agent/test_gemini_schema.py (9✓, 2.1s)
+[ 43.1% |   239/~555 | ✓263 | ✗  0] ✓ tests/agent/test_rate_limit_tracker.py (9✓, 1.0s)
+[ 44.5% |   247/~555 | ✓271 | ✗  0] ✓ tests/agent/test_gemini_standard_key_guidance.py (8✓, 2.7s)
+[ 44.9% |   249/~555 | ✓370 | ✗  0] ✓ tests/agent/test_gemini_type_arrays.py (99✓, 2.2s)
+[ 45.4% |   252/~555 | ✓402 | ✗  0] ✓ tests/agent/test_auxiliary_quota_recovery.py (32✓, 15.1s)
+[ 45.8% |   254/~555 | ✓429 | ✗  0] ✓ tests/agent/test_gemini_quota_recovery.py (27✓, 7.1s)
+[ 78.7% |   437/~555 | ✓633 | ✗  0] ✓ tests/agent/test_auxiliary_client.py (204✓, 20.1s)
+[100.0% |   555/~555 | ✓782 | ✗  4] ✗ tests/agent/test_error_classifier.py (149✓ 4✗, 17.6s)
 
   ╔╍ Failed: tests/agent/test_error_classifier.py ╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍
   ║ _ TestClassifyApiError.test_resource_exhausted_separator_variants_without_status[resource exhausted] _
@@ -928,46 +971,33 @@ Discovered 6 test files (~379 tests) under ['tests/agent/test_auxiliary_quota_re
   ║ FAILED tests/agent/test_error_classifier.py::TestClassifyApiError::test_resource_exhausted_separator_variants_without_status[RESOURCE_EXHAUSTED]
   ║ FAILED tests/agent/test_error_classifier.py::TestClassifyApiError::test_resource_exhausted_separator_variants_without_status[ResourceExhausted]
   ║ FAILED tests/agent/test_error_classifier.py::TestClassifyApiError::test_resource_exhausted_separator_variants_without_status[resource-exhausted]
-  ║ 4 failed, 149 passed in 19.55s
+  ║ 4 failed, 149 passed in 16.97s
   ║
   ║  Repro: python -m pytest tests/agent/test_error_classifier.py -q --tb=short
   ╚╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍
 
 
-=== Summary: 6 files, 494 tests passed, 5 failed (100% complete) in 20.5s (8 workers) ===
-  Durations cached to test_durations.json (6 files)
+=== Summary: 38 files, 782 tests passed, 4 failed (100% complete) in 25.9s (8 workers) ===
+  Durations cached to test_durations.json (38 files)
 
 === Per-file subprocess time distribution ===
-  Files:   6
-  Total subprocess CPU-wall: 65.5s  (runner wall: 20.5s, parallelism: 8x)
-  P50: 10.80s  P90: 20.49s  P95: 20.49s  P99: 20.49s  Max: 20.49s
-  <1s: 0 files (0%)  <2s: 0 files (0%)
+  Files:   38
+  Total subprocess CPU-wall: 142.5s  (runner wall: 25.9s, parallelism: 8x)
+  P50: 1.98s  P90: 9.13s  P95: 17.61s  P99: 20.08s  Max: 20.08s
+  <1s: 0 files (0%)  <2s: 20 files (53%)
   Top 10 slowest:
-     20.49s  tests/agent/test_error_classifier.py
-     15.65s  tests/agent/test_auxiliary_client.py
-     10.80s  tests/agent/test_auxiliary_quota_recovery.py
-      8.52s  tests/agent/test_credential_pool.py
-      7.86s  tests/agent/test_gemini_quota_recovery.py
-      2.19s  tests/agent/test_gemini_native_adapter.py
+     20.08s  tests/agent/test_auxiliary_client.py
+     17.61s  tests/agent/test_error_classifier.py
+     15.10s  tests/agent/test_auxiliary_quota_recovery.py
+      9.13s  tests/agent/test_credential_pool.py
+      7.14s  tests/agent/test_gemini_quota_recovery.py
+      5.32s  tests/agent/test_credential_pool_routing.py
+      4.73s  tests/agent/test_gemini_alias_native_route.py
+      4.03s  tests/agent/test_auxiliary_client_nous_401_cache_key.py
+      3.50s  tests/agent/test_auxiliary_client_azure_foundry.py
+      3.50s  tests/agent/test_credential_pool_nous_refresh_stampede.py
 
 === Failure output ===
-
---- tests/agent/test_auxiliary_client.py ---
-........................................................................ [ 35%]
-..........................................................F............. [ 70%]
-............................................................             [100%]
-=================================== FAILURES ===================================
-_ TestAuxiliaryPoolRotationRetry.test_call_llm_rotates_explicit_codex_pool_on_429 _
-tests/agent/test_auxiliary_client.py:2873: in test_call_llm_rotates_explicit_codex_pool_on_429
-    assert stale_client.chat.completions.create.call_count == 2
-E   AssertionError: assert 1 == 2
-E    +  where 1 = <MagicMock name='mock.chat.completions.create' id='140208349200352'>.call_count
-E    +    where <MagicMock name='mock.chat.completions.create' id='140208349200352'> = <MagicMock name='mock.chat.completions' id='140208349950128'>.create
-E    +      where <MagicMock name='mock.chat.completions' id='140208349950128'> = <MagicMock name='mock.chat' id='140208349952672'>.completions
-E    +        where <MagicMock name='mock.chat' id='140208349952672'> = <MagicMock id='140208371844784'>.chat
-=========================== short test summary info ============================
-FAILED tests/agent/test_auxiliary_client.py::TestAuxiliaryPoolRotationRetry::test_call_llm_rotates_explicit_codex_pool_on_429
-1 failed, 203 passed in 14.46s
 
 --- tests/agent/test_error_classifier.py ---
 ....................FFFF................................................ [ 47%]
@@ -1003,10 +1033,9 @@ FAILED tests/agent/test_error_classifier.py::TestClassifyApiError::test_resource
 FAILED tests/agent/test_error_classifier.py::TestClassifyApiError::test_resource_exhausted_separator_variants_without_status[RESOURCE_EXHAUSTED]
 FAILED tests/agent/test_error_classifier.py::TestClassifyApiError::test_resource_exhausted_separator_variants_without_status[ResourceExhausted]
 FAILED tests/agent/test_error_classifier.py::TestClassifyApiError::test_resource_exhausted_separator_variants_without_status[resource-exhausted]
-4 failed, 149 passed in 19.55s
+4 failed, 149 passed in 16.97s
 
-=== 2 files with test failures (5 tests failed) ===
-  tests/agent/test_auxiliary_client.py  (1 test failed)
+=== 1 file with test failures (4 tests failed) ===
   tests/agent/test_error_classifier.py  (4 tests failed)
 
-WORKBENCH_ERROR: RuntimeError: command failed (1): ['bash', 'scripts/run_tests.sh', 'tests/agent/test_auxiliary_quota_recovery.py', 'tests/agent/test_gemini_quota_recovery.py', 'tests/agent/test_auxiliary_client.py', 'tests/agent/test_error_classifier.py', 'tests/agent/test_credential_pool.py', 'tests/agent/test_gemini_native_adapter.py', '-q', '--tb=short']
+WORKBENCH_ERROR: RuntimeError: command failed (1): ['bash', 'scripts/run_tests.sh', 'tests/agent/test_auxiliary_anthropic_pool_fallback_regression.py', 'tests/agent/test_auxiliary_client_anthropic_custom.py', 'tests/agent/test_auxiliary_client_azure_foundry.py', 'tests/agent/test_auxiliary_client_base_url_host_validation_52608.py', 'tests/agent/test_auxiliary_client_bootstrap_skew.py', 'tests/agent/test_auxiliary_client_nous_401_cache_key.py', 'tests/agent/test_auxiliary_client_proxy_env.py', 'tests/agent/test_auxiliary_client_resolve_dedup.py', 'tests/agent/test_auxiliary_client_ssl_verify.py', 'tests/agent/test_auxiliary_client_xai_oauth_recovery.py', 'tests/agent/test_credential_pool_anthropic_refresh_race.py', 'tests/agent/test_credential_pool_deferred_refresh.py', 'tests/agent/test_credential_pool_key_rotation.py', 'tests/agent/test_credential_pool_lease_refresh_reselect.py', 'tests/agent/test_credential_pool_no_entries_log_throttle.py', 'tests/agent/test_credential_pool_nous_refresh_stampede.py', 'tests/agent/test_credential_pool_oat_authtype.py', 'tests/agent/test_credential_pool_oauth_writethrough.py', 'tests/agent/test_credential_pool_operations.py', 'tests/agent/test_credential_pool_profile_oauth_fork.py', 'tests/agent/test_credential_pool_provider_boundary.py', 'tests/agent/test_credential_pool_quarantine_locking.py', 'tests/agent/test_credential_pool_routing.py', 'tests/agent/test_credential_pool_sole_cooldown.py', 'tests/agent/test_credential_pool_unmatched_rotation_bound.py', 'tests/agent/test_gemini_alias_native_route.py', 'tests/agent/test_gemini_fast_fallback.py', 'tests/agent/test_gemini_free_tier_gate.py', 'tests/agent/test_gemini_schema.py', 'tests/agent/test_gemini_standard_key_guidance.py', 'tests/agent/test_gemini_type_arrays.py', 'tests/agent/test_rate_limit_tracker.py', 'tests/agent/test_auxiliary_quota_recovery.py', 'tests/agent/test_gemini_quota_recovery.py', 'tests/agent/test_auxiliary_client.py', 'tests/agent/test_error_classifier.py', 'tests/agent/test_credential_pool.py', 'tests/agent/test_gemini_native_adapter.py', '-q', '--tb=short']
