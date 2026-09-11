@@ -31,8 +31,13 @@ jobs:
           npm ci --ignore-scripts
           npm ci --prefix website --ignore-scripts
       - name: Apply the import-preserving split
+        shell: bash
         working-directory: source
-        run: python ../input/.refactor/minimal.py
+        run: |
+          python ../input/.refactor/minimal.py
+          sed -i '/^import { ListItem } from "@nous-research\/ui\/ui\/components\/list-item";$/d' web/src/pages/SessionsPage.tsx
+          mapfile -t changed < validation-output/changed-files.txt
+          git diff --numstat -- "${changed[@]}" > validation-output/numstat.txt
       - name: Enforce bounded ownership and a minimal consumer diff
         shell: bash
         working-directory: source
