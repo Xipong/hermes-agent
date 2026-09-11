@@ -3,13 +3,119 @@ on:
   push:
     branches: [work/split-dashboard-api-config-example-20260911]
     paths:
-      - .refactor/**
+      - .refactor/apply.py
       - .github/workflows/refactor-dashboard-api-config.yml
 permissions:
   contents: read
 jobs:
-  inspect:
+  validate:
     runs-on: ubuntu-24.04
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-      - run: python .refactor/analyze.py
+        with:
+          path: input
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          repository: NousResearch/hermes-agent
+          ref: 6c3d4a4af70d76b7365bf19e9420ffdcbb9830ad
+          path: source
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '26'
+          cache: npm
+          cache-dependency-path: source/package-lock.json
+      - name: Install workspace and docs dependencies
+        working-directory: source
+        run: |
+          npm ci --ignore-scripts
+          npm ci --prefix website --ignore-scripts
+      - name: Apply the behavior-preserving split
+        working-directory: source
+        run: python ../input/.refactor/apply.py
+      - name: Format and lint changed TypeScript
+        shell: bash
+        working-directory: source
+        run: |
+          mapfile -t all_files < validation-output/changed-files.txt
+          mapfile -t ts_files < validation-output/ts-files.txt
+          node node_modules/prettier/bin/prettier.cjs --write "${all_files[@]}"
+          node node_modules/eslint/bin/eslint.js --fix --max-warnings 0 "${ts_files[@]}"
+          node node_modules/prettier/bin/prettier.cjs --write "${ts_files[@]}"
+          node node_modules/eslint/bin/eslint.js --max-warnings 0 "${ts_files[@]}"
+      - name: Enforce bounded files and type-only ownership
+        working-directory: source
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          limits = [
+              'web/src/lib/api.ts',
+              'web/src/lib/api-types.ts',
+              'cli-config.yaml.example',
+          ]
+          for path in limits:
+              count = len(Path(path).read_text(encoding='utf-8').splitlines())
+              print(path, count)
+              assert count <= 2000, (path, count)
+          api = Path('web/src/lib/api.ts').read_text(encoding='utf-8')
+          types = Path('web/src/lib/api-types.ts').read_text(encoding='utf-8')
+          assert 'export type {' not in api
+          assert not any(line.startswith('export const ') or line.startswith('export function ') or line.startswith('export class ') for line in types.splitlines())
+          changed = Path('validation-output/changed-files.txt').read_text(encoding='utf-8').splitlines()
+          oversized = [(path, len(Path(path).read_text(encoding='utf-8').splitlines())) for path in changed if Path(path).suffix in {'.ts', '.tsx', '.yaml'} and len(Path(path).read_text(encoding='utf-8').splitlines()) > 2000]
+          assert not oversized, oversized
+          PY
+      - name: Typecheck and test the dashboard
+        working-directory: source
+        run: |
+          node node_modules/typescript/bin/tsc -p web --noEmit
+          cd web
+          node ../node_modules/vitest/vitest.mjs run
+      - name: Build the English documentation site
+        working-directory: source
+        run: npm --prefix website run build:fast
+      - name: Package the exact validated patch
+        shell: bash
+        working-directory: source
+        run: |
+          git add -N web/src/lib/api-types.ts
+          git diff --check
+          git diff --binary > validation-output/candidate.patch
+          git diff --stat | tee validation-output/stat.txt
+          git status --short | tee validation-output/status.txt
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: dashboard-api-config-refactor
+          path: source/validation-output/
+          retention-days: 7
+  publish:
+    needs: validate
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          repository: Xipong/hermes-agent
+          ref: 6c3d4a4af70d76b7365bf19e9420ffdcbb9830ad
+          fetch-depth: 0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: dashboard-api-config-refactor
+          path: /tmp/refactor
+      - name: Publish two clean prerequisite commits
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch=refactor/split-dashboard-api-config-example-20260911
+          test "$(git rev-parse HEAD)" = 6c3d4a4af70d76b7365bf19e9420ffdcbb9830ad
+          git switch -c "$branch"
+          git apply /tmp/refactor/candidate.patch
+          git diff --check
+          git config user.name Xipong
+          git config user.email 217837358+Xipong@users.noreply.github.com
+          git add --pathspec-from-file=/tmp/refactor/api-files.txt
+          git commit -m 'refactor(web): extract dashboard API data types'
+          git add --pathspec-from-file=/tmp/refactor/config-files.txt
+          git commit -m 'docs(config): slim the oversized example file'
+          git push origin "HEAD:refs/heads/$branch"
