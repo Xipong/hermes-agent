@@ -4,6 +4,7 @@ on:
     branches: [work/split-dashboard-api-config-example-20260911]
     paths:
       - .refactor/apply.py
+      - .refactor/fixup.py
       - .github/workflows/refactor-dashboard-api-config.yml
 permissions:
   contents: read
@@ -36,13 +37,13 @@ jobs:
         run: |
           sed -i 's/TYPE_IMPORT_RE_TEMPLATE\.format(source=re\.escape(source))/TYPE_IMPORT_RE_TEMPLATE.replace("{source}", re.escape(source))/' ../input/.refactor/apply.py
           python ../input/.refactor/apply.py
+          python ../input/.refactor/fixup.py
       - name: Format and lint changed TypeScript
         shell: bash
         working-directory: source
         run: |
-          mapfile -t all_files < validation-output/changed-files.txt
           mapfile -t ts_files < validation-output/ts-files.txt
-          node node_modules/prettier/bin/prettier.cjs --write "${all_files[@]}"
+          node node_modules/prettier/bin/prettier.cjs --write "${ts_files[@]}"
           node node_modules/eslint/bin/eslint.js --fix --max-warnings 0 "${ts_files[@]}"
           node node_modules/prettier/bin/prettier.cjs --write "${ts_files[@]}"
           node node_modules/eslint/bin/eslint.js --max-warnings 0 "${ts_files[@]}"
@@ -55,6 +56,7 @@ jobs:
               'web/src/lib/api.ts',
               'web/src/lib/api-types.ts',
               'cli-config.yaml.example',
+              'website/docs/reference/advanced-provider-configuration.md',
           ]
           for path in limits:
               count = len(Path(path).read_text(encoding='utf-8').splitlines())
@@ -65,7 +67,7 @@ jobs:
           assert 'export type {' not in api
           assert not any(line.startswith('export const ') or line.startswith('export function ') or line.startswith('export class ') for line in types.splitlines())
           changed = Path('validation-output/changed-files.txt').read_text(encoding='utf-8').splitlines()
-          oversized = [(path, len(Path(path).read_text(encoding='utf-8').splitlines())) for path in changed if Path(path).suffix in {'.ts', '.tsx', '.yaml'} and len(Path(path).read_text(encoding='utf-8').splitlines()) > 2000]
+          oversized = [(path, len(Path(path).read_text(encoding='utf-8').splitlines())) for path in changed if Path(path).suffix in {'.ts', '.tsx', '.yaml', '.md'} and len(Path(path).read_text(encoding='utf-8').splitlines()) > 2000]
           assert not oversized, oversized
           PY
       - name: Typecheck and test the dashboard
@@ -81,7 +83,7 @@ jobs:
         shell: bash
         working-directory: source
         run: |
-          git add -N web/src/lib/api-types.ts
+          git add -N web/src/lib/api-types.ts website/docs/reference/advanced-provider-configuration.md
           git diff --check
           git diff --binary > validation-output/candidate.patch
           git diff --stat | tee validation-output/stat.txt
