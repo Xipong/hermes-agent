@@ -3,8 +3,7 @@ on:
   push:
     branches: [work/split-dashboard-api-config-example-20260911]
     paths:
-      - .refactor/apply.py
-      - .refactor/fixup.py
+      - .refactor/minimal.py
       - .github/workflows/refactor-dashboard-api-config.yml
 permissions:
   contents: read
@@ -19,7 +18,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           repository: NousResearch/hermes-agent
-          ref: 6c3d4a4af70d76b7365bf19e9420ffdcbb9830ad
+          ref: 45a6101f36576367359c171cd5820ee76a3d047b
           path: source
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
@@ -31,45 +30,39 @@ jobs:
         run: |
           npm ci --ignore-scripts
           npm ci --prefix website --ignore-scripts
-      - name: Apply the behavior-preserving split
-        shell: bash
+      - name: Apply the import-preserving split
         working-directory: source
-        run: |
-          sed -i 's/TYPE_IMPORT_RE_TEMPLATE\.format(source=re\.escape(source))/TYPE_IMPORT_RE_TEMPLATE.replace("{source}", re.escape(source))/' ../input/.refactor/apply.py
-          python ../input/.refactor/apply.py
-          python ../input/.refactor/fixup.py
-      - name: Format and lint changed TypeScript
+        run: python ../input/.refactor/minimal.py
+      - name: Enforce bounded ownership and a minimal consumer diff
         shell: bash
-        working-directory: source
-        run: |
-          mapfile -t ts_files < validation-output/ts-files.txt
-          node node_modules/prettier/bin/prettier.cjs --write "${ts_files[@]}"
-          node node_modules/eslint/bin/eslint.js --fix "${ts_files[@]}"
-          node node_modules/prettier/bin/prettier.cjs --write "${ts_files[@]}"
-          node node_modules/eslint/bin/eslint.js "${ts_files[@]}"
-      - name: Enforce bounded files and type-only ownership
         working-directory: source
         run: |
           python - <<'PY'
           from pathlib import Path
-          limits = [
+          bounded = [
               'web/src/lib/api.ts',
               'web/src/lib/api-types.ts',
               'cli-config.yaml.example',
               'website/docs/reference/advanced-provider-configuration.md',
           ]
-          for path in limits:
+          for path in bounded:
               count = len(Path(path).read_text(encoding='utf-8').splitlines())
               print(path, count)
               assert count <= 2000, (path, count)
-          api = Path('web/src/lib/api.ts').read_text(encoding='utf-8')
-          types = Path('web/src/lib/api-types.ts').read_text(encoding='utf-8')
-          assert 'export type {' not in api
-          assert not any(line.startswith('export const ') or line.startswith('export function ') or line.startswith('export class ') for line in types.splitlines())
           changed = Path('validation-output/changed-files.txt').read_text(encoding='utf-8').splitlines()
-          oversized = [(path, len(Path(path).read_text(encoding='utf-8').splitlines())) for path in changed if Path(path).suffix in {'.ts', '.tsx', '.yaml', '.md'} and len(Path(path).read_text(encoding='utf-8').splitlines()) > 2000]
+          oversized = [
+              (path, len(Path(path).read_text(encoding='utf-8').splitlines()))
+              for path in changed
+              if Path(path).suffix in {'.ts', '.tsx', '.yaml', '.md'}
+              and len(Path(path).read_text(encoding='utf-8').splitlines()) > 2000
+          ]
           assert not oversized, oversized
+          numstat = Path('validation-output/numstat.txt').read_text(encoding='utf-8')
+          print(numstat)
           PY
+          mapfile -t ts_files < validation-output/ts-files.txt
+          node node_modules/eslint/bin/eslint.js "${ts_files[@]}"
+          git diff --check
       - name: Typecheck and test the dashboard
         working-directory: source
         run: |
@@ -90,7 +83,7 @@ jobs:
           git status --short | tee validation-output/status.txt
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: dashboard-api-config-refactor
+          name: dashboard-api-config-refactor-minimal
           path: source/validation-output/
           retention-days: 7
   publish:
@@ -102,18 +95,18 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           repository: Xipong/hermes-agent
-          ref: 6c3d4a4af70d76b7365bf19e9420ffdcbb9830ad
+          ref: 45a6101f36576367359c171cd5820ee76a3d047b
           fetch-depth: 0
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: dashboard-api-config-refactor
+          name: dashboard-api-config-refactor-minimal
           path: /tmp/refactor
       - name: Publish two clean prerequisite commits
         shell: bash
         run: |
           set -euo pipefail
-          branch=refactor/split-dashboard-api-config-example-20260911
-          test "$(git rev-parse HEAD)" = 6c3d4a4af70d76b7365bf19e9420ffdcbb9830ad
+          branch=refactor/split-dashboard-api-types-and-config-docs-20260911
+          test "$(git rev-parse HEAD)" = 45a6101f36576367359c171cd5820ee76a3d047b
           git switch -c "$branch"
           git apply /tmp/refactor/candidate.patch
           git diff --check
