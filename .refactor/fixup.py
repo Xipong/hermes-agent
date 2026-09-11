@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 ROOT = Path.cwd()
+API = ROOT / "web/src/lib/api.ts"
+TYPES = ROOT / "web/src/lib/api-types.ts"
 CONFIG = ROOT / "cli-config.yaml.example"
 CONFIGURATION = ROOT / "website/docs/user-guide/configuration.md"
 REFERENCE = ROOT / "website/docs/reference/advanced-provider-configuration.md"
@@ -14,6 +17,14 @@ CONFIG_START = "# Advanced provider credentials and request deadlines"
 CONFIG_END = (
     "# =============================================================================\n"
     "# Kanban Review Dispatch"
+)
+API_TYPE_IMPORT = re.compile(
+    r'import type \{\n(?P<body>.*?)\n\} from "@/lib/api-types";\n', re.DOTALL
+)
+TYPE_DECLARATION = re.compile(
+    r"^(?P<export>export\s+)?(?P<kind>interface|type)\s+"
+    r"(?P<name>[A-Za-z_$][\w$]*)\b",
+    re.MULTILINE,
 )
 
 COMPACT_REFERENCE = """# =============================================================================
@@ -48,6 +59,45 @@ COMPACT_REFERENCE = """# =======================================================
 """
 
 
+def trim_runtime_type_import() -> None:
+    api_text = API.read_text(encoding="utf-8")
+    match = API_TYPE_IMPORT.search(api_text)
+    if match is None:
+        raise AssertionError("generated api-types import was not found")
+    api_without_import = api_text[: match.start()] + api_text[match.end() :]
+
+    types_text = TYPES.read_text(encoding="utf-8")
+    declarations = list(TYPE_DECLARATION.finditer(types_text))
+    used = [
+        declaration.group("name")
+        for declaration in declarations
+        if re.search(
+            rf"\b{re.escape(declaration.group('name'))}\b", api_without_import
+        )
+    ]
+    if not used:
+        raise AssertionError("runtime client did not reference any extracted types")
+
+    for declaration in reversed(declarations):
+        name = declaration.group("name")
+        if name not in used or declaration.group("export"):
+            continue
+        start = declaration.start()
+        types_text = types_text[:start] + "export " + types_text[start:]
+
+    import_block = (
+        "import type {\n"
+        + "".join(f"  {name},\n" for name in used)
+        + '} from "@/lib/api-types";\n'
+    )
+    API.write_text(
+        api_text[: match.start()] + import_block + api_text[match.end() :],
+        encoding="utf-8",
+    )
+    TYPES.write_text(types_text, encoding="utf-8")
+    print("runtime DTO imports", len(used))
+
+
 def move_inserted_docs_to_topical_file() -> None:
     text = CONFIGURATION.read_text(encoding="utf-8")
     start = text.index(DOC_HEADING)
@@ -79,14 +129,15 @@ def compact_example_reference() -> None:
 
 def replace_manifest_entry(name: str, old: str, new: str) -> None:
     path = OUTPUT / name
-    entries = path.read_text(encoding="utf-8").splitlines()
-    entries = [new if entry == old else entry for entry in entries]
-    if old not in path.read_text(encoding="utf-8"):
+    original = path.read_text(encoding="utf-8")
+    if old not in original:
         raise AssertionError(f"{old} was not present in {name}")
+    entries = [new if entry == old else entry for entry in original.splitlines()]
     path.write_text("\n".join(dict.fromkeys(entries)) + "\n", encoding="utf-8")
 
 
 def main() -> None:
+    trim_runtime_type_import()
     move_inserted_docs_to_topical_file()
     compact_example_reference()
     old = "website/docs/user-guide/configuration.md"
