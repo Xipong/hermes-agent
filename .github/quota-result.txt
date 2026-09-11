@@ -1,0 +1,1012 @@
++ git fetch origin fix/gemini-model-quota-108656
+From https://github.com/Xipong/hermes-agent
+ * branch                  fix/gemini-model-quota-108656 -> FETCH_HEAD
+ * [new branch]            fix/gemini-model-quota-108656 -> origin/fix/gemini-model-quota-108656
+
++ git rev-parse FETCH_HEAD
+706054b207d0331639d9371ed8f36f642aa38125
+
++ git worktree add --detach /tmp/hermes-quota-followup 706054b207d0331639d9371ed8f36f642aa38125
+Preparing worktree (detached HEAD 706054b207)
+Updating files:  96% (12292/12695)
+Updating files:  97% (12315/12695)
+Updating files:  98% (12442/12695)
+Updating files:  99% (12569/12695)
+Updating files: 100% (12695/12695)
+Updating files: 100% (12695/12695), done.
+HEAD is now at 706054b207 fix(gemini): preserve model quota scope and provider retry deadlines
+
++ bash scripts/run_tests.sh tests/agent/test_auxiliary_quota_recovery.py -q --tb=short
+▶ running per-file parallel test suite via run_tests_parallel.py
+  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)
+▶ pre-compiling bytecode cache
+▶ launching test runner
+Discovered 1 test files (~2 tests) under ['tests/agent/test_auxiliary_quota_recovery.py']; running with -j 8
+[100.0% |     2/~2 | ✓ 3 | ✗21] ✗ tests/agent/test_auxiliary_quota_recovery.py (3✓ 21✗, 13.8s)
+
+  ╔╍ Failed: tests/agent/test_auxiliary_quota_recovery.py ╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍
+  ║ tests/agent/test_auxiliary_quota_recovery.py:201: in test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls
+  ║     assert persisted.last_error_reset_at == pytest.approx(now[0] + delay)
+  ║ E   assert None == 1789170522.1460488 ± 1.8e+03
+  ║ E     
+  ║ E     comparison failed
+  ║ E     Obtained: None
+  ║ E     Expected: 1789170522.1460488 ± 1.8e+03
+  ║ =========================== short test summary info ============================
+  ║ FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[tokens-sync]
+  ║ FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[tokens-async]
+  ║ FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[tokens-parallel]
+  ║ FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[requests-sync]
+  ║ FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[requests-async]
+  ║ FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[requests-parallel]
+  ║ FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[zero-sync]
+  ║ FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[zero-async]
+  ║ FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[zero-parallel]
+  ║ FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[text-sync]
+  ║ FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[text-async]
+  ║ FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[text-parallel]
+  ║ FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[worker-sync]
+  ║ FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[worker-async]
+  ║ FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[worker-parallel]
+  ║ FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[cross-provider-sync]
+  ║ FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[cross-provider-async]
+  ║ FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[cross-provider-parallel]
+  ║ FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[google-retryinfo]
+  ║ FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[google-mixed]
+  ║ FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[nvidia-retryafter]
+  ║ 21 failed, 3 passed in 13.01s
+  ║
+  ║  Repro: python -m pytest tests/agent/test_auxiliary_quota_recovery.py -q --tb=short
+  ╚╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍
+
+
+=== Summary: 1 files, 3 tests passed, 21 failed (100% complete) in 13.8s (8 workers) ===
+  Durations cached to test_durations.json (1 files)
+
+=== Per-file subprocess time distribution ===
+  Files:   1
+  Total subprocess CPU-wall: 13.8s  (runner wall: 13.8s, parallelism: 8x)
+  P50: 13.81s  P90: 13.81s  P95: 13.81s  P99: 13.81s  Max: 13.81s
+  <1s: 0 files (0%)  <2s: 0 files (0%)
+  Top 10 slowest:
+     13.81s  tests/agent/test_auxiliary_quota_recovery.py
+
+=== Failure output ===
+
+--- tests/agent/test_auxiliary_quota_recovery.py ---
+FFFFFFFFFFFFFFFFFFFFF...                                                 [100%]
+=================================== FAILURES ===================================
+_ test_auxiliary_quota_keeps_other_routes_and_credentials_usable[tokens-sync] __
+tests/agent/test_auxiliary_quota_recovery.py:156: in test_auxiliary_quota_keeps_other_routes_and_credentials_usable
+    results, calls = [invoke()], 1
+                      ^^^^^^^^
+tests/agent/test_auxiliary_quota_recovery.py:140: in invoke
+    return asyncio.run(aux.async_call_llm(**kwargs)) if mode == 'async' else aux.call_llm(**kwargs)
+                                                                             ^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:2427: in wrapped
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:7224: in call_llm
+    response = _call_llm_impl(
+agent/auxiliary_client.py:7389: in _call_llm_impl
+    return _primary(provider=request_provider, base_url=req.base_info)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:7374: in _primary
+    _relay_sync_completion(
+agent/auxiliary_client.py:2495: in _relay_sync_completion
+    return relay_llm.execute_current(
+agent/relay_llm.py:185: in execute
+    return callback(request)
+           ^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:2496: in <lambda>
+    kwargs, lambda request: _run_protected_sync_provider_call(callback, request),
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:442: in _run_protected_sync_provider_call
+    return callback(kwargs)
+           ^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:7376: in <lambda>
+    create=lambda request: _create_with_progress(
+agent/auxiliary_client.py:6372: in _create_with_progress
+    return _create_with_progress_once(client, kwargs, task, force_stream=force_stream)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:6421: in _create_with_progress_once
+    response = client.chat.completions.create(**kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/gemini_native_adapter.py:671: in _create_chat_completion
+    raise gemini_http_error(response)
+E   agent.gemini_native_adapter.GeminiAPIError: Gemini HTTP 429 (RESOURCE_EXHAUSTED): You exceeded your current quota, please check your plan and billing details.
+E   * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, limit: 250000, model: gemini-test-limited
+E   Please retry in 48.100581664s.
+E   
+E   Google reported a free tier quota limit for this request. Limits differ by model and quota window; this does not by itself establish that the daily allowance or API key is exhausted. Check the project's model quotas and billing: https://aistudio.google.com/apikey
+------------------------------ Captured log call -------------------------------
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:43.
+WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference: payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
+_ test_auxiliary_quota_keeps_other_routes_and_credentials_usable[tokens-async] _
+tests/agent/test_auxiliary_quota_recovery.py:156: in test_auxiliary_quota_keeps_other_routes_and_credentials_usable
+    results, calls = [invoke()], 1
+                      ^^^^^^^^
+tests/agent/test_auxiliary_quota_recovery.py:140: in invoke
+    return asyncio.run(aux.async_call_llm(**kwargs)) if mode == 'async' else aux.call_llm(**kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/asyncio/runners.py:194: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/asyncio/base_events.py:687: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:2436: in wrapped
+    return await callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:7506: in async_call_llm
+    return await _async_call_llm_impl(
+agent/auxiliary_client.py:7549: in _async_call_llm_impl
+    return await _primary(provider=request_provider, base_url=req.base_info)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:7544: in _primary
+    await _relay_async_completion(
+agent/auxiliary_client.py:2516: in _relay_async_completion
+    return await relay_llm.execute_current_async(
+agent/relay_llm.py:202: in execute_async
+    return await callback(request)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:7540: in _acreate
+    return await _acreate_with_progress(client, _kwargs, task, force_stream=_force_stream_async)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:6644: in _acreate_with_progress
+    response = await client.chat.completions.create(**kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/gemini_native_adapter.py:707: in _create_chat_completion
+    result = await asyncio.to_thread(self._sync.chat.completions.create, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/asyncio/threads.py:25: in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/concurrent/futures/thread.py:58: in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/gemini_native_adapter.py:671: in _create_chat_completion
+    raise gemini_http_error(response)
+E   agent.gemini_native_adapter.GeminiAPIError: Gemini HTTP 429 (RESOURCE_EXHAUSTED): You exceeded your current quota, please check your plan and billing details.
+E   * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, limit: 250000, model: gemini-test-limited
+E   Please retry in 48.100581664s.
+E   
+E   Google reported a free tier quota limit for this request. Limits differ by model and quota window; this does not by itself establish that the daily allowance or API key is exhausted. Check the project's model quotas and billing: https://aistudio.google.com/apikey
+------------------------------ Captured log call -------------------------------
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:43.
+WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference (async): payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
+_ test_auxiliary_quota_keeps_other_routes_and_credentials_usable[tokens-parallel] _
+tests/agent/test_auxiliary_quota_recovery.py:153: in test_auxiliary_quota_keeps_other_routes_and_credentials_usable
+    results = list(executor.map(lambda _: invoke(), range(4)))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/concurrent/futures/_base.py:619: in result_iterator
+    yield _result_or_cancel(fs.pop())
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/concurrent/futures/_base.py:317: in _result_or_cancel
+    return fut.result(timeout)
+           ^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/concurrent/futures/_base.py:456: in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/concurrent/futures/_base.py:401: in __get_result
+    raise self._exception
+/usr/lib/python3.12/concurrent/futures/thread.py:58: in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/agent/test_auxiliary_quota_recovery.py:153: in <lambda>
+    results = list(executor.map(lambda _: invoke(), range(4)))
+                                          ^^^^^^^^
+tests/agent/test_auxiliary_quota_recovery.py:140: in invoke
+    return asyncio.run(aux.async_call_llm(**kwargs)) if mode == 'async' else aux.call_llm(**kwargs)
+                                                                             ^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:2427: in wrapped
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:7224: in call_llm
+    response = _call_llm_impl(
+agent/auxiliary_client.py:7389: in _call_llm_impl
+    return _primary(provider=request_provider, base_url=req.base_info)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:7374: in _primary
+    _relay_sync_completion(
+agent/auxiliary_client.py:2495: in _relay_sync_completion
+    return relay_llm.execute_current(
+agent/relay_llm.py:185: in execute
+    return callback(request)
+           ^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:2496: in <lambda>
+    kwargs, lambda request: _run_protected_sync_provider_call(callback, request),
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:442: in _run_protected_sync_provider_call
+    return callback(kwargs)
+           ^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:7376: in <lambda>
+    create=lambda request: _create_with_progress(
+agent/auxiliary_client.py:6372: in _create_with_progress
+    return _create_with_progress_once(client, kwargs, task, force_stream=force_stream)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:6421: in _create_with_progress_once
+    response = client.chat.completions.create(**kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/gemini_native_adapter.py:671: in _create_chat_completion
+    raise gemini_http_error(response)
+E   agent.gemini_native_adapter.GeminiAPIError: Gemini HTTP 429 (RESOURCE_EXHAUSTED): You exceeded your current quota, please check your plan and billing details.
+E   * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, limit: 250000, model: gemini-test-limited
+E   Please retry in 48.100581664s.
+E   
+E   Google reported a free tier quota limit for this request. Limits differ by model and quota window; this does not by itself establish that the daily allowance or API key is exhausted. Check the project's model quotas and billing: https://aistudio.google.com/apikey
+------------------------------ Captured log call -------------------------------
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:44.
+WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference: payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:44.
+WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference: payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:44.
+WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference: payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:44.
+WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference: payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
+_ test_auxiliary_quota_keeps_other_routes_and_credentials_usable[requests-sync] _
+tests/agent/test_auxiliary_quota_recovery.py:156: in test_auxiliary_quota_keeps_other_routes_and_credentials_usable
+    results, calls = [invoke()], 1
+                      ^^^^^^^^
+tests/agent/test_auxiliary_quota_recovery.py:140: in invoke
+    return asyncio.run(aux.async_call_llm(**kwargs)) if mode == 'async' else aux.call_llm(**kwargs)
+                                                                             ^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:2427: in wrapped
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:7224: in call_llm
+    response = _call_llm_impl(
+agent/auxiliary_client.py:7389: in _call_llm_impl
+    return _primary(provider=request_provider, base_url=req.base_info)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:7374: in _primary
+    _relay_sync_completion(
+agent/auxiliary_client.py:2495: in _relay_sync_completion
+    return relay_llm.execute_current(
+agent/relay_llm.py:185: in execute
+    return callback(request)
+           ^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:2496: in <lambda>
+    kwargs, lambda request: _run_protected_sync_provider_call(callback, request),
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:442: in _run_protected_sync_provider_call
+    return callback(kwargs)
+           ^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:7376: in <lambda>
+    create=lambda request: _create_with_progress(
+agent/auxiliary_client.py:6372: in _create_with_progress
+    return _create_with_progress_once(client, kwargs, task, force_stream=force_stream)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:6421: in _create_with_progress_once
+    response = client.chat.completions.create(**kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/gemini_native_adapter.py:671: in _create_chat_completion
+    raise gemini_http_error(response)
+E   agent.gemini_native_adapter.GeminiAPIError: Gemini HTTP 429 (RESOURCE_EXHAUSTED): You exceeded your current quota, please check your plan and billing details.
+E   * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-test-limited
+E   Please retry in 48.100581664s.
+E   
+E   Google reported a free tier quota limit for this request. Limits differ by model and quota window; this does not by itself establish that the daily allowance or API key is exhausted. Check the project's model quotas and billing: https://aistudio.google.com/apikey
+------------------------------ Captured log call -------------------------------
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:45.
+WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference: payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
+_ test_auxiliary_quota_keeps_other_routes_and_credentials_usable[requests-async] _
+tests/agent/test_auxiliary_quota_recovery.py:156: in test_auxiliary_quota_keeps_other_routes_and_credentials_usable
+    results, calls = [invoke()], 1
+                      ^^^^^^^^
+tests/agent/test_auxiliary_quota_recovery.py:140: in invoke
+    return asyncio.run(aux.async_call_llm(**kwargs)) if mode == 'async' else aux.call_llm(**kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/asyncio/runners.py:194: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/asyncio/base_events.py:687: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:2436: in wrapped
+    return await callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:7506: in async_call_llm
+    return await _async_call_llm_impl(
+agent/auxiliary_client.py:7549: in _async_call_llm_impl
+    return await _primary(provider=request_provider, base_url=req.base_info)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:7544: in _primary
+    await _relay_async_completion(
+agent/auxiliary_client.py:2516: in _relay_async_completion
+    return await relay_llm.execute_current_async(
+agent/relay_llm.py:202: in execute_async
+    return await callback(request)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:7540: in _acreate
+    return await _acreate_with_progress(client, _kwargs, task, force_stream=_force_stream_async)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:6644: in _acreate_with_progress
+    response = await client.chat.completions.create(**kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/gemini_native_adapter.py:707: in _create_chat_completion
+    result = await asyncio.to_thread(self._sync.chat.completions.create, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/asyncio/threads.py:25: in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/concurrent/futures/thread.py:58: in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/gemini_native_adapter.py:671: in _create_chat_completion
+    raise gemini_http_error(response)
+E   agent.gemini_native_adapter.GeminiAPIError: Gemini HTTP 429 (RESOURCE_EXHAUSTED): You exceeded your current quota, please check your plan and billing details.
+E   * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-test-limited
+E   Please retry in 48.100581664s.
+E   
+E   Google reported a free tier quota limit for this request. Limits differ by model and quota window; this does not by itself establish that the daily allowance or API key is exhausted. Check the project's model quotas and billing: https://aistudio.google.com/apikey
+------------------------------ Captured log call -------------------------------
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:46.
+WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference (async): payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
+_ test_auxiliary_quota_keeps_other_routes_and_credentials_usable[requests-parallel] _
+tests/agent/test_auxiliary_quota_recovery.py:153: in test_auxiliary_quota_keeps_other_routes_and_credentials_usable
+    results = list(executor.map(lambda _: invoke(), range(4)))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/concurrent/futures/_base.py:619: in result_iterator
+    yield _result_or_cancel(fs.pop())
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/concurrent/futures/_base.py:317: in _result_or_cancel
+    return fut.result(timeout)
+           ^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/concurrent/futures/_base.py:456: in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/concurrent/futures/_base.py:401: in __get_result
+    raise self._exception
+/usr/lib/python3.12/concurrent/futures/thread.py:58: in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/agent/test_auxiliary_quota_recovery.py:153: in <lambda>
+    results = list(executor.map(lambda _: invoke(), range(4)))
+                                          ^^^^^^^^
+tests/agent/test_auxiliary_quota_recovery.py:140: in invoke
+    return asyncio.run(aux.async_call_llm(**kwargs)) if mode == 'async' else aux.call_llm(**kwargs)
+                                                                             ^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:2427: in wrapped
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:7224: in call_llm
+    response = _call_llm_impl(
+agent/auxiliary_client.py:7389: in _call_llm_impl
+    return _primary(provider=request_provider, base_url=req.base_info)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:7374: in _primary
+    _relay_sync_completion(
+agent/auxiliary_client.py:2495: in _relay_sync_completion
+    return relay_llm.execute_current(
+agent/relay_llm.py:185: in execute
+    return callback(request)
+           ^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:2496: in <lambda>
+    kwargs, lambda request: _run_protected_sync_provider_call(callback, request),
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:442: in _run_protected_sync_provider_call
+    return callback(kwargs)
+           ^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:7376: in <lambda>
+    create=lambda request: _create_with_progress(
+agent/auxiliary_client.py:6372: in _create_with_progress
+    return _create_with_progress_once(client, kwargs, task, force_stream=force_stream)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:6421: in _create_with_progress_once
+    response = client.chat.completions.create(**kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/gemini_native_adapter.py:671: in _create_chat_completion
+    raise gemini_http_error(response)
+E   agent.gemini_native_adapter.GeminiAPIError: Gemini HTTP 429 (RESOURCE_EXHAUSTED): You exceeded your current quota, please check your plan and billing details.
+E   * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-test-limited
+E   Please retry in 48.100581664s.
+E   
+E   Google reported a free tier quota limit for this request. Limits differ by model and quota window; this does not by itself establish that the daily allowance or API key is exhausted. Check the project's model quotas and billing: https://aistudio.google.com/apikey
+------------------------------ Captured log call -------------------------------
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:46.
+WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference: payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:46.
+WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference: payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:46.
+WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference: payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:47.
+WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference: payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
+__ test_auxiliary_quota_keeps_other_routes_and_credentials_usable[zero-sync] ___
+tests/agent/test_auxiliary_quota_recovery.py:156: in test_auxiliary_quota_keeps_other_routes_and_credentials_usable
+    results, calls = [invoke()], 1
+                      ^^^^^^^^
+tests/agent/test_auxiliary_quota_recovery.py:140: in invoke
+    return asyncio.run(aux.async_call_llm(**kwargs)) if mode == 'async' else aux.call_llm(**kwargs)
+                                                                             ^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:2427: in wrapped
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:7224: in call_llm
+    response = _call_llm_impl(
+agent/auxiliary_client.py:7389: in _call_llm_impl
+    return _primary(provider=request_provider, base_url=req.base_info)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:7374: in _primary
+    _relay_sync_completion(
+agent/auxiliary_client.py:2495: in _relay_sync_completion
+    return relay_llm.execute_current(
+agent/relay_llm.py:185: in execute
+    return callback(request)
+           ^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:2496: in <lambda>
+    kwargs, lambda request: _run_protected_sync_provider_call(callback, request),
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:442: in _run_protected_sync_provider_call
+    return callback(kwargs)
+           ^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:7376: in <lambda>
+    create=lambda request: _create_with_progress(
+agent/auxiliary_client.py:6372: in _create_with_progress
+    return _create_with_progress_once(client, kwargs, task, force_stream=force_stream)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:6421: in _create_with_progress_once
+    response = client.chat.completions.create(**kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/gemini_native_adapter.py:671: in _create_chat_completion
+    raise gemini_http_error(response)
+E   agent.gemini_native_adapter.GeminiAPIError: Gemini HTTP 429 (RESOURCE_EXHAUSTED): You exceeded your current quota, please check your plan and billing details.
+E   * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, limit: 0, model: gemini-test-limited
+E   Please retry in 48.100581664s.
+E   
+E   This model has zero quota allowance for the project; a retry delay does not guarantee access. Choose an available model or check the project's quota tier.
+E   
+E   Google reported a free tier quota limit for this request. Limits differ by model and quota window; this does not by itself establish that the daily allowance or API key is exhausted. Check the project's model quotas and billing: https://aistudio.google.com/apikey
+------------------------------ Captured log call -------------------------------
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:47.
+WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference: payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
+__ test_auxiliary_quota_keeps_other_routes_and_credentials_usable[zero-async] __
+tests/agent/test_auxiliary_quota_recovery.py:156: in test_auxiliary_quota_keeps_other_routes_and_credentials_usable
+    results, calls = [invoke()], 1
+                      ^^^^^^^^
+tests/agent/test_auxiliary_quota_recovery.py:140: in invoke
+    return asyncio.run(aux.async_call_llm(**kwargs)) if mode == 'async' else aux.call_llm(**kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/asyncio/runners.py:194: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/asyncio/base_events.py:687: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:2436: in wrapped
+    return await callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:7506: in async_call_llm
+    return await _async_call_llm_impl(
+agent/auxiliary_client.py:7549: in _async_call_llm_impl
+    return await _primary(provider=request_provider, base_url=req.base_info)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:7544: in _primary
+    await _relay_async_completion(
+agent/auxiliary_client.py:2516: in _relay_async_completion
+    return await relay_llm.execute_current_async(
+agent/relay_llm.py:202: in execute_async
+    return await callback(request)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:7540: in _acreate
+    return await _acreate_with_progress(client, _kwargs, task, force_stream=_force_stream_async)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:6644: in _acreate_with_progress
+    response = await client.chat.completions.create(**kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/gemini_native_adapter.py:707: in _create_chat_completion
+    result = await asyncio.to_thread(self._sync.chat.completions.create, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/asyncio/threads.py:25: in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/concurrent/futures/thread.py:58: in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/gemini_native_adapter.py:671: in _create_chat_completion
+    raise gemini_http_error(response)
+E   agent.gemini_native_adapter.GeminiAPIError: Gemini HTTP 429 (RESOURCE_EXHAUSTED): You exceeded your current quota, please check your plan and billing details.
+E   * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, limit: 0, model: gemini-test-limited
+E   Please retry in 48.100581664s.
+E   
+E   This model has zero quota allowance for the project; a retry delay does not guarantee access. Choose an available model or check the project's quota tier.
+E   
+E   Google reported a free tier quota limit for this request. Limits differ by model and quota window; this does not by itself establish that the daily allowance or API key is exhausted. Check the project's model quotas and billing: https://aistudio.google.com/apikey
+------------------------------ Captured log call -------------------------------
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:48.
+WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference (async): payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
+_ test_auxiliary_quota_keeps_other_routes_and_credentials_usable[zero-parallel] _
+tests/agent/test_auxiliary_quota_recovery.py:153: in test_auxiliary_quota_keeps_other_routes_and_credentials_usable
+    results = list(executor.map(lambda _: invoke(), range(4)))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/concurrent/futures/_base.py:619: in result_iterator
+    yield _result_or_cancel(fs.pop())
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/concurrent/futures/_base.py:317: in _result_or_cancel
+    return fut.result(timeout)
+           ^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/concurrent/futures/_base.py:456: in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/concurrent/futures/_base.py:401: in __get_result
+    raise self._exception
+/usr/lib/python3.12/concurrent/futures/thread.py:58: in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/agent/test_auxiliary_quota_recovery.py:153: in <lambda>
+    results = list(executor.map(lambda _: invoke(), range(4)))
+                                          ^^^^^^^^
+tests/agent/test_auxiliary_quota_recovery.py:140: in invoke
+    return asyncio.run(aux.async_call_llm(**kwargs)) if mode == 'async' else aux.call_llm(**kwargs)
+                                                                             ^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:2427: in wrapped
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:7224: in call_llm
+    response = _call_llm_impl(
+agent/auxiliary_client.py:7389: in _call_llm_impl
+    return _primary(provider=request_provider, base_url=req.base_info)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:7374: in _primary
+    _relay_sync_completion(
+agent/auxiliary_client.py:2495: in _relay_sync_completion
+    return relay_llm.execute_current(
+agent/relay_llm.py:185: in execute
+    return callback(request)
+           ^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:2496: in <lambda>
+    kwargs, lambda request: _run_protected_sync_provider_call(callback, request),
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:442: in _run_protected_sync_provider_call
+    return callback(kwargs)
+           ^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:7376: in <lambda>
+    create=lambda request: _create_with_progress(
+agent/auxiliary_client.py:6372: in _create_with_progress
+    return _create_with_progress_once(client, kwargs, task, force_stream=force_stream)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:6421: in _create_with_progress_once
+    response = client.chat.completions.create(**kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/gemini_native_adapter.py:671: in _create_chat_completion
+    raise gemini_http_error(response)
+E   agent.gemini_native_adapter.GeminiAPIError: Gemini HTTP 429 (RESOURCE_EXHAUSTED): You exceeded your current quota, please check your plan and billing details.
+E   * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, limit: 0, model: gemini-test-limited
+E   Please retry in 48.100581664s.
+E   
+E   This model has zero quota allowance for the project; a retry delay does not guarantee access. Choose an available model or check the project's quota tier.
+E   
+E   Google reported a free tier quota limit for this request. Limits differ by model and quota window; this does not by itself establish that the daily allowance or API key is exhausted. Check the project's model quotas and billing: https://aistudio.google.com/apikey
+------------------------------ Captured log call -------------------------------
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:49.
+WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference: payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:49.
+WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference: payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:49.
+WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference: payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:49.
+WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference: payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
+__ test_auxiliary_quota_keeps_other_routes_and_credentials_usable[text-sync] ___
+tests/agent/test_auxiliary_quota_recovery.py:156: in test_auxiliary_quota_keeps_other_routes_and_credentials_usable
+    results, calls = [invoke()], 1
+                      ^^^^^^^^
+tests/agent/test_auxiliary_quota_recovery.py:140: in invoke
+    return asyncio.run(aux.async_call_llm(**kwargs)) if mode == 'async' else aux.call_llm(**kwargs)
+                                                                             ^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:2427: in wrapped
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:7224: in call_llm
+    response = _call_llm_impl(
+agent/auxiliary_client.py:7389: in _call_llm_impl
+    return _primary(provider=request_provider, base_url=req.base_info)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:7374: in _primary
+    _relay_sync_completion(
+agent/auxiliary_client.py:2495: in _relay_sync_completion
+    return relay_llm.execute_current(
+agent/relay_llm.py:185: in execute
+    return callback(request)
+           ^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:2496: in <lambda>
+    kwargs, lambda request: _run_protected_sync_provider_call(callback, request),
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:442: in _run_protected_sync_provider_call
+    return callback(kwargs)
+           ^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:7376: in <lambda>
+    create=lambda request: _create_with_progress(
+agent/auxiliary_client.py:6372: in _create_with_progress
+    return _create_with_progress_once(client, kwargs, task, force_stream=force_stream)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:6421: in _create_with_progress_once
+    response = client.chat.completions.create(**kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/gemini_native_adapter.py:671: in _create_chat_completion
+    raise gemini_http_error(response)
+E   agent.gemini_native_adapter.GeminiAPIError: Gemini HTTP 429 (RESOURCE_EXHAUSTED): You exceeded your current quota, please check your plan and billing details.
+E   * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, limit: 250000, model: gemini-test-limited
+E   Please retry in 48.100581664s.
+E   
+E   Google reported a free tier quota limit for this request. Limits differ by model and quota window; this does not by itself establish that the daily allowance or API key is exhausted. Check the project's model quotas and billing: https://aistudio.google.com/apikey
+------------------------------ Captured log call -------------------------------
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:49.
+WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference: payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
+__ test_auxiliary_quota_keeps_other_routes_and_credentials_usable[text-async] __
+tests/agent/test_auxiliary_quota_recovery.py:156: in test_auxiliary_quota_keeps_other_routes_and_credentials_usable
+    results, calls = [invoke()], 1
+                      ^^^^^^^^
+tests/agent/test_auxiliary_quota_recovery.py:140: in invoke
+    return asyncio.run(aux.async_call_llm(**kwargs)) if mode == 'async' else aux.call_llm(**kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/asyncio/runners.py:194: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/asyncio/base_events.py:687: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:2436: in wrapped
+    return await callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:7506: in async_call_llm
+    return await _async_call_llm_impl(
+agent/auxiliary_client.py:7549: in _async_call_llm_impl
+    return await _primary(provider=request_provider, base_url=req.base_info)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:7544: in _primary
+    await _relay_async_completion(
+agent/auxiliary_client.py:2516: in _relay_async_completion
+    return await relay_llm.execute_current_async(
+agent/relay_llm.py:202: in execute_async
+    return await callback(request)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:7540: in _acreate
+    return await _acreate_with_progress(client, _kwargs, task, force_stream=_force_stream_async)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:6644: in _acreate_with_progress
+    response = await client.chat.completions.create(**kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/gemini_native_adapter.py:707: in _create_chat_completion
+    result = await asyncio.to_thread(self._sync.chat.completions.create, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/asyncio/threads.py:25: in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/concurrent/futures/thread.py:58: in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/gemini_native_adapter.py:671: in _create_chat_completion
+    raise gemini_http_error(response)
+E   agent.gemini_native_adapter.GeminiAPIError: Gemini HTTP 429 (RESOURCE_EXHAUSTED): You exceeded your current quota, please check your plan and billing details.
+E   * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, limit: 250000, model: gemini-test-limited
+E   Please retry in 48.100581664s.
+E   
+E   Google reported a free tier quota limit for this request. Limits differ by model and quota window; this does not by itself establish that the daily allowance or API key is exhausted. Check the project's model quotas and billing: https://aistudio.google.com/apikey
+------------------------------ Captured log call -------------------------------
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:50.
+WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference (async): payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
+_ test_auxiliary_quota_keeps_other_routes_and_credentials_usable[text-parallel] _
+tests/agent/test_auxiliary_quota_recovery.py:153: in test_auxiliary_quota_keeps_other_routes_and_credentials_usable
+    results = list(executor.map(lambda _: invoke(), range(4)))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/concurrent/futures/_base.py:619: in result_iterator
+    yield _result_or_cancel(fs.pop())
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/concurrent/futures/_base.py:317: in _result_or_cancel
+    return fut.result(timeout)
+           ^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/concurrent/futures/_base.py:456: in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/concurrent/futures/_base.py:401: in __get_result
+    raise self._exception
+/usr/lib/python3.12/concurrent/futures/thread.py:58: in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/agent/test_auxiliary_quota_recovery.py:153: in <lambda>
+    results = list(executor.map(lambda _: invoke(), range(4)))
+                                          ^^^^^^^^
+tests/agent/test_auxiliary_quota_recovery.py:140: in invoke
+    return asyncio.run(aux.async_call_llm(**kwargs)) if mode == 'async' else aux.call_llm(**kwargs)
+                                                                             ^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:2427: in wrapped
+    return callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:7224: in call_llm
+    response = _call_llm_impl(
+agent/auxiliary_client.py:7389: in _call_llm_impl
+    return _primary(provider=request_provider, base_url=req.base_info)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:7374: in _primary
+    _relay_sync_completion(
+agent/auxiliary_client.py:2495: in _relay_sync_completion
+    return relay_llm.execute_current(
+agent/relay_llm.py:185: in execute
+    return callback(request)
+           ^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:2496: in <lambda>
+    kwargs, lambda request: _run_protected_sync_provider_call(callback, request),
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:442: in _run_protected_sync_provider_call
+    return callback(kwargs)
+           ^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:7376: in <lambda>
+    create=lambda request: _create_with_progress(
+agent/auxiliary_client.py:6372: in _create_with_progress
+    return _create_with_progress_once(client, kwargs, task, force_stream=force_stream)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/auxiliary_client.py:6421: in _create_with_progress_once
+    response = client.chat.completions.create(**kwargs)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+agent/gemini_native_adapter.py:671: in _create_chat_completion
+    raise gemini_http_error(response)
+E   agent.gemini_native_adapter.GeminiAPIError: Gemini HTTP 429 (RESOURCE_EXHAUSTED): You exceeded your current quota, please check your plan and billing details.
+E   * Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, limit: 250000, model: gemini-test-limited
+E   Please retry in 48.100581664s.
+E   
+E   Google reported a free tier quota limit for this request. Limits differ by model and quota window; this does not by itself establish that the daily allowance or API key is exhausted. Check the project's model quotas and billing: https://aistudio.google.com/apikey
+------------------------------ Captured log call -------------------------------
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:51.
+WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference: payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:51.
+WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference: payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:51.
+WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference: payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking gemini unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:51.
+WARNING  agent.auxiliary_client:auxiliary_client.py:7099 Auxiliary moa_reference: payment error on gemini and all fallbacks exhausted (fallback_chain + main agent model). Raising original error.
+_ test_auxiliary_quota_keeps_other_routes_and_credentials_usable[worker-sync] __
+tests/agent/test_auxiliary_quota_recovery.py:159: in test_auxiliary_quota_keeps_other_routes_and_credentials_usable
+    assert not aux._is_provider_unhealthy('nvidia')
+E   AssertionError: assert not True
+E    +  where True = <function _is_provider_unhealthy at 0x7fbf21f545e0>('nvidia')
+E    +    where <function _is_provider_unhealthy at 0x7fbf21f545e0> = aux._is_provider_unhealthy
+------------------------------ Captured log call -------------------------------
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking nvidia unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:52.
+_ test_auxiliary_quota_keeps_other_routes_and_credentials_usable[worker-async] _
+tests/agent/test_auxiliary_quota_recovery.py:159: in test_auxiliary_quota_keeps_other_routes_and_credentials_usable
+    assert not aux._is_provider_unhealthy('nvidia')
+E   AssertionError: assert not True
+E    +  where True = <function _is_provider_unhealthy at 0x7fbf21f545e0>('nvidia')
+E    +    where <function _is_provider_unhealthy at 0x7fbf21f545e0> = aux._is_provider_unhealthy
+------------------------------ Captured log call -------------------------------
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking nvidia unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:53.
+_ test_auxiliary_quota_keeps_other_routes_and_credentials_usable[worker-parallel] _
+tests/agent/test_auxiliary_quota_recovery.py:159: in test_auxiliary_quota_keeps_other_routes_and_credentials_usable
+    assert not aux._is_provider_unhealthy('nvidia')
+E   AssertionError: assert not True
+E    +  where True = <function _is_provider_unhealthy at 0x7fbf21f545e0>('nvidia')
+E    +    where <function _is_provider_unhealthy at 0x7fbf21f545e0> = aux._is_provider_unhealthy
+------------------------------ Captured log call -------------------------------
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking nvidia unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:53.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking nvidia unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:53.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking nvidia unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:53.
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking nvidia unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:53.
+_ test_auxiliary_quota_keeps_other_routes_and_credentials_usable[cross-provider-sync] _
+tests/agent/test_auxiliary_quota_recovery.py:148: in test_auxiliary_quota_keeps_other_routes_and_credentials_usable
+    assert not aux._is_provider_unhealthy('nvidia')
+E   AssertionError: assert not True
+E    +  where True = <function _is_provider_unhealthy at 0x7fbf21f545e0>('nvidia')
+E    +    where <function _is_provider_unhealthy at 0x7fbf21f545e0> = aux._is_provider_unhealthy
+------------------------------ Captured log call -------------------------------
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking nvidia unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:53.
+_ test_auxiliary_quota_keeps_other_routes_and_credentials_usable[cross-provider-async] _
+tests/agent/test_auxiliary_quota_recovery.py:148: in test_auxiliary_quota_keeps_other_routes_and_credentials_usable
+    assert not aux._is_provider_unhealthy('nvidia')
+E   AssertionError: assert not True
+E    +  where True = <function _is_provider_unhealthy at 0x7fbf21f545e0>('nvidia')
+E    +    where <function _is_provider_unhealthy at 0x7fbf21f545e0> = aux._is_provider_unhealthy
+------------------------------ Captured log call -------------------------------
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking nvidia unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:53.
+_ test_auxiliary_quota_keeps_other_routes_and_credentials_usable[cross-provider-parallel] _
+tests/agent/test_auxiliary_quota_recovery.py:148: in test_auxiliary_quota_keeps_other_routes_and_credentials_usable
+    assert not aux._is_provider_unhealthy('nvidia')
+E   AssertionError: assert not True
+E    +  where True = <function _is_provider_unhealthy at 0x7fbf21f545e0>('nvidia')
+E    +    where <function _is_provider_unhealthy at 0x7fbf21f545e0> = aux._is_provider_unhealthy
+------------------------------ Captured log call -------------------------------
+WARNING  agent.auxiliary_client:auxiliary_client.py:2967 Auxiliary: marking nvidia unhealthy for 600s (payment / credit error). Subsequent auxiliary calls will skip it until 23:57:53.
+_ test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[google-retryinfo] _
+tests/agent/test_auxiliary_quota_recovery.py:190: in test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls
+    assert not aux._is_payment_error(error)
+E   AssertionError: assert not True
+E    +  where True = <function _is_payment_error at 0x7fbf21f54860>(GeminiAPIError('Gemini HTTP 429 (RESOURCE_EXHAUSTED): You exceeded your current quota, please check your plan and billing details.'))
+E    +    where <function _is_payment_error at 0x7fbf21f54860> = aux._is_payment_error
+_ test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[google-mixed] _
+tests/agent/test_auxiliary_quota_recovery.py:190: in test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls
+    assert not aux._is_payment_error(error)
+E   assert not True
+E    +  where True = <function _is_payment_error at 0x7fbf21f54860>(GeminiAPIError("Gemini HTTP 429 (RESOURCE_EXHAUSTED): You exceeded your current quota, please check your plan and bill...y allowance or API key is exhausted. Check the project's model quotas and billing: https://aistudio.google.com/apikey"))
+E    +    where <function _is_payment_error at 0x7fbf21f54860> = aux._is_payment_error
+_ test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[nvidia-retryafter] _
+tests/agent/test_auxiliary_quota_recovery.py:201: in test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls
+    assert persisted.last_error_reset_at == pytest.approx(now[0] + delay)
+E   assert None == 1789170522.1460488 ± 1.8e+03
+E     
+E     comparison failed
+E     Obtained: None
+E     Expected: 1789170522.1460488 ± 1.8e+03
+=========================== short test summary info ============================
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[tokens-sync]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[tokens-async]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[tokens-parallel]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[requests-sync]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[requests-async]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[requests-parallel]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[zero-sync]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[zero-async]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[zero-parallel]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[text-sync]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[text-async]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[text-parallel]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[worker-sync]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[worker-async]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[worker-parallel]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[cross-provider-sync]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[cross-provider-async]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_quota_keeps_other_routes_and_credentials_usable[cross-provider-parallel]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[google-retryinfo]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[google-mixed]
+FAILED tests/agent/test_auxiliary_quota_recovery.py::test_auxiliary_pool_persists_retry_deadlines_without_losing_real_quota_walls[nvidia-retryafter]
+21 failed, 3 passed in 13.01s
+
+=== 1 file with test failures (21 tests failed) ===
+  tests/agent/test_auxiliary_quota_recovery.py  (21 tests failed)
+
++ bash scripts/run_tests.sh tests/agent/test_auxiliary_quota_recovery.py tests/agent/test_gemini_quota_recovery.py tests/agent/test_auxiliary_client.py tests/agent/test_error_classifier.py tests/agent/test_credential_pool.py tests/agent/test_gemini_native_adapter.py -q --tb=short
+▶ running per-file parallel test suite via run_tests_parallel.py
+  (TZ=UTC LANG=C.UTF-8 PYTHONHASHSEED=0; clean env)
+▶ pre-compiling bytecode cache
+▶ launching test runner
+Discovered 6 test files (~379 tests) under ['tests/agent/test_auxiliary_quota_recovery.py', 'tests/agent/test_gemini_quota_recovery.py', 'tests/agent/test_auxiliary_client.py', 'tests/agent/test_error_classifier.py', 'tests/agent/test_credential_pool.py', 'tests/agent/test_gemini_native_adapter.py']; running with -j 8
+[  6.9% |    26/~379 | ✓29 | ✗ 0] ✓ tests/agent/test_gemini_native_adapter.py (29✓, 2.2s)
+[  7.4% |    28/~379 | ✓56 | ✗ 0] ✓ tests/agent/test_gemini_quota_recovery.py (27✓, 7.9s)
+[ 20.1% |    76/~379 | ✓118 | ✗  0] ✓ tests/agent/test_credential_pool.py (62✓, 8.5s)
+[ 20.6% |    78/~379 | ✓142 | ✗  0] ✓ tests/agent/test_auxiliary_quota_recovery.py (24✓, 10.8s)
+[ 68.9% |   261/~379 | ✓345 | ✗  1] ✗ tests/agent/test_auxiliary_client.py (203✓ 1✗, 15.6s)
+
+  ╔╍ Failed: tests/agent/test_auxiliary_client.py ╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍
+  ║ ........................................................................ [ 35%]
+  ║ ..........................................................F............. [ 70%]
+  ║ ............................................................             [100%]
+  ║ =================================== FAILURES ===================================
+  ║ _ TestAuxiliaryPoolRotationRetry.test_call_llm_rotates_explicit_codex_pool_on_429 _
+  ║ tests/agent/test_auxiliary_client.py:2873: in test_call_llm_rotates_explicit_codex_pool_on_429
+  ║     assert stale_client.chat.completions.create.call_count == 2
+  ║ E   AssertionError: assert 1 == 2
+  ║ E    +  where 1 = <MagicMock name='mock.chat.completions.create' id='140208349200352'>.call_count
+  ║ E    +    where <MagicMock name='mock.chat.completions.create' id='140208349200352'> = <MagicMock name='mock.chat.completions' id='140208349950128'>.create
+  ║ E    +      where <MagicMock name='mock.chat.completions' id='140208349950128'> = <MagicMock name='mock.chat' id='140208349952672'>.completions
+  ║ E    +        where <MagicMock name='mock.chat' id='140208349952672'> = <MagicMock id='140208371844784'>.chat
+  ║ =========================== short test summary info ============================
+  ║ FAILED tests/agent/test_auxiliary_client.py::TestAuxiliaryPoolRotationRetry::test_call_llm_rotates_explicit_codex_pool_on_429
+  ║ 1 failed, 203 passed in 14.46s
+  ║
+  ║  Repro: python -m pytest tests/agent/test_auxiliary_client.py -q --tb=short
+  ╚╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍
+
+[100.0% |   379/~379 | ✓494 | ✗  5] ✗ tests/agent/test_error_classifier.py (149✓ 4✗, 20.5s)
+
+  ╔╍ Failed: tests/agent/test_error_classifier.py ╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍
+  ║ _ TestClassifyApiError.test_resource_exhausted_separator_variants_without_status[resource exhausted] _
+  ║ tests/agent/test_error_classifier.py:293: in test_resource_exhausted_separator_variants_without_status
+  ║     assert result.reason == FailoverReason.rate_limit
+  ║ E   AssertionError: assert <FailoverReason.overloaded: 'overloaded'> == <FailoverReason.rate_limit: 'rate_limit'>
+  ║ E    +  where <FailoverReason.overloaded: 'overloaded'> = ClassifiedError(reason=<FailoverReason.overloaded: 'overloaded'>, status_code=None, provider='nvidia', model='nvidia/n...2/32)', error_context={}, retryable=True, should_compress=False, should_rotate_credential=False, should_fallback=False).reason
+  ║ E    +  and   <FailoverReason.rate_limit: 'rate_limit'> = FailoverReason.rate_limit
+  ║ _ TestClassifyApiError.test_resource_exhausted_separator_variants_without_status[RESOURCE_EXHAUSTED] _
+  ║ tests/agent/test_error_classifier.py:293: in test_resource_exhausted_separator_variants_without_status
+  ║     assert result.reason == FailoverReason.rate_limit
+  ║ E   AssertionError: assert <FailoverReason.overloaded: 'overloaded'> == <FailoverReason.rate_limit: 'rate_limit'>
+  ║ E    +  where <FailoverReason.overloaded: 'overloaded'> = ClassifiedError(reason=<FailoverReason.overloaded: 'overloaded'>, status_code=None, provider='nvidia', model='nvidia/n...2/32)', error_context={}, retryable=True, should_compress=False, should_rotate_credential=False, should_fallback=False).reason
+  ║ E    +  and   <FailoverReason.rate_limit: 'rate_limit'> = FailoverReason.rate_limit
+  ║ _ TestClassifyApiError.test_resource_exhausted_separator_variants_without_status[ResourceExhausted] _
+  ║ tests/agent/test_error_classifier.py:293: in test_resource_exhausted_separator_variants_without_status
+  ║     assert result.reason == FailoverReason.rate_limit
+  ║ E   AssertionError: assert <FailoverReason.overloaded: 'overloaded'> == <FailoverReason.rate_limit: 'rate_limit'>
+  ║ E    +  where <FailoverReason.overloaded: 'overloaded'> = ClassifiedError(reason=<FailoverReason.overloaded: 'overloaded'>, status_code=None, provider='nvidia', model='nvidia/n...2/32)', error_context={}, retryable=True, should_compress=False, should_rotate_credential=False, should_fallback=False).reason
+  ║ E    +  and   <FailoverReason.rate_limit: 'rate_limit'> = FailoverReason.rate_limit
+  ║ _ TestClassifyApiError.test_resource_exhausted_separator_variants_without_status[resource-exhausted] _
+  ║ tests/agent/test_error_classifier.py:293: in test_resource_exhausted_separator_variants_without_status
+  ║     assert result.reason == FailoverReason.rate_limit
+  ║ E   AssertionError: assert <FailoverReason.overloaded: 'overloaded'> == <FailoverReason.rate_limit: 'rate_limit'>
+  ║ E    +  where <FailoverReason.overloaded: 'overloaded'> = ClassifiedError(reason=<FailoverReason.overloaded: 'overloaded'>, status_code=None, provider='nvidia', model='nvidia/n...2/32)', error_context={}, retryable=True, should_compress=False, should_rotate_credential=False, should_fallback=False).reason
+  ║ E    +  and   <FailoverReason.rate_limit: 'rate_limit'> = FailoverReason.rate_limit
+  ║ =========================== short test summary info ============================
+  ║ FAILED tests/agent/test_error_classifier.py::TestClassifyApiError::test_resource_exhausted_separator_variants_without_status[resource exhausted]
+  ║ FAILED tests/agent/test_error_classifier.py::TestClassifyApiError::test_resource_exhausted_separator_variants_without_status[RESOURCE_EXHAUSTED]
+  ║ FAILED tests/agent/test_error_classifier.py::TestClassifyApiError::test_resource_exhausted_separator_variants_without_status[ResourceExhausted]
+  ║ FAILED tests/agent/test_error_classifier.py::TestClassifyApiError::test_resource_exhausted_separator_variants_without_status[resource-exhausted]
+  ║ 4 failed, 149 passed in 19.55s
+  ║
+  ║  Repro: python -m pytest tests/agent/test_error_classifier.py -q --tb=short
+  ╚╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍╍
+
+
+=== Summary: 6 files, 494 tests passed, 5 failed (100% complete) in 20.5s (8 workers) ===
+  Durations cached to test_durations.json (6 files)
+
+=== Per-file subprocess time distribution ===
+  Files:   6
+  Total subprocess CPU-wall: 65.5s  (runner wall: 20.5s, parallelism: 8x)
+  P50: 10.80s  P90: 20.49s  P95: 20.49s  P99: 20.49s  Max: 20.49s
+  <1s: 0 files (0%)  <2s: 0 files (0%)
+  Top 10 slowest:
+     20.49s  tests/agent/test_error_classifier.py
+     15.65s  tests/agent/test_auxiliary_client.py
+     10.80s  tests/agent/test_auxiliary_quota_recovery.py
+      8.52s  tests/agent/test_credential_pool.py
+      7.86s  tests/agent/test_gemini_quota_recovery.py
+      2.19s  tests/agent/test_gemini_native_adapter.py
+
+=== Failure output ===
+
+--- tests/agent/test_auxiliary_client.py ---
+........................................................................ [ 35%]
+..........................................................F............. [ 70%]
+............................................................             [100%]
+=================================== FAILURES ===================================
+_ TestAuxiliaryPoolRotationRetry.test_call_llm_rotates_explicit_codex_pool_on_429 _
+tests/agent/test_auxiliary_client.py:2873: in test_call_llm_rotates_explicit_codex_pool_on_429
+    assert stale_client.chat.completions.create.call_count == 2
+E   AssertionError: assert 1 == 2
+E    +  where 1 = <MagicMock name='mock.chat.completions.create' id='140208349200352'>.call_count
+E    +    where <MagicMock name='mock.chat.completions.create' id='140208349200352'> = <MagicMock name='mock.chat.completions' id='140208349950128'>.create
+E    +      where <MagicMock name='mock.chat.completions' id='140208349950128'> = <MagicMock name='mock.chat' id='140208349952672'>.completions
+E    +        where <MagicMock name='mock.chat' id='140208349952672'> = <MagicMock id='140208371844784'>.chat
+=========================== short test summary info ============================
+FAILED tests/agent/test_auxiliary_client.py::TestAuxiliaryPoolRotationRetry::test_call_llm_rotates_explicit_codex_pool_on_429
+1 failed, 203 passed in 14.46s
+
+--- tests/agent/test_error_classifier.py ---
+....................FFFF................................................ [ 47%]
+........................................................................ [ 94%]
+.........                                                                [100%]
+=================================== FAILURES ===================================
+_ TestClassifyApiError.test_resource_exhausted_separator_variants_without_status[resource exhausted] _
+tests/agent/test_error_classifier.py:293: in test_resource_exhausted_separator_variants_without_status
+    assert result.reason == FailoverReason.rate_limit
+E   AssertionError: assert <FailoverReason.overloaded: 'overloaded'> == <FailoverReason.rate_limit: 'rate_limit'>
+E    +  where <FailoverReason.overloaded: 'overloaded'> = ClassifiedError(reason=<FailoverReason.overloaded: 'overloaded'>, status_code=None, provider='nvidia', model='nvidia/n...2/32)', error_context={}, retryable=True, should_compress=False, should_rotate_credential=False, should_fallback=False).reason
+E    +  and   <FailoverReason.rate_limit: 'rate_limit'> = FailoverReason.rate_limit
+_ TestClassifyApiError.test_resource_exhausted_separator_variants_without_status[RESOURCE_EXHAUSTED] _
+tests/agent/test_error_classifier.py:293: in test_resource_exhausted_separator_variants_without_status
+    assert result.reason == FailoverReason.rate_limit
+E   AssertionError: assert <FailoverReason.overloaded: 'overloaded'> == <FailoverReason.rate_limit: 'rate_limit'>
+E    +  where <FailoverReason.overloaded: 'overloaded'> = ClassifiedError(reason=<FailoverReason.overloaded: 'overloaded'>, status_code=None, provider='nvidia', model='nvidia/n...2/32)', error_context={}, retryable=True, should_compress=False, should_rotate_credential=False, should_fallback=False).reason
+E    +  and   <FailoverReason.rate_limit: 'rate_limit'> = FailoverReason.rate_limit
+_ TestClassifyApiError.test_resource_exhausted_separator_variants_without_status[ResourceExhausted] _
+tests/agent/test_error_classifier.py:293: in test_resource_exhausted_separator_variants_without_status
+    assert result.reason == FailoverReason.rate_limit
+E   AssertionError: assert <FailoverReason.overloaded: 'overloaded'> == <FailoverReason.rate_limit: 'rate_limit'>
+E    +  where <FailoverReason.overloaded: 'overloaded'> = ClassifiedError(reason=<FailoverReason.overloaded: 'overloaded'>, status_code=None, provider='nvidia', model='nvidia/n...2/32)', error_context={}, retryable=True, should_compress=False, should_rotate_credential=False, should_fallback=False).reason
+E    +  and   <FailoverReason.rate_limit: 'rate_limit'> = FailoverReason.rate_limit
+_ TestClassifyApiError.test_resource_exhausted_separator_variants_without_status[resource-exhausted] _
+tests/agent/test_error_classifier.py:293: in test_resource_exhausted_separator_variants_without_status
+    assert result.reason == FailoverReason.rate_limit
+E   AssertionError: assert <FailoverReason.overloaded: 'overloaded'> == <FailoverReason.rate_limit: 'rate_limit'>
+E    +  where <FailoverReason.overloaded: 'overloaded'> = ClassifiedError(reason=<FailoverReason.overloaded: 'overloaded'>, status_code=None, provider='nvidia', model='nvidia/n...2/32)', error_context={}, retryable=True, should_compress=False, should_rotate_credential=False, should_fallback=False).reason
+E    +  and   <FailoverReason.rate_limit: 'rate_limit'> = FailoverReason.rate_limit
+=========================== short test summary info ============================
+FAILED tests/agent/test_error_classifier.py::TestClassifyApiError::test_resource_exhausted_separator_variants_without_status[resource exhausted]
+FAILED tests/agent/test_error_classifier.py::TestClassifyApiError::test_resource_exhausted_separator_variants_without_status[RESOURCE_EXHAUSTED]
+FAILED tests/agent/test_error_classifier.py::TestClassifyApiError::test_resource_exhausted_separator_variants_without_status[ResourceExhausted]
+FAILED tests/agent/test_error_classifier.py::TestClassifyApiError::test_resource_exhausted_separator_variants_without_status[resource-exhausted]
+4 failed, 149 passed in 19.55s
+
+=== 2 files with test failures (5 tests failed) ===
+  tests/agent/test_auxiliary_client.py  (1 test failed)
+  tests/agent/test_error_classifier.py  (4 tests failed)
+
+WORKBENCH_ERROR: RuntimeError: command failed (1): ['bash', 'scripts/run_tests.sh', 'tests/agent/test_auxiliary_quota_recovery.py', 'tests/agent/test_gemini_quota_recovery.py', 'tests/agent/test_auxiliary_client.py', 'tests/agent/test_error_classifier.py', 'tests/agent/test_credential_pool.py', 'tests/agent/test_gemini_native_adapter.py', '-q', '--tb=short']
