@@ -45,8 +45,19 @@ export type ArtifactRegistry = Record<string, ArtifactRecord[]>
 const MAX_ARTIFACTS_PER_SESSION = 24
 const MAX_VERSIONS_PER_ARTIFACT = 20
 const MAX_SESSIONS = 40
+/**
+ * Cumulative generated-source characters retained in addition to the durable
+ * transcript. JS strings are UTF-16, so this caps ordinary backing storage at
+ * roughly 8 MiB before small object/array overhead. A single newest artifact
+ * may exceed the cap: exact executable/renderable content is never truncated.
+ */
+export const ARTIFACT_REGISTRY_MAX_CONTENT_CHARS = 4 * 1024 * 1024
 
-function pruneRegistry(registry: ArtifactRegistry): ArtifactRegistry {
+function artifactRecordContentChars(record: ArtifactRecord): number {
+  return record.versions.reduce((total, version) => total + version.content.length, 0)
+}
+
+function countBoundedRegistry(registry: ArtifactRegistry): ArtifactRegistry {
   const entries = Object.entries(registry)
     .map(([sessionId, records]) => {
       const trimmed = [...records]
@@ -67,6 +78,83 @@ function pruneRegistry(registry: ArtifactRegistry): ArtifactRegistry {
   return Object.fromEntries(entries)
 }
 
+/**
+ * Apply count bounds, then shed duplicate artifact payload by age. Historical
+ * versions go first; if latest-only records are still over budget, whole old
+ * artifacts go next. Keep one newest record even when its exact current body is
+ * itself larger than the budget — silently truncating HTML/code would corrupt it.
+ */
+function pruneRegistry(registry: ArtifactRegistry): ArtifactRegistry {
+  const counted = countBoundedRegistry(registry)
+  let totalChars = Object.values(counted)
+    .flat()
+    .reduce((total, record) => total + artifactRecordContentChars(record), 0)
+
+  if (totalChars <= ARTIFACT_REGISTRY_MAX_CONTENT_CHARS) {
+    return counted
+  }
+
+  // Work on fresh records/version arrays: callers may still hold the previous
+  // atom value, and pruning it in place would mutate React's current snapshot.
+  const working = Object.fromEntries(
+    Object.entries(counted).map(([sessionId, records]) => [
+      sessionId,
+      records.map(record => ({ ...record, versions: [...record.versions] }))
+    ])
+  ) as ArtifactRegistry
+  const records = Object.values(working).flat()
+  const historical = records
+    .flatMap(record =>
+      record.versions.slice(0, -1).map(version => ({
+        createdAt: version.createdAt,
+        hash: version.hash,
+        record
+      }))
+    )
+    .sort((a, b) => a.createdAt - b.createdAt)
+
+  for (const candidate of historical) {
+    if (totalChars <= ARTIFACT_REGISTRY_MAX_CONTENT_CHARS) {
+      break
+    }
+
+    const index = candidate.record.versions.findIndex(version => version.hash === candidate.hash)
+
+    if (index === -1 || index === candidate.record.versions.length - 1) {
+      continue
+    }
+
+    totalChars -= candidate.record.versions[index].content.length
+    candidate.record.versions.splice(index, 1)
+  }
+
+  let recordCount = records.length
+  const oldestRecords = [...records].sort((a, b) => a.updatedAt - b.updatedAt)
+
+  for (const record of oldestRecords) {
+    if (totalChars <= ARTIFACT_REGISTRY_MAX_CONTENT_CHARS || recordCount <= 1) {
+      break
+    }
+
+    const sessionRecords = working[record.sessionId]
+    const index = sessionRecords?.findIndex(candidate => candidate.id === record.id) ?? -1
+
+    if (index === -1) {
+      continue
+    }
+
+    totalChars -= artifactRecordContentChars(sessionRecords[index])
+    sessionRecords.splice(index, 1)
+    recordCount--
+
+    if (sessionRecords.length === 0) {
+      delete working[record.sessionId]
+    }
+  }
+
+  return working
+}
+
 export const $artifactRegistry = atom<ArtifactRegistry>({})
 
 /** Per-artifact selected version index; absent = newest. */
@@ -84,6 +172,54 @@ export function findArtifact(registry: ArtifactRegistry, artifactId: string): Ar
   }
 
   return null
+}
+
+function sameVersionSelection(a: Record<string, number>, b: Record<string, number>): boolean {
+  const aEntries = Object.entries(a)
+  const bEntries = Object.entries(b)
+
+  return aEntries.length === bEntries.length && aEntries.every(([id, index]) => b[id] === index)
+}
+
+/** Keep a pinned surviving version attached to its content hash when pruning
+ * removes older array entries. Missing/pruned pins fall back to newest. */
+function reconcileVersionSelection(previous: ArtifactRegistry, next: ArtifactRegistry): void {
+  const selection = $artifactVersionSelection.get()
+
+  if (Object.keys(selection).length === 0) {
+    return
+  }
+
+  const reconciled: Record<string, number> = {}
+
+  for (const [artifactId, selectedIndex] of Object.entries(selection)) {
+    const selectedHash = findArtifact(previous, artifactId)?.versions[selectedIndex]?.hash
+    const nextRecord = findArtifact(next, artifactId)
+
+    if (!selectedHash || !nextRecord) {
+      continue
+    }
+
+    const nextIndex = nextRecord.versions.findIndex(version => version.hash === selectedHash)
+
+    if (nextIndex >= 0 && nextIndex < nextRecord.versions.length - 1) {
+      reconciled[artifactId] = nextIndex
+    }
+  }
+
+  if (!sameVersionSelection(selection, reconciled)) {
+    $artifactVersionSelection.set(reconciled)
+  }
+}
+
+function commitArtifactRegistry(candidate: ArtifactRegistry): ArtifactRegistry {
+  const previous = $artifactRegistry.get()
+  const next = pruneRegistry(candidate)
+
+  reconcileVersionSelection(previous, next)
+  $artifactRegistry.set(next)
+
+  return next
 }
 
 export function getArtifact(artifactId: string): ArtifactRecord | null {
@@ -151,14 +287,13 @@ export function upsertArtifact(
       versions
     }
 
-    $artifactRegistry.set(
-      pruneRegistry({
-        ...registry,
-        [id]: records.map(record => (record.id === existing.id ? next : record))
-      })
-    )
+    const committed = commitArtifactRegistry({
+      ...registry,
+      [id]: records.map(record => (record.id === existing.id ? next : record))
+    })
+    const committedRecord = findArtifact(committed, existing.id) ?? next
 
-    return { artifactId: existing.id, record: next, versionAdded: true }
+    return { artifactId: existing.id, record: committedRecord, versionAdded: true }
   }
 
   const record: ArtifactRecord = {
@@ -173,9 +308,10 @@ export function upsertArtifact(
     versions: [{ content: trimmed, createdAt: now, hash }]
   }
 
-  $artifactRegistry.set(pruneRegistry({ ...registry, [id]: [...records, record] }))
+  const committed = commitArtifactRegistry({ ...registry, [id]: [...records, record] })
+  const committedRecord = findArtifact(committed, record.id) ?? record
 
-  return { artifactId: record.id, record, versionAdded: true }
+  return { artifactId: record.id, record: committedRecord, versionAdded: true }
 }
 
 /** A rail tab for an artifact references the registry by id rather than
