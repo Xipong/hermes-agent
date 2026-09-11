@@ -42,6 +42,8 @@ jobs:
           bounded = [
               'web/src/lib/api.ts',
               'web/src/lib/api-types.ts',
+              'web/src/pages/SessionsPage.tsx',
+              'web/src/components/SessionMessageList.tsx',
               'cli-config.yaml.example',
               'website/docs/reference/advanced-provider-configuration.md',
           ]
@@ -76,7 +78,7 @@ jobs:
         shell: bash
         working-directory: source
         run: |
-          git add -N web/src/lib/api-types.ts website/docs/reference/advanced-provider-configuration.md
+          git add -N web/src/lib/api-types.ts web/src/components/SessionMessageList.tsx website/docs/reference/advanced-provider-configuration.md
           git diff --check
           git diff --binary > validation-output/candidate.patch
           git diff --stat | tee validation-output/stat.txt
