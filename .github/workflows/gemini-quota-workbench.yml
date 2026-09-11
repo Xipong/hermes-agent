@@ -4,9 +4,12 @@ on:
     branches: [work/gemini-quota-scope-20260912]
     paths:
       - .github/workflows/gemini-quota-workbench.yml
-      - .github/gemini_quota_workbench.py
+      - .github/gemini_quota_workbench*.py
 permissions:
   contents: write
+concurrency:
+  group: gemini-quota-workbench-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   regression:
     runs-on: ubuntu-latest
@@ -15,34 +18,12 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           fetch-depth: 1
-      - name: Inspect quota and retry integration points
+      - name: Install repository test dependencies
         run: |
-          python3 - <<'PY'
-          import ast
-          from pathlib import Path
-          paths = [Path('agent/credential_pool.py'), Path('agent/agent_runtime_helpers.py'), Path('agent/error_classifier.py'), Path('agent/turn_recovery.py'), *Path('agent').glob('*retry*.py')]
-          for path in dict.fromkeys(paths):
-              print('\nFILE', path)
-              for node in ast.walk(ast.parse(path.read_text())):
-                  if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                      print(f'{node.lineno}-{node.end_lineno}: {node.name}')
-          print('\nTEST FILES')
-          for path in Path('tests').rglob('test_*.py'):
-              if any(word in path.name for word in ('gemini', 'retry_policy', 'error_classifier', 'credential_pool', 'rate_limit', 'fallback')):
-                  print(path)
-          print('\nDEV DEPENDENCIES')
-          import tomllib
-          config = tomllib.loads(Path('pyproject.toml').read_text())
-          print(config.get('project', {}).get('optional-dependencies', {}).get('dev', []))
-          print(config.get('dependency-groups', {}))
-          PY
-      - name: Build and verify fix when workbench is present
+          python3 -m venv .venv
+          .venv/bin/python -m pip install -q 'uv==0.8.22'
+          .venv/bin/uv pip install --python .venv/bin/python -q -e '.[dev]'
+      - name: Prove baseline failures, verify fix, and publish clean branch
         env:
           HERMES_TEST_FILE_RETRIES: '0'
-        run: |
-          if [ -f .github/gemini_quota_workbench.py ]; then
-            python3 -m venv .venv
-            .venv/bin/python -m pip install 'uv==0.8.22'
-            .venv/bin/uv pip install --python .venv/bin/python -e '.[dev]'
-            .venv/bin/python .github/gemini_quota_workbench.py
-          fi
+        run: .venv/bin/python .github/gemini_quota_workbench_v2.py
