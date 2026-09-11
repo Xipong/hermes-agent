@@ -9,43 +9,17 @@ concurrency:
   group: quota-log-followup-108661
   cancel-in-progress: true
 jobs:
-  inspect:
+  regression:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-      - name: Inspect recovery call sites
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - name: Install repository test dependencies
         run: |
-          python3 - <<'PY'
-          import ast, pathlib, re
-          out = []
-          for path in ['AGENTS.md', 'agent/AGENTS.md', 'tests/AGENTS.md', 'tests/agent/AGENTS.md']:
-              p = pathlib.Path(path)
-              if p.exists():
-                  out.extend([f'===== {path} =====', p.read_text()])
-          for path in ['agent/auxiliary_client.py', 'agent/auxiliary_health.py', 'agent/error_classifier.py', 'agent/credential_pool.py', 'agent/turn_api_error.py', 'agent/agent_runtime_helpers.py', 'agent/fallback_cooldown.py', 'tests/agent/test_auxiliary_client.py', 'tests/agent/test_gemini_model_quota.py']:
-              p = pathlib.Path(path)
-              if not p.exists():
-                  continue
-              text = p.read_text()
-              out.append(f'===== {path} ({len(text.splitlines())} lines) =====')
-              tree = ast.parse(text)
-              for node in ast.walk(tree):
-                  if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                      if any(s in node.name.lower() for s in ['payment', 'rate_limit', 'pool', 'unhealthy', 'recover', 'call_llm', 'retry', '429', 'classify']):
-                          out.append(f'{node.lineno}-{node.end_lineno}: {node.name}')
-              lines = text.splitlines()
-              hits = [i for i,s in enumerate(lines) if re.search(r'_is_payment_error|_is_rate_limit_error|try_rotate|mark_exhausted|classify_error|resource.?exhausted|STATUS_EXHAUSTED|_EXHAUST|_unhealthy_providers', s, re.I)]
-              printed = set()
-              for i in hits:
-                  for j in range(max(0,i-4), min(len(lines),i+7)):
-                      if j not in printed:
-                          out.append(f'{j+1}: {lines[j]}')
-                          printed.add(j)
-          pathlib.Path('.github/quota-inspect.txt').write_text('\n'.join(out)+'\n')
-          PY
-          git config user.name 'Xipong'
-          git config user.email '217837358+Xipong@users.noreply.github.com'
-          git add .github/quota-inspect.txt
-          git commit -m 'chore: record quota recovery inspection on workbench only'
-          git push origin HEAD:work/quota-log-followup-108661
+          python3 -m venv .venv
+          .venv/bin/python -m pip install -q 'uv==0.8.22'
+          .venv/bin/uv pip install --python .venv/bin/python -q -e '.[dev]'
+      - name: Reproduce PR gaps, verify fix, publish clean commit
+        env:
+          HERMES_TEST_FILE_RETRIES: '0'
+        run: .venv/bin/python .github/quota_followup.py
