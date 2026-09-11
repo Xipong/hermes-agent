@@ -2,7 +2,7 @@ name: Quota log follow-up workbench
 on:
   push:
     branches: [work/quota-log-followup-108661]
-    paths: [.github/workflows/quota-log-followup.yml, .github/quota_followup.py]
+    paths: [.github/workflows/quota-log-followup.yml, '.github/quota_followup*.py']
 permissions:
   contents: write
 concurrency:
@@ -22,4 +22,4 @@ jobs:
       - name: Reproduce PR gaps, verify fix, publish clean commit
         env:
           HERMES_TEST_FILE_RETRIES: '0'
-        run: .venv/bin/python .github/quota_followup.py
+        run: .venv/bin/python .github/quota_followup_v2.py
