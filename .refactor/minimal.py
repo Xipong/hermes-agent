@@ -7,6 +7,8 @@ from pathlib import Path
 ROOT = Path.cwd()
 API = ROOT / "web/src/lib/api.ts"
 TYPES = ROOT / "web/src/lib/api-types.ts"
+SESSIONS = ROOT / "web/src/pages/SessionsPage.tsx"
+SESSION_MESSAGES = ROOT / "web/src/components/SessionMessageList.tsx"
 CONFIG = ROOT / "cli-config.yaml.example"
 DOC = ROOT / "website/docs/reference/advanced-provider-configuration.md"
 OUTPUT = ROOT / "validation-output"
@@ -18,6 +20,12 @@ API_IMPORT_ANCHOR = (
     '  attemptDashboardTokenReloadOnce,\n'
     '  clearDashboardTokenReloadAttempt,\n'
     '} from "@/lib/dashboard-auth-reload";\n'
+)
+SESSION_MESSAGES_START = "function ToolCallBlock({"
+SESSION_MESSAGES_END = "function SessionRow({"
+SESSION_MARKDOWN_IMPORT = 'import { Markdown } from "@/components/Markdown";\n'
+SESSION_MESSAGES_IMPORT = (
+    'import { MessageList } from "@/components/SessionMessageList";\n'
 )
 CONFIG_START = "# Command-minted credentials (optional): key_cmd"
 CONFIG_END = (
@@ -237,6 +245,39 @@ def rewrite_consumer_type_imports(type_names: set[str]) -> list[str]:
     return changed
 
 
+def split_session_message_list() -> None:
+    text = SESSIONS.read_text(encoding="utf-8")
+    start = text.index(SESSION_MESSAGES_START)
+    end = text.index(SESSION_MESSAGES_END, start)
+    block = text[start:end].rstrip()
+    block = replace_once(
+        block,
+        "function MessageList({",
+        "export function MessageList({",
+        "MessageList export",
+    )
+    header = """import { useEffect, useRef, useState } from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
+import { Badge } from "@nous-research/ui/ui/components/badge";
+import { ListItem } from "@nous-research/ui/ui/components/list-item";
+
+import { Markdown } from "@/components/Markdown";
+import { useI18n } from "@/i18n";
+import type { SessionMessage } from "@/lib/api-types";
+import { timeAgo } from "@/lib/utils";
+
+"""
+    SESSION_MESSAGES.write_text(header + block + "\n", encoding="utf-8")
+    text = text[:start] + text[end:]
+    text = replace_once(
+        text,
+        SESSION_MARKDOWN_IMPORT,
+        SESSION_MESSAGES_IMPORT,
+        "SessionsPage message-list import",
+    )
+    SESSIONS.write_text(text, encoding="utf-8")
+
+
 def move_advanced_config_reference() -> None:
     text = CONFIG.read_text(encoding="utf-8")
     start = text.index(CONFIG_START)
@@ -325,7 +366,14 @@ def git_numstat(paths: list[str]) -> dict[str, tuple[int, int]]:
 
 def write_manifests(consumers: list[str]) -> None:
     OUTPUT.mkdir(exist_ok=True)
-    api_files = ["web/src/lib/api.ts", "web/src/lib/api-types.ts", *consumers]
+    session_path = str(SESSIONS.relative_to(ROOT))
+    message_path = str(SESSION_MESSAGES.relative_to(ROOT))
+    api_files = [
+        "web/src/lib/api.ts",
+        "web/src/lib/api-types.ts",
+        message_path,
+        *consumers,
+    ]
     config_files = [
         "cli-config.yaml.example",
         "website/docs/reference/advanced-provider-configuration.md",
@@ -344,9 +392,13 @@ def write_manifests(consumers: list[str]) -> None:
     for path in consumers:
         added, deleted = stats.get(path, (0, 0))
         churn = added + deleted
-        if churn > 40:
-            raise AssertionError(f"unexpected non-import churn in {path}: +{added}/-{deleted}")
-        consumer_churn += churn
+        limit = 450 if path == session_path else 40
+        if churn > limit:
+            raise AssertionError(
+                f"unexpected non-import churn in {path}: +{added}/-{deleted}"
+            )
+        if path != session_path:
+            consumer_churn += churn
     if consumer_churn > 500:
         raise AssertionError(f"consumer import churn is too large: {consumer_churn}")
     (OUTPUT / "numstat.txt").write_text(
@@ -358,10 +410,11 @@ def write_manifests(consumers: list[str]) -> None:
 def main() -> None:
     type_names = split_api_types()
     consumers = rewrite_consumer_type_imports(type_names)
+    split_session_message_list()
     move_advanced_config_reference()
     assert_import_boundaries(type_names)
     write_manifests(consumers)
-    for path in [API, TYPES, CONFIG, DOC]:
+    for path in [API, TYPES, SESSIONS, SESSION_MESSAGES, CONFIG, DOC]:
         print(path.relative_to(ROOT), len(path.read_text(encoding="utf-8").splitlines()))
     print("consumer type-import files", len(consumers))
 
