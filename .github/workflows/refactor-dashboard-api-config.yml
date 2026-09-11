@@ -44,9 +44,9 @@ jobs:
         run: |
           mapfile -t ts_files < validation-output/ts-files.txt
           node node_modules/prettier/bin/prettier.cjs --write "${ts_files[@]}"
-          node node_modules/eslint/bin/eslint.js --fix --max-warnings 0 "${ts_files[@]}"
+          node node_modules/eslint/bin/eslint.js --fix "${ts_files[@]}"
           node node_modules/prettier/bin/prettier.cjs --write "${ts_files[@]}"
-          node node_modules/eslint/bin/eslint.js --max-warnings 0 "${ts_files[@]}"
+          node node_modules/eslint/bin/eslint.js "${ts_files[@]}"
       - name: Enforce bounded files and type-only ownership
         working-directory: source
         run: |
