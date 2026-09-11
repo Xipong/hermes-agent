@@ -22,7 +22,7 @@ print("first exports", exports[:30])
 print("last exports", exports[-30:])
 
 imports = []
-pattern = re.compile(r"import\s+(?:type\s+)?\{.*?\}\s+from\s+['\"]@/lib/api['\"];?", re.S)
+pattern = re.compile(r"import\s+(?:type\s+)?\{[^}]*\}\s+from\s+['\"]@/lib/api['\"];?", re.S)
 for path in sorted((root / "web/src").rglob("*.ts*")):
     text = path.read_text(encoding="utf-8")
     for match in pattern.finditer(text):
@@ -49,3 +49,21 @@ while i < len(config_lines):
 print("comment blocks >=4", len(blocks))
 for item in sorted(blocks, reverse=True)[:80]:
     print("BLOCK", item)
+
+for rel, needles in {
+    "website/docs/integrations/providers.md": [
+        "#### Command-minted credentials (`key_cmd`)",
+        "request_timeout_seconds",
+    ],
+    "website/docs/user-guide/configuration.md": [
+        "## Git Worktree Isolation",
+        "provider_routing",
+        "response_cache",
+    ],
+}.items():
+    path = root / rel
+    text = path.read_text(encoding="utf-8")
+    print("DOC", rel, "lines", len(text.splitlines()))
+    for needle in needles:
+        pos = text.find(needle)
+        print("MARKER", rel, repr(needle), "line", None if pos < 0 else text[:pos].count("\n") + 1)
