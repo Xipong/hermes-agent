@@ -18,7 +18,7 @@ jobs:
         run: |
           python3 -m venv .venv
           .venv/bin/python -m pip install -q 'uv==0.8.22'
-          .venv/bin/uv pip install --python .venv/bin/python -q -e '.[dev]' 'ruff==0.12.11'
+          .venv/bin/uv pip install --python .venv/bin/python -q -e '.[dev]'
       - name: Reproduce PR gaps, verify fix, publish clean commit
         env:
           HERMES_TEST_FILE_RETRIES: '0'
