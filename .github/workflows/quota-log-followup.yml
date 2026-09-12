@@ -14,10 +14,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
-      - name: Check out PR branch
-        run: |
-          git fetch origin fix/gemini-model-quota-108656
-          git checkout --detach FETCH_HEAD
+        with:
+          ref: fix/gemini-model-quota-108656
       - name: Install repository test dependencies
         run: |
           python3 -m venv .venv
