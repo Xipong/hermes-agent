@@ -24,9 +24,11 @@ jobs:
           assert hashlib.sha256(data).hexdigest() == '90135149b288b4b9c972746da5aeb419df8c9d17a1f025d7ce9015c94d652f5e'
           pathlib.Path('/tmp/build_review_pr.py').write_bytes(data)
           PY
+          cp .github/review-summary-driver.py /tmp/driver.py
+          cp .github/refine-review-patch.py /tmp/refine_review_patch.py
           git fetch origin e440bf35472c30c2ee5527e884a866c12ad15b91 --depth=1
           git checkout -b fix/desktop-durable-review-summary e440bf35472c30c2ee5527e884a866c12ad15b91
-          python /tmp/build_review_pr.py
+          python /tmp/driver.py
       - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # 8.2.0
         with:
           version: '0.9.28'
@@ -55,9 +57,8 @@ jobs:
           test "$py" -ne 0 && test "$js" -ne 0
       - name: Apply production fix
         run: |
-          python /tmp/build_review_pr.py --apply
+          python /tmp/driver.py --apply
           python -m compileall -q agent/review_summary.py agent/background_review.py agent/turn_context.py hermes_state_messages.py tui_gateway/server.py
-          git diff --check
           git status --short
       - name: Backend regressions
         env:
@@ -69,16 +70,17 @@ jobs:
       - name: Desktop regressions and formatting
         working-directory: apps/desktop
         run: |
-          npx prettier --write src/lib/chat-messages/review-summary.ts src/lib/chat-messages/hydration.ts src/lib/chat-messages/reconciliation.ts src/app/session/hooks/use-message-stream/gateway-event/status.ts src/components/assistant-ui/thread/system-message.tsx src/app/session/hooks/use-message-stream/review-summary-durability.test.tsx
+          files='src/lib/chat-messages/review-summary.ts src/lib/chat-messages/hydration.ts src/lib/chat-messages/reconciliation.ts src/app/session/hooks/use-message-stream/gateway-event/status.ts src/components/assistant-ui/thread/system-message.tsx src/app/session/hooks/use-message-stream/review-summary-durability.test.tsx src/app/contrib/wiring.tsx src/app/contrib/hooks/use-background-sync.ts'
+          npx prettier --write $files
           npx vitest run --project ui src/app/session/hooks/use-message-stream/review-summary-durability.test.tsx src/app/session/hooks/use-message-stream/timeline-events.test.tsx src/lib/chat-messages.test.ts src/app/contrib/hooks/use-background-sync.test.ts
           npx tsc -p . --noEmit
-          npx eslint src/lib/chat-messages/review-summary.ts src/lib/chat-messages/hydration.ts src/lib/chat-messages/reconciliation.ts src/app/session/hooks/use-message-stream/gateway-event/status.ts src/components/assistant-ui/thread/system-message.tsx src/app/session/hooks/use-message-stream/review-summary-durability.test.tsx
+          npx eslint $files
       - name: Publish tested feature branch
         run: |
           git diff --check
           git config user.name Xipong
           git config user.email '217837358+Xipong@users.noreply.github.com'
-          git add agent/review_summary.py agent/background_review.py agent/turn_context.py hermes_state_messages.py tui_gateway/server.py tests/agent/test_review_summary_durability.py apps/desktop/src/lib/chat-messages/review-summary.ts apps/desktop/src/lib/chat-messages/hydration.ts apps/desktop/src/lib/chat-messages/reconciliation.ts apps/desktop/src/app/session/hooks/use-message-stream/gateway-event/status.ts apps/desktop/src/components/assistant-ui/thread/system-message.tsx apps/desktop/src/app/session/hooks/use-message-stream/review-summary-durability.test.tsx
+          git add agent/review_summary.py agent/background_review.py agent/turn_context.py hermes_state_messages.py tui_gateway/server.py tests/agent/test_review_summary_durability.py apps/desktop/src/lib/chat-messages/review-summary.ts apps/desktop/src/lib/chat-messages/hydration.ts apps/desktop/src/lib/chat-messages/reconciliation.ts apps/desktop/src/app/session/hooks/use-message-stream/gateway-event/status.ts apps/desktop/src/components/assistant-ui/thread/system-message.tsx apps/desktop/src/app/session/hooks/use-message-stream/review-summary-durability.test.tsx apps/desktop/src/app/contrib/wiring.tsx apps/desktop/src/app/contrib/hooks/use-background-sync.ts
           git commit -m 'fix(desktop): persist self-improvement receipts across transcript hydration'
           git push origin HEAD:refs/heads/fix/desktop-durable-review-summary
           git show --stat --oneline HEAD
