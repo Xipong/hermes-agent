@@ -1,0 +1,161 @@
+name: Biza MCP prerequisite alignment
+on:
+  push:
+    branches: [automation/biza-mcp-align-prerequisite-20260912]
+permissions:
+  contents: write
+jobs:
+  align:
+    if: github.repository == 'Xipong/hermes-agent'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: 39a7fd6b60d448bd943dbae2c7711193050022e8
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 26
+          cache: npm
+      - name: Reuse the existing prerequisite instead of a parallel extraction
+        run: |
+          cp web/src/lib/api-mcp.test.ts /tmp/mcp-request-parity.test.ts
+          git fetch --no-tags --depth=1 origin 681af68a5d893cd5a9703b94f5be41cacc784927 45a6101f36576367359c171cd5820ee76a3d047b d98f78a54ec58dd8376737617bea267d3296f6fa
+          git reset --hard 681af68a5d893cd5a9703b94f5be41cacc784927
+          git diff --binary 45a6101f36576367359c171cd5820ee76a3d047b d98f78a54ec58dd8376737617bea267d3296f6fa -- cli-config.yaml.example web/src/pages/SessionsPage.tsx web/src/components/SessionMessageList.tsx website/docs/reference/advanced-provider-configuration.md > /tmp/prerequisite-core.patch
+          git apply --3way --index /tmp/prerequisite-core.patch
+          cp /tmp/mcp-request-parity.test.ts web/src/lib/api-mcp.test.ts
+      - name: Install locked dependencies
+        run: |
+          npm --version | grep -q '^12\.' || npm install -g npm@12
+          npm ci --ignore-scripts --no-audit --no-fund
+      - name: Port only the same direct type ownership, retaining MCP additions
+        run: |
+          cat > /tmp/align-types.cjs <<'JS'
+          const fs = require('node:fs');
+          const cp = require('node:child_process');
+          const assert = require('node:assert/strict');
+          const ts = require(process.cwd() + '/node_modules/typescript');
+          const prior = '681af68a5d893cd5a9703b94f5be41cacc784927';
+          const depBase = '45a6101f36576367359c171cd5820ee76a3d047b';
+          const dep = 'd98f78a54ec58dd8376737617bea267d3296f6fa';
+          const git = (...args) => cp.execFileSync('git', args, { encoding: 'utf8' });
+          const read = (ref, file) => git('show', `${ref}:${file}`);
+          const parse = (file, text) => ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+          const withoutImports = (file, text) => {
+            const sf = parse(file, text);
+            const spans = sf.statements.filter(ts.isImportDeclaration).map(n => [n.getStart(sf), n.end]);
+            for (const [a, b] of spans.reverse()) text = text.slice(0, a) + text.slice(b);
+            return text.replace(/\s/g, '');
+          };
+          const core = new Set(['cli-config.yaml.example', 'web/src/pages/SessionsPage.tsx', 'web/src/components/SessionMessageList.tsx', 'website/docs/reference/advanced-provider-configuration.md', 'web/src/lib/api.ts', 'web/src/lib/api-types.ts']);
+          const depFiles = git('diff', '--name-only', depBase, dep).trim().split('\n');
+          assert.equal(depFiles.length, 43);
+          // The other prerequisite files must be import-only changes. Preserve
+          // the current branch's implementation when it has extra MCP work.
+          for (const file of depFiles.filter(f => !core.has(f))) {
+            const base = read(depBase, file), desired = read(dep, file);
+            assert.equal(withoutImports(file, base), withoutImports(file, desired), `non-import prerequisite change: ${file}`);
+            if (fs.readFileSync(file, 'utf8') === base) fs.writeFileSync(file, desired);
+          }
+          const file = 'web/src/lib/api.ts';
+          const original = read(prior, file);
+          const start = original.indexOf('/** Identity payload returned');
+          assert(start > 0);
+          let runtime = original.slice(0, start);
+          let contracts = original.slice(start);
+          const parsed = parse('api-types.ts', contracts);
+          assert(parsed.statements.every(n => ts.isInterfaceDeclaration(n) || ts.isTypeAliasDeclaration(n)));
+          const names = parsed.statements.map(n => n.name.text);
+          const exportedNames = new Set(names);
+          // #107842 exposes the existing transport-options type in the types
+          // owner; keep that same boundary, without compatibility re-exports.
+          contracts = contracts.replace(/(^|\n)interface FetchJSONOptions\b/, '$1export interface FetchJSONOptions');
+          const used = new Set();
+          const visit = n => { if (ts.isIdentifier(n)) used.add(n.text); ts.forEachChild(n, visit); };
+          visit(parse(file, runtime));
+          const theme = 'import type { DashboardTheme } from "@/themes/types";';
+          assert(runtime.includes(theme));
+          runtime = runtime.replace(theme, 'import type {\n' + names.filter(n => used.has(n)).map(n => `  ${n},`).join('\n') + '\n} from "./api-types";');
+          fs.writeFileSync(file, runtime);
+          fs.writeFileSync('web/src/lib/api-types.ts', theme + '\n\n' + contracts);
+          assert(!runtime.includes('createMcpApi') && !runtime.includes('export type *'));
+          // Remaining changed/new MCP consumers keep runtime imports in api
+          // and import the moved contracts directly from api-types.
+          const paths = git('ls-files', 'web/src').trim().split('\n').filter(p => /\.tsx?$/.test(p));
+          if (!paths.includes('web/src/lib/api-mcp.test.ts')) paths.push('web/src/lib/api-mcp.test.ts');
+          const printer = ts.createPrinter({ newLine: ts.NewLineKind.LineFeed });
+          let rewrites = 0;
+          for (const path of paths) {
+            if (path === file || path === 'web/src/lib/api-types.ts') continue;
+            const source = fs.readFileSync(path, 'utf8'), sf = parse(path, source), edits = [];
+            for (const n of sf.statements) {
+              if (!ts.isImportDeclaration(n) || !ts.isStringLiteral(n.moduleSpecifier) || !/(^|\/)api$/.test(n.moduleSpecifier.text)) continue;
+              const clause = n.importClause;
+              if (!clause || !clause.namedBindings || !ts.isNamedImports(clause.namedBindings)) continue;
+              const elements = [...clause.namedBindings.elements];
+              const types = elements.filter(e => clause.isTypeOnly || e.isTypeOnly || exportedNames.has((e.propertyName || e.name).text));
+              if (!types.length) continue;
+              const values = elements.filter(e => !types.includes(e));
+              const make = (isType, specs, module, name) => ts.factory.createImportDeclaration(undefined, ts.factory.createImportClause(isType, name, ts.factory.createNamedImports(specs.map(e => ts.factory.createImportSpecifier(false, e.propertyName, e.name)))), ts.factory.createStringLiteral(module));
+              const statements = [];
+              if (values.length || clause.name) statements.push(make(false, values, n.moduleSpecifier.text, clause.name));
+              statements.push(make(true, types, n.moduleSpecifier.text + '-types', undefined));
+              edits.push([n.getStart(sf), n.end, statements.map(stmt => printer.printNode(ts.EmitHint.Unspecified, stmt, sf)).join('\n')]);
+            }
+            let next = source;
+            for (const [a,b,text] of edits.reverse()) next = next.slice(0,a) + text + next.slice(b);
+            if (next !== source) { fs.writeFileSync(path, next); rewrites++; }
+          }
+          console.log('Additional MCP type-import consumers:', rewrites);
+          assert(!fs.existsSync('web/src/lib/api-mcp.ts'), 'parallel runtime factory must be removed');
+          // Each pre-existing runtime statement remains byte-identical apart
+          // from the one type-only import replacement.
+          assert.equal(runtime.replace(/import type \{[\s\S]*?\} from "\.\/api-types";/, theme), original.slice(0,start));
+          const active = t => t.split('\n').filter(l => l.trim() && !l.trimStart().startsWith('#')).join('\n');
+          assert.equal(active(fs.readFileSync('cli-config.yaml.example','utf8')), active(read(prior, 'cli-config.yaml.example')));
+          assert.equal(fs.readFileSync('website/docs/reference/advanced-provider-configuration.md','utf8'), read(dep,'website/docs/reference/advanced-provider-configuration.md'));
+          assert.equal(fs.readFileSync('website/docs/user-guide/configuring-models.md','utf8'), read(prior,'website/docs/user-guide/configuring-models.md'));
+          JS
+          node /tmp/align-types.cjs
+      - name: Verify the actual composed frontend tree
+        run: |
+          npm run test --workspace web -- --run --reporter=json --outputFile=/tmp/aligned-web.json > /tmp/aligned-web.log 2>&1 || { tail -100 /tmp/aligned-web.log; exit 1; }
+          npm run test --workspace apps/desktop -- --project ui src/api/mcp-network.test.ts src/lib/mcp-probe-cache.test.ts --reporter=json --outputFile=/tmp/aligned-desktop.json > /tmp/aligned-desktop.log 2>&1 || { tail -100 /tmp/aligned-desktop.log; exit 1; }
+          npx tsc -p web/tsconfig.app.json --noEmit
+          npx tsc -p apps/desktop/tsconfig.json --noEmit
+          python3 - <<'PY'
+          import json
+          for name, minimum in [('web', 310), ('desktop', 14)]:
+              result = json.load(open('/tmp/aligned-' + name + '.json'))
+              assert result['numFailedTests'] == 0 and result['numPassedTests'] >= minimum, result
+              print(name, result['numPassedTests'], 'passed;', result['numFailedTests'], 'failed')
+          PY
+      - name: Validate scoped lint, ownership and all bounded files
+        run: |
+          git add web/src cli-config.yaml.example website/docs/reference/advanced-provider-configuration.md
+          git diff --cached --name-only --diff-filter=AM -- '*.ts' '*.tsx' | xargs -r npx eslint
+          git diff --cached --check
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          files = subprocess.check_output(['git','diff','--cached','--name-only','--diff-filter=AM'], text=True).splitlines()
+          for name in files:
+              if name.endswith(('.ts','.tsx','.yaml','.yml','.md','.example')):
+                  count = len(Path(name).read_text().splitlines())
+                  print(name, count)
+                  assert count <= 2000, (name, count)
+          expected = {'web/', 'cli-config.yaml.example', 'website/docs/reference/advanced-provider-configuration.md'}
+          assert all(any(name.startswith(prefix) for prefix in expected) for name in files), files
+          PY
+      - name: Publish normal follow-up with the previously published head as parent
+        run: |
+          git config user.name Xipong
+          git config user.email 217837358+Xipong@users.noreply.github.com
+          tree=$(git write-tree)
+          message="refactor(mcp): align type and documentation ownership with #107842"
+          receipt="Ports the existing d98f78a structural prerequisite, preserving this branch's MCP additions and nine request-parity tests. Removes the parallel runtime factory and re-export approach; runtime behavior stays in api.ts and consumers use direct type-only imports. Verified by ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}. No unrelated upstream commits are imported."
+          candidate=$(git commit-tree "$tree" -p 39a7fd6b60d448bd943dbae2c7711193050022e8 -m "$message" -m "$receipt")
+          git diff --stat 39a7fd6b60d448bd943dbae2c7711193050022e8 "$candidate"
+          git push origin "$candidate:refs/heads/automation/biza-107713-aligned-${GITHUB_RUN_ID}"
+          echo "Aligned candidate: $candidate" >> "$GITHUB_STEP_SUMMARY"
