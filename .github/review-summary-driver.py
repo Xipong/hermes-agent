@@ -2,6 +2,7 @@ import ast
 import importlib.util
 from pathlib import Path
 import runpy
+import subprocess
 import sys
 
 spec = importlib.util.spec_from_file_location('builder', '/tmp/build_review_pr.py')
@@ -30,3 +31,12 @@ module.tests()
 if '--apply' in sys.argv:
     module.apply()
 runpy.run_path('/tmp/refine_review_patch.py', run_name='__main__')
+
+# Only reached for --apply (the baseline refinement exits above).
+types = 'apps/desktop/src/types/hermes.ts'
+original(types, 'export type TimelineDisplayMetadata =\n', 'export type TimelineDisplayMetadata =\n  | { review_id: string; source_session_id?: string }\n')
+subprocess.run(['git', 'add', types], check=True)
+files = ['src/types/hermes.ts', 'src/lib/chat-messages/review-summary.ts', 'src/lib/chat-messages/hydration.ts', 'src/lib/chat-messages/reconciliation.ts', 'src/app/session/hooks/use-message-stream/gateway-event/status.ts', 'src/components/assistant-ui/thread/system-message.tsx', 'src/app/session/hooks/use-message-stream/review-summary-durability.test.tsx', 'src/app/contrib/wiring.tsx', 'src/app/contrib/hooks/use-background-sync.ts']
+subprocess.run(['npx', 'eslint', '--fix', *files], cwd='apps/desktop', check=True)
+subprocess.run(['npx', 'prettier', '--write', *files], cwd='apps/desktop', check=True)
+subprocess.run(['git', 'add', types], check=True)
