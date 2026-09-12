@@ -1,25 +1,29 @@
-name: Quota log follow-up workbench
+name: Quota float-boundary verification
 on:
   push:
     branches: [work/quota-log-followup-108661]
-    paths: [.github/workflows/quota-log-followup.yml, '.github/quota_followup*.py']
+    paths: [.github/workflows/quota-log-followup.yml]
 permissions:
-  contents: write
+  contents: read
 concurrency:
-  group: quota-log-followup-108661
+  group: quota-float-boundary-108661
   cancel-in-progress: true
 jobs:
   regression:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - name: Check out PR branch
+        run: |
+          git fetch origin fix/gemini-model-quota-108656
+          git checkout --detach FETCH_HEAD
       - name: Install repository test dependencies
         run: |
           python3 -m venv .venv
           .venv/bin/python -m pip install -q 'uv==0.8.22'
           .venv/bin/uv pip install --python .venv/bin/python -q -e '.[dev]'
-      - name: Reproduce PR gaps, verify fix, publish clean commit
+      - name: Run focused Gemini quota regression file
         env:
           HERMES_TEST_FILE_RETRIES: '0'
-        run: .venv/bin/python .github/quota_followup_v3.py
+        run: bash scripts/run_tests.sh tests/agent/test_gemini_quota_recovery.py -q --tb=short
