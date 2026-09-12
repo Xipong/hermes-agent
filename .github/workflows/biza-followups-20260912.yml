@@ -1,0 +1,190 @@
+name: Biza review follow-ups
+on:
+  push:
+    branches: [automation/biza-followups-20260912]
+permissions:
+  contents: write
+jobs:
+  remote-liveness:
+    if: github.repository == 'Xipong/hermes-agent'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: 71c1e3bdaca631e44bcda6c4e83dff5a415a659d
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 26
+          cache: npm
+      - name: Install locked dependencies
+        run: |
+          npm --version | grep -q '^12\.' || npm install -g npm@12
+          npm ci --ignore-scripts --no-audit --no-fund
+      - name: Add cross-path ownership regressions before changing production
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('apps/desktop/electron/power-resume-remote-revalidation.test.ts')
+          source = p.read_text()
+          source = source.replace('  RemoteLivenessTracker,\n', '  RemoteLivenessTracker,\n  revalidatePooledRemoteBackends,\n', 1)
+          start = source.index("  it('clears the shared failure streak for a retired base URL")
+          end = source.index("\n})\n\ndescribe('attachPowerResumeRemoteRevalidation", start)
+          tests = '''  for (const shared of [false, true]) {
+            for (const transition of ['healthy', 'rebuilt', 'rebuild-failed', 'retire-failed']) {
+              it(`pooled failure-key: ${shared ? 'shared' : 'independent'} / ${transition}`, async () => {
+                const baseUrl = 'https://remote.example.com'
+                const tracker = new RemoteLivenessTracker(3, 60_000, () => 1_000)
+                const entry = (profile: string, sharedProbeKey?: string) => ({
+                  connectionPromise: Promise.resolve({ baseUrl, mode: 'remote', profile }),
+                  process: null,
+                  remoteBaseUrl: `${baseUrl}/`,
+                  sharedProbeKey
+                })
+                const recovering = entry('recovering', shared ? ' source-a ' : undefined)
+                const sibling = entry('sibling', 'source-a')
+                sibling.remoteBaseUrl = baseUrl
+                const unrelated = entry('unrelated', shared ? 'source-b' : undefined)
+                const recoveredEntries: Array<[string, typeof recovering]> = [['recovering', recovering]]
+                if (shared) recoveredEntries.push(['sibling', sibling])
+                const entries: Array<[string, typeof recovering]> = [...recoveredEntries, ['unrelated', unrelated]]
+                const offline = async () => { throw new Error('offline') }
+                const sweep = (selected = entries) => revalidatePooledRemoteBackends({
+                  entries: selected,
+                  log: () => undefined,
+                  probe: offline,
+                  stopBackend: () => undefined,
+                  tracker
+                })
+
+                // Seed the actual background path, not a guessed tracker key.
+                await expect(sweep()).resolves.toEqual({ dropped: [] })
+                await expect(sweep()).resolves.toEqual({ dropped: [] })
+                const retire = vi.fn(async () => {
+                  if (transition === 'retire-failed') throw new Error('retire failed')
+                })
+                const rebuild = vi.fn(async () => {
+                  if (transition === 'rebuild-failed') throw new Error('rebuild failed')
+                  recovering.connectionPromise = Promise.resolve({ baseUrl, mode: 'remote', profile: 'replacement' })
+                })
+                const result = await revalidateSuspectPooledRemoteBackends({
+                  entries: [['recovering', recovering]],
+                  log: () => undefined,
+                  probe: transition === 'healthy' ? async () => undefined : offline,
+                  rebuild,
+                  retire,
+                  tracker
+                })
+
+                if (transition === 'healthy') {
+                  expect(result).toEqual({ rebuilt: [], retired: [] })
+                  expect(retire).not.toHaveBeenCalled()
+                  expect(rebuild).not.toHaveBeenCalled()
+                } else if (transition === 'retire-failed') {
+                  expect(result).toEqual({ rebuilt: [], retired: [] })
+                  expect(retire).toHaveBeenCalledOnce()
+                  expect(rebuild).not.toHaveBeenCalled()
+                } else {
+                  expect(result).toEqual({
+                    rebuilt: transition === 'rebuilt' ? ['recovering'] : [],
+                    retired: ['recovering']
+                  })
+                  expect(retire).toHaveBeenCalledOnce()
+                  expect(rebuild).toHaveBeenCalledOnce()
+                }
+
+                const afterResume = await sweep()
+                const expectedDrops = transition === 'retire-failed'
+                  ? entries.map(([profile]) => profile)
+                  : ['unrelated']
+                expect(afterResume.dropped.slice().sort()).toEqual(expectedDrops.slice().sort())
+                if (transition !== 'retire-failed') {
+                  // Reset is scoped to the exact shared group/profile. An
+                  // unrelated same-URL profile keeps its pre-resume streak.
+                  await expect(sweep(recoveredEntries)).resolves.toEqual({ dropped: [] })
+                  const threshold = await sweep(recoveredEntries)
+                  expect(threshold.dropped).toEqual(recoveredEntries.map(([profile]) => profile))
+                }
+              })
+            }
+          }'''
+          p.write_text(source[:start] + tests + source[end:])
+          PY
+      - name: Require failing-before proof
+        shell: bash
+        run: |
+          set +e
+          npm run test --workspace apps/desktop -- --project electron electron/power-resume-remote-revalidation.test.ts -t 'pooled failure-key' --reporter=json --outputFile=/tmp/biza-red.json
+          status=$?
+          set -e
+          test "$status" -ne 0
+          python3 - <<'PY'
+          import json
+          result = json.load(open('/tmp/biza-red.json'))
+          print('RED:', result['numFailedTests'], 'failed;', result['numPassedTests'], 'passed')
+          assert result['numFailedTests'] == 6, result
+          assert result['numPassedTests'] == 2, result
+          PY
+      - name: Use the same key at every pooled accounting boundary
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('apps/desktop/electron/remote-liveness.ts')
+          source = p.read_text()
+          anchor = 'export interface RevalidatePooledRemoteBackendsOptions'
+          helper = '''/** One ownership key for background observations and post-resume resets. */
+          function pooledRemoteFailureKey(profile: string, entry: PooledRemoteEntry): string {
+            const baseUrl = String(entry.remoteBaseUrl).replace(/\\/+$/, '')
+            const sharedProbeKey = String(entry.sharedProbeKey ?? '').trim()
+
+            return sharedProbeKey ? `shared:${sharedProbeKey}:${baseUrl}` : `profile:${profile}:${baseUrl}`
+          }
+
+          '''
+          assert source.count(anchor) == 1
+          source = source.replace(anchor, helper + anchor, 1)
+          old = '''    const baseUrl = String(entry.remoteBaseUrl).replace(/\\/+$/, '')
+              const sharedProbeKey = String(entry.sharedProbeKey ?? '').trim()
+              const failureKey = sharedProbeKey ? `shared:${sharedProbeKey}:${baseUrl}` : `profile:${profile}:${baseUrl}`'''
+          assert source.count(old) == 1
+          source = source.replace(old, '    const failureKey = pooledRemoteFailureKey(profile, entry)', 1)
+          begin = source.index('export async function revalidateSuspectPooledRemoteBackends')
+          end = source.index('// macOS fires', begin)
+          resume = source[begin:end]
+          old = "      const baseUrl = String(entry.remoteBaseUrl).replace(/\\/+$/, '')"
+          assert resume.count(old) == 1
+          assert resume.count('tracker.recordSuccess(baseUrl)') == 2
+          resume = resume.replace(old, '      const failureKey = pooledRemoteFailureKey(poolKey, entry)')
+          resume = resume.replace('tracker.recordSuccess(baseUrl)', 'tracker.recordSuccess(failureKey)')
+          p.write_text(source[:begin] + resume + source[end:])
+          PY
+      - name: Format and lint only the changed files
+        run: |
+          npx prettier --write apps/desktop/electron/remote-liveness.ts apps/desktop/electron/power-resume-remote-revalidation.test.ts
+          npx eslint --fix apps/desktop/electron/remote-liveness.ts apps/desktop/electron/power-resume-remote-revalidation.test.ts
+          npx eslint apps/desktop/electron/remote-liveness.ts apps/desktop/electron/power-resume-remote-revalidation.test.ts
+          git diff --check
+      - name: Execute the complete affected files and Electron typecheck
+        run: |
+          npm run test --workspace apps/desktop -- --project electron electron/remote-liveness.test.ts electron/power-resume-remote-revalidation.test.ts --reporter=json --outputFile=/tmp/biza-green.json
+          npx tsc -p apps/desktop/tsconfig.electron.json --noEmit
+          python3 - <<'PY'
+          import json
+          r = json.load(open('/tmp/biza-green.json'))
+          assert r['numFailedTests'] == 0 and r['numPassedTests'] >= 40, r
+          print('GREEN:', r['numPassedTests'], 'passed;', r['numFailedTests'], 'failed')
+          PY
+      - name: Publish tested candidate without changing the PR branch
+        shell: bash
+        run: |
+          git diff --stat
+          git diff --check
+          git config user.name Xipong
+          git config user.email 217837358+Xipong@users.noreply.github.com
+          git add apps/desktop/electron/remote-liveness.ts apps/desktop/electron/power-resume-remote-revalidation.test.ts
+          git commit -m 'fix(desktop): reset pooled liveness failures with their ownership key' -m "Validated by ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}; six red recovery cases, two retire-failure controls, affected Vitest suites, focused ESLint and Electron typecheck."
+          candidate="automation/biza-106047-${GITHUB_RUN_ID}"
+          git push origin "HEAD:refs/heads/${candidate}"
+          echo "Candidate: ${candidate}; head: $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
