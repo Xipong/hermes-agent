@@ -11,7 +11,7 @@ defaults:
   run:
     shell: bash
 jobs:
-  integration:
+  review:
     if: github.repository == 'Xipong/hermes-agent'
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -20,28 +20,35 @@ jobs:
       HERMES_TEST_FILE_RETRIES: '0'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-      - name: Combine the exact feature commits in a scratch tree
+      - name: Stage review regression tests on current receipt branch
         run: |
           mkdir -p /tmp/review-proof
-          git fetch origin 75b12424d302549ea9b88436e3514a81fc9ae62c --depth=3
-          git diff e440bf35472c30c2ee5527e884a866c12ad15b91 75b12424d302549ea9b88436e3514a81fc9ae62c > /tmp/review-proof/receipts.patch
-          git diff --name-only e440bf35472c30c2ee5527e884a866c12ad15b91 75b12424d302549ea9b88436e3514a81fc9ae62c -- '*.ts' '*.tsx' > /tmp/review-proof/typescript-files.txt
-          git fetch https://github.com/NousResearch/hermes-agent.git 16bf224ba229ea2c8608e965eb4127da8f35b8b8 --depth=1
-          git checkout --detach 16bf224ba229ea2c8608e965eb4127da8f35b8b8
-          git apply --3way /tmp/review-proof/receipts.patch
-          git diff --check
-          git diff --cached --check
-          echo 'Backend 3188c07b3cf78afac3cea0a178dec4555f878439 + upstream de2d6a1b93508463c31434c1ae067e204af81238 + receipts 75b12424d302549ea9b88436e3514a81fc9ae62c' > /tmp/review-proof/tree.txt
+          python - <<'PY'
+          import base64, hashlib, pathlib, zlib
+          patch = zlib.decompress(base64.b64decode(pathlib.Path('.github/review-blockers.b64').read_text().strip()))
+          assert hashlib.sha256(patch).hexdigest() == '69213535025252cb72cc64385a7606da0297acc4fe67bd87d98475a4ca5d2cbd'
+          pathlib.Path('/tmp/review-proof/blockers.patch').write_bytes(patch)
+          PY
+          git fetch origin fix/desktop-durable-review-summary --depth=6
+          git checkout -b receipts-review-fixes FETCH_HEAD
+          git rev-parse HEAD > /tmp/review-proof/previous-head.txt
+          git apply --include='tests/*' --include='*review-summary-durability.test.tsx' /tmp/review-proof/blockers.patch
       - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39
         with:
           version: '0.9.28'
           enable-cache: true
       - name: Install Python test dependencies
         run: uv sync --locked --python 3.11 --extra dev --extra anthropic
-      - name: Combined lifecycle and receipt regressions
+      - name: Demonstrate queued-origin baseline failure
         run: |
           source .venv/bin/activate
-          scripts/run_tests.sh tests/agent/test_review_worker_ownership.py tests/agent/test_review_cadence_durable.py tests/tui_gateway/test_review_orphan_ownership.py tests/run_agent/test_background_review.py tests/run_agent/test_background_review_cache_parity.py tests/run_agent/test_background_review_toolset_restriction.py tests/agent/test_review_idle_queue.py tests/tools/test_oneshot_completion_linger.py tests/tui_gateway/test_isolated_orphan_activity.py tests/tui_gateway/test_ws_orphan_races.py tests/tui_gateway/test_review_summary_callback.py tests/run_agent/test_background_review_cost_controls.py tests/agent/test_background_review_usage.py tests/agent/test_background_review_memory_scope.py tests/agent/test_skip_background_review.py tests/agent/test_turn_finalizer_cleanup_guard.py tests/hermes_cli/test_review_summary_surfaces.py tests/agent/test_review_summary_durability.py tests/run_agent/test_codex_app_server_lifecycle.py 2>&1 | tee /tmp/review-proof/python.log
+          set +e
+          scripts/run_tests.sh tests/agent/test_review_summary_durability.py -k idle_queue > /tmp/review-proof/baseline-python.log 2>&1
+          rc=$?
+          set -e
+          cat /tmp/review-proof/baseline-python.log
+          test "$rc" -ne 0
+          grep -q AssertionError /tmp/review-proof/baseline-python.log
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 26
@@ -51,38 +58,64 @@ jobs:
           npm --version | grep -q '^12\.' || npm i -g npm@12
           npm ci --ignore-scripts
           npm run build:ink --workspace ui-tui
-      - name: Format receipt changes including new files
+      - name: Demonstrate cross-profile unread baseline failures
         run: |
-          xargs -r npx prettier --write < /tmp/review-proof/typescript-files.txt
-          git diff > /tmp/review-proof/format.patch
+          set +e
+          npm run test:ui --workspace apps/desktop -- src/app/session/hooks/use-message-stream/review-summary-durability.test.tsx > /tmp/review-proof/baseline-desktop.log 2>&1
+          rc=$?
+          set -e
+          cat /tmp/review-proof/baseline-desktop.log
+          test "$rc" -ne 0
+          grep -q AssertionError /tmp/review-proof/baseline-desktop.log
+      - name: Apply fixes and lint
+        run: |
+          git apply --exclude='tests/*' --exclude='*review-summary-durability.test.tsx' /tmp/review-proof/blockers.patch
+          npx prettier --write apps/desktop/src/app/session/hooks/use-message-stream/gateway-event/status.ts apps/desktop/src/app/session/hooks/use-message-stream/review-summary-durability.test.tsx apps/desktop/src/store/session-unread.ts
           cd apps/desktop
-          npx eslint src/plugins/hermes-bots/group-review-receipts.ts src/plugins/hermes-bots/group-review-receipts.test.ts src/plugins/hermes-bots/group-review-row.tsx
-      - name: Combined Desktop regressions
+          npx eslint --fix src/app/session/hooks/use-message-stream/gateway-event/status.ts src/app/session/hooks/use-message-stream/review-summary-durability.test.tsx src/store/session-unread.ts
+          cd ../..
+          source .venv/bin/activate
+          ruff check agent/review_summary.py agent/review_idle_queue.py tests/agent/test_review_summary_durability.py
+          git diff --check
+      - name: Receipt branch Python regressions
         run: |
-          npm run test:ui --workspace apps/desktop -- src/plugins/hermes-bots/group-review-receipts.test.ts src/plugins/hermes-bots/group-chat-timeline.test.tsx src/plugins/hermes-bots/group-chat.test.ts src/plugins/hermes-bots/group-turns.test.ts src/plugins/hermes-bots/group-rounds.test.ts src/plugins/hermes-bots/group-chat-view.test.ts src/plugins/hermes-bots/group-membership.test.ts src/plugins/hermes-bots/group-activity.test.ts src/sdk/profile-routing.test.ts src/app/session/hooks/use-message-stream/review-summary-durability.test.tsx src/app/session/hooks/use-message-stream/timeline-events.test.tsx src/app/contrib/hooks/use-background-sync.test.ts src/lib/chat-messages.test.ts 2>&1 | tee /tmp/review-proof/desktop.log
-      - name: Combined TUI regressions and type checks
+          source .venv/bin/activate
+          scripts/run_tests.sh tests/agent/test_review_summary_durability.py tests/hermes_cli/test_review_summary_surfaces.py tests/tui_gateway/test_review_summary_callback.py tests/run_agent/test_background_review.py tests/agent/test_review_idle_queue.py tests/run_agent/test_background_review_cache_parity.py 2>&1 | tee /tmp/review-proof/python.log
+      - name: Desktop and TUI regressions
         run: |
+          npm run test:ui --workspace apps/desktop -- src/plugins/hermes-bots/group-review-receipts.test.ts src/plugins/hermes-bots/group-chat-timeline.test.tsx src/plugins/hermes-bots/group-chat.test.ts src/plugins/hermes-bots/group-turns.test.ts src/plugins/hermes-bots/group-rounds.test.ts src/plugins/hermes-bots/group-chat-view.test.ts src/plugins/hermes-bots/group-membership.test.ts src/plugins/hermes-bots/group-activity.test.ts src/sdk/profile-routing.test.ts src/app/session/hooks/use-message-stream/review-summary-durability.test.tsx src/app/session/hooks/use-message-stream/timeline-events.test.tsx src/app/contrib/hooks/use-background-sync.test.ts src/lib/chat-messages.test.ts src/store/session-unread.test.ts 2>&1 | tee /tmp/review-proof/desktop.log
           npm test --workspace ui-tui -- src/__tests__/createGatewayEventHandler.test.ts src/__tests__/messages.test.ts 2>&1 | tee /tmp/review-proof/tui.log
+      - name: Type checks
+        run: |
           npm run typecheck --workspace ui-tui 2>&1 | tee /tmp/review-proof/tui-types.log
           cd apps/desktop
           npx tsc -p . --noEmit 2>&1 | tee /tmp/review-proof/desktop-types.log
-      - name: Publish formatting only back to the receipt branch
+      - name: Commit receipt fixes and combine with runtime PR in scratch tree
         run: |
           git config user.name Xipong
           git config user.email '217837358+Xipong@users.noreply.github.com'
-          git checkout -f -b receipts-formatted 75b12424d302549ea9b88436e3514a81fc9ae62c
-          if [ -s /tmp/review-proof/format.patch ]; then
-            git apply /tmp/review-proof/format.patch
-            git diff --check
-            git add -u
-            git commit -m 'style(ui): format new review receipt surfaces'
-            git push origin HEAD:refs/heads/fix/desktop-durable-review-summary
-          fi
-          git show --stat --oneline HEAD | tee /tmp/review-proof/receipt-commit.log
-      - name: Upload combined proof
+          git add agent/background_review.py agent/review_idle_queue.py agent/review_summary.py tests/agent/test_review_summary_durability.py apps/desktop/src/app/session/hooks/use-message-stream/gateway-event/status.ts apps/desktop/src/app/session/hooks/use-message-stream/review-summary-durability.test.tsx apps/desktop/src/store/session-unread.ts
+          git commit -m 'fix(review): retain deferred origin and scope unread receipts by profile'
+          git diff --exit-code
+          git show --stat --oneline HEAD > /tmp/review-proof/receipt-commit.log
+          git diff e440bf35472c30c2ee5527e884a866c12ad15b91 HEAD > /tmp/review-proof/receipts.patch
+          git fetch https://github.com/NousResearch/hermes-agent.git 16bf224ba229ea2c8608e965eb4127da8f35b8b8 --depth=1
+          git checkout --detach 16bf224ba229ea2c8608e965eb4127da8f35b8b8
+          git apply --3way /tmp/review-proof/receipts.patch
+          git diff --check
+          git diff --cached --check
+      - name: Combined runtime and receipt regression proof
+        run: |
+          source .venv/bin/activate
+          scripts/run_tests.sh tests/agent/test_review_worker_ownership.py tests/agent/test_review_cadence_durable.py tests/tui_gateway/test_review_orphan_ownership.py tests/run_agent/test_background_review.py tests/run_agent/test_background_review_cache_parity.py tests/run_agent/test_background_review_toolset_restriction.py tests/agent/test_review_idle_queue.py tests/tools/test_oneshot_completion_linger.py tests/tui_gateway/test_isolated_orphan_activity.py tests/tui_gateway/test_ws_orphan_races.py tests/tui_gateway/test_review_summary_callback.py tests/run_agent/test_background_review_cost_controls.py tests/agent/test_background_review_usage.py tests/agent/test_background_review_memory_scope.py tests/agent/test_skip_background_review.py tests/agent/test_turn_finalizer_cleanup_guard.py tests/hermes_cli/test_review_summary_surfaces.py tests/agent/test_review_summary_durability.py tests/run_agent/test_codex_app_server_lifecycle.py 2>&1 | tee /tmp/review-proof/integration.log
+      - name: Publish receipt branch only
+        run: |
+          git push origin receipts-review-fixes:refs/heads/fix/desktop-durable-review-summary
+          git rev-parse receipts-review-fixes | tee /tmp/review-proof/published-head.txt
+      - name: Upload review proof
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: review-integration-proof
+          name: review-final-proof
           path: /tmp/review-proof/
           retention-days: 3
