@@ -11,7 +11,7 @@ defaults:
   run:
     shell: bash
 jobs:
-  backend:
+  receipts:
     if: github.repository == 'Xipong/hermes-agent'
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -20,56 +20,73 @@ jobs:
       HERMES_TEST_FILE_RETRIES: '0'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-      - name: Stage facade and profile-key assertion
+      - name: Stage receipt surface patch
         run: |
           mkdir -p /tmp/review-proof
           python - <<'PY'
           import base64, hashlib, pathlib, zlib
-          s = ''.join(pathlib.Path(f'.github/review-backend-{i}.b64').read_text().strip() for i in (1, 2))
-          for old, new in [('V+/ff7L6z81', 'V+/ff7L81'), ('cXbvHCf/7q/cXbv52', 'cXbv52'), ('U3J8J8JkLNs', 'U3J8JkLNs')]:
-              s = s.replace(old, new)
+          s = ''.join(pathlib.Path(f'.github/review-ui-{i}.b64').read_text().strip() for i in (1, 2))
           patch = zlib.decompress(base64.b64decode(s))
-          assert hashlib.sha256(patch).hexdigest() == '5e534313a8dd66230d2347f0749a1b2203878cb5485041290afaa8a1676196da'
-          pathlib.Path('/tmp/review-proof/backend.patch').write_bytes(patch)
+          assert hashlib.sha256(patch).hexdigest() == '1430004e5070cc714de2dae805fd89234271f6bd08e59197b04c27faf3db98f3'
+          pathlib.Path('/tmp/review-proof/ui.patch').write_bytes(patch)
           PY
-          git fetch origin fix/review-worker-ownership-cadence --depth=1
-          git checkout -b fix/review-worker-ownership-cadence FETCH_HEAD
-          git apply --include=run_agent.py /tmp/review-proof/backend.patch
-          python - <<'PY'
-          from pathlib import Path
-          p = Path('tests/agent/test_review_idle_queue.py')
-          s = p.read_text()
-          assert '    assert key == "sess-x"' in s
-          s = s.replace('    assert key == "sess-x"', '    from hermes_constants import get_hermes_home\n    assert key == str(get_hermes_home()) + "::sess-x"')
-          p.write_text(s)
-          PY
-          git config user.name Xipong
-          git config user.email '217837358+Xipong@users.noreply.github.com'
-          git add run_agent.py tests/agent/test_review_idle_queue.py
-          git commit -m 'fix(agent): wire review worker ownership through the agent facade'
-          git diff --exit-code
+          git fetch origin f556836024dbe9a3173ff1a6c87be63dad674fac --depth=1
+          git checkout -b fix/desktop-durable-review-summary f556836024dbe9a3173ff1a6c87be63dad674fac
+          git apply /tmp/review-proof/ui.patch
+          git diff --check
       - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39
         with:
           version: '0.9.28'
           enable-cache: true
-      - name: Install test dependencies
+      - name: Install Python test dependencies
         run: uv sync --locked --python 3.11 --extra dev --extra anthropic
-      - name: Run regression selection on committed tree
+      - name: Verify receipt storage and read-only route
         run: |
           source .venv/bin/activate
-          scripts/run_tests.sh tests/agent/test_review_worker_ownership.py tests/agent/test_review_cadence_durable.py tests/tui_gateway/test_review_orphan_ownership.py tests/run_agent/test_background_review.py tests/run_agent/test_background_review_cache_parity.py tests/run_agent/test_background_review_toolset_restriction.py tests/agent/test_review_idle_queue.py tests/tools/test_oneshot_completion_linger.py tests/tui_gateway/test_isolated_orphan_activity.py tests/tui_gateway/test_ws_orphan_races.py tests/tui_gateway/test_review_summary_callback.py tests/run_agent/test_background_review_cost_controls.py tests/agent/test_background_review_usage.py tests/agent/test_background_review_memory_scope.py tests/agent/test_skip_background_review.py tests/agent/test_turn_finalizer_cleanup_guard.py 2>&1 | tee /tmp/review-proof/regression.log
-      - name: Publish verified tree
+          scripts/run_tests.sh tests/hermes_cli/test_review_summary_surfaces.py tests/agent/test_review_summary_durability.py tests/tui_gateway/test_review_summary_callback.py tests/run_agent/test_background_review.py 2>&1 | tee /tmp/review-proof/python.log
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 26
+          cache: npm
+      - name: Install Node test dependencies
+        run: |
+          npm --version | grep -q '^12\.' || npm i -g npm@12
+          npm ci --ignore-scripts
+          npm run build:ink --workspace ui-tui
+      - name: Format and lint changed TypeScript
+        run: |
+          git diff --name-only --diff-filter=ACM -- '*.ts' '*.tsx' > /tmp/review-proof/typescript-files.txt
+          xargs -r npx prettier --write < /tmp/review-proof/typescript-files.txt
+          cd apps/desktop
+          npx eslint --fix src/plugins/hermes-bots/group-review-receipts.ts src/plugins/hermes-bots/group-review-receipts.test.ts src/plugins/hermes-bots/group-review-row.tsx
+          cd ../../ui-tui
+          npx eslint --fix src/app/createGatewayEventHandler.ts src/domain/messages.ts src/gatewayTypes.ts src/types.ts src/__tests__/createGatewayEventHandler.test.ts
+      - name: Desktop group and receipt regressions
+        run: |
+          npm run test:ui --workspace apps/desktop -- src/plugins/hermes-bots/group-review-receipts.test.ts src/plugins/hermes-bots/group-chat-timeline.test.tsx src/plugins/hermes-bots/group-chat.test.ts src/plugins/hermes-bots/group-turns.test.ts src/plugins/hermes-bots/group-rounds.test.ts src/plugins/hermes-bots/group-chat-view.test.ts src/sdk/profile-routing.test.ts src/app/session/hooks/use-message-stream/review-summary-durability.test.tsx src/lib/chat-messages.test.ts 2>&1 | tee /tmp/review-proof/desktop.log
+      - name: TUI receipt regressions
+        run: |
+          npm test --workspace ui-tui -- src/__tests__/createGatewayEventHandler.test.ts src/__tests__/messages.test.ts 2>&1 | tee /tmp/review-proof/tui.log
+      - name: Type checks
+        run: |
+          npm run typecheck --workspace ui-tui 2>&1 | tee /tmp/review-proof/tui-types.log
+          cd apps/desktop
+          npx tsc -p . --noEmit 2>&1 | tee /tmp/review-proof/desktop-types.log
+      - name: Publish receipt surfaces to existing PR branch
         run: |
           source .venv/bin/activate
-          ruff check agent/review_lifecycle.py agent/review_cadence.py tests/agent/test_review_worker_ownership.py tests/agent/test_review_cadence_durable.py tests/tui_gateway/test_review_orphan_ownership.py
+          ruff check tests/hermes_cli/test_review_summary_surfaces.py
           git diff --check
-          git diff --exit-code
-          git push origin HEAD:refs/heads/fix/review-worker-ownership-cadence
+          git config user.name Xipong
+          git config user.email '217837358+Xipong@users.noreply.github.com'
+          git add apps/desktop/src/plugins/hermes-bots apps/desktop/src/sdk hermes_cli/cli_agent_setup_mixin.py hermes_cli/web_routers/sessions.py hermes_state_messages.py tests/hermes_cli/test_review_summary_surfaces.py ui-tui/src
+          git commit -m 'fix(ui): restore review receipts in groups and terminal surfaces'
+          git push origin HEAD:refs/heads/fix/desktop-durable-review-summary
           git show --stat --oneline HEAD | tee /tmp/review-proof/commit.log
       - name: Upload proof diagnostics
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: review-backend-proof
+          name: review-receipts-proof
           path: /tmp/review-proof/
           retention-days: 3
