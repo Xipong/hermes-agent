@@ -14,23 +14,12 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-      - name: Package public source for offline editing
+      - name: Capture existing receipt fix
         run: |
-          git fetch origin d595e636c83aa0b9606d4e914e1140ae9c796897 --depth=1
-          git checkout --detach d595e636c83aa0b9606d4e914e1140ae9c796897
-          python - <<'PY'
-          import pathlib, subprocess, tarfile
-          paths = subprocess.check_output(['git', 'ls-files', '-z']).decode().split('\0')
-          suffixes = {'.py', '.ts', '.tsx', '.js', '.mjs', '.cjs', '.json', '.toml', '.yaml', '.yml', '.sh', '.md', '.css', '.sql', '.lock', '.txt'}
-          with tarfile.open('/tmp/hermes-review-source.tar.gz', 'w:gz') as out:
-              for name in paths:
-                  p = pathlib.Path(name)
-                  if name and p.is_file() and (p.suffix in suffixes or p.name.startswith('.')):
-                      out.add(p, arcname=name, recursive=False)
-          print(pathlib.Path('/tmp/hermes-review-source.tar.gz').stat().st_size)
-          PY
+          git fetch origin f556836024dbe9a3173ff1a6c87be63dad674fac --depth=2
+          git diff f556836024dbe9a3173ff1a6c87be63dad674fac^ f556836024dbe9a3173ff1a6c87be63dad674fac > /tmp/receipts.patch
       - uses: actions/upload-artifact@v4
         with:
-          name: hermes-review-source
-          path: /tmp/hermes-review-source.tar.gz
+          name: receipts-patch
+          path: /tmp/receipts.patch
           retention-days: 3
