@@ -3,23 +3,71 @@ on:
   push:
     branches: [ops/review-surfaces-proof]
 permissions:
-  contents: read
+  contents: write
 concurrency:
   group: review-surfaces-proof
   cancel-in-progress: true
 jobs:
-  source:
+  backend:
     if: github.repository == 'Xipong/hermes-agent'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
+    env:
+      HERMES_TEST_WORKERS: '2'
+      HERMES_TEST_FILE_RETRIES: '0'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-      - name: Capture existing receipt fix
+      - name: Validate and stage source patch
         run: |
-          git fetch origin f556836024dbe9a3173ff1a6c87be63dad674fac --depth=2
-          git diff f556836024dbe9a3173ff1a6c87be63dad674fac^ f556836024dbe9a3173ff1a6c87be63dad674fac > /tmp/receipts.patch
-      - uses: actions/upload-artifact@v4
+          mkdir -p /tmp/review-proof
+          cp .github/review-backend-*.b64 /tmp/review-proof/
+          python - <<'PY'
+          import base64, hashlib, pathlib, zlib
+          s = ''.join(pathlib.Path(f'.github/review-backend-{i}.b64').read_text().strip() for i in (1, 2))
+          for old, new in [('V+/ff7L6z81', 'V+/ff7L81'), ('cXbvHCf/7q/cXbv52', 'cXbv52'), ('U3J8J8JkLNs', 'U3J8JkLNs')]:
+              s = s.replace(old, new)
+          patch = zlib.decompress(base64.b64decode(s))
+          assert hashlib.sha256(patch).hexdigest() == '5e534313a8dd66230d2347f0749a1b2203878cb5485041290afaa8a1676196da'
+          pathlib.Path('/tmp/review-proof/backend.patch').write_bytes(patch)
+          PY
+          git fetch origin d595e636c83aa0b9606d4e914e1140ae9c796897 --depth=1
+          git checkout -b fix/review-worker-ownership-cadence d595e636c83aa0b9606d4e914e1140ae9c796897
+          git apply --include='tests/*' /tmp/review-proof/backend.patch
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39
         with:
-          name: receipts-patch
-          path: /tmp/receipts.patch
+          version: '0.9.28'
+          enable-cache: true
+      - name: Install test dependencies
+        run: uv sync --locked --python 3.11 --extra dev --extra anthropic
+      - name: Verify baseline failures
+        run: |
+          source .venv/bin/activate
+          set +e
+          scripts/run_tests.sh tests/agent/test_review_worker_ownership.py tests/agent/test_review_cadence_durable.py tests/tui_gateway/test_review_orphan_ownership.py -k 'exit_waits or reconstructed_short or orphan_and_lru' > /tmp/review-proof/baseline.log 2>&1
+          rc=$?
+          cat /tmp/review-proof/baseline.log
+          test "$rc" -ne 0
+      - name: Apply production patch
+        run: git apply --exclude='tests/*' /tmp/review-proof/backend.patch
+      - name: Run regression selection
+        run: |
+          source .venv/bin/activate
+          scripts/run_tests.sh tests/agent/test_review_worker_ownership.py tests/agent/test_review_cadence_durable.py tests/tui_gateway/test_review_orphan_ownership.py tests/run_agent/test_background_review.py tests/run_agent/test_background_review_cache_parity.py tests/run_agent/test_background_review_toolset_restriction.py tests/agent/test_review_idle_queue.py tests/tools/test_oneshot_completion_linger.py tests/tui_gateway/test_isolated_orphan_activity.py tests/tui_gateway/test_ws_orphan_races.py tests/tui_gateway/test_review_summary_callback.py tests/run_agent/test_background_review_cost_controls.py tests/agent/test_background_review_usage.py tests/agent/test_background_review_memory_scope.py 2>&1 | tee /tmp/review-proof/regression.log
+      - name: Lint and publish tested branch
+        run: |
+          source .venv/bin/activate
+          ruff check --fix agent/review_lifecycle.py agent/review_cadence.py tests/agent/test_review_worker_ownership.py tests/agent/test_review_cadence_durable.py tests/tui_gateway/test_review_orphan_ownership.py
+          git diff --check
+          git config user.name Xipong
+          git config user.email '217837358+Xipong@users.noreply.github.com'
+          git add agent cli.py hermes_cli/oneshot.py hermes_cli/config_defaults.py tui_gateway tests/agent/test_review_worker_ownership.py tests/agent/test_review_cadence_durable.py tests/tui_gateway/test_review_orphan_ownership.py website/docs/user-guide/features/memory.md
+          git commit -m 'fix(agent): retain review ownership and cadence across short-lived workers'
+          git push origin HEAD:refs/heads/fix/review-worker-ownership-cadence
+          git show --stat --oneline HEAD
+      - name: Upload proof diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: review-backend-proof
+          path: /tmp/review-proof/
           retention-days: 3
