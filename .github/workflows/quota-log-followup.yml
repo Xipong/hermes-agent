@@ -1,27 +1,90 @@
-name: Quota float-boundary verification
+name: BearHuddleston recovery review follow-up
 on:
   push:
     branches: [work/quota-log-followup-108661]
     paths: [.github/workflows/quota-log-followup.yml]
 permissions:
-  contents: read
+  contents: write
 concurrency:
-  group: quota-float-boundary-108661
+  group: quota-bear-review-108661
   cancel-in-progress: true
 jobs:
   regression:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           ref: fix/gemini-model-quota-108656
+      - name: Apply review findings
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              if old not in text:
+                  raise RuntimeError(f"missing patch context in {path}: {old[:100]!r}")
+              p.write_text(text.replace(old, new, 1))
+
+          replace('agent/turn_recovery.py',
+              'import logging\nimport math\nimport math\nimport re',
+              'import logging\nimport math\nimport re')
+          replace('agent/turn_recovery.py',
+              '    is_zai_coding_overload: bool, base_url: Any, model: Any,\n) -> float:',
+              '    is_zai_coding_overload: bool, base_url: Any, model: Any,\n    error_context: Optional[Dict[str, Any]] = None,\n) -> float:')
+          replace('agent/turn_recovery.py',
+              '''    # Native adapters normalize structured provider hints onto the exception. Do not\n    # shorten that minimum (or discard its fractional part) with the generic header cap.\n    _adapter_retry_after = parse_retry_after_seconds(getattr(api_error, "retry_after", None))\n    if _adapter_retry_after is not None and math.isfinite(_adapter_retry_after) and _adapter_retry_after > 0:\n        _retry_after = max(_retry_after or 0.0, _adapter_retry_after)\n''',
+              '''    # Native adapters and the shared classifier normalize structured provider hints.\n    # Neither minimum may be shortened by the generic header/body cap. The classifier\n    # path is load-bearing for OpenAI-SDK-compatible Gemini routes, whose exception has\n    # no adapter-specific ``retry_after`` attribute even when RetryInfo is present.\n    for _normalized_retry_after in (\n        getattr(api_error, "retry_after", None),\n        (error_context or {}).get("retry_after"),\n    ):\n        _normalized_retry_after = parse_retry_after_seconds(_normalized_retry_after)\n        if (\n            _normalized_retry_after is not None\n            and math.isfinite(_normalized_retry_after)\n            and _normalized_retry_after > 0\n        ):\n            _retry_after = max(_retry_after or 0.0, _normalized_retry_after)\n''')
+          replace('agent/turn_api_error.py',
+              '''        is_rate_limited=is_rate_limited, is_zai_coding_overload=_is_zai_coding_overload,\n        base_url=_base, model=_model,\n''',
+              '''        is_rate_limited=is_rate_limited, is_zai_coding_overload=_is_zai_coding_overload,\n        base_url=_base, model=_model, error_context=classified.error_context,\n''')
+          replace('agent/auxiliary_client.py',
+              '''    return (_is_payment_error(exc) or _is_connection_error(exc) or _is_auth_error(exc)\n            or "max_tokens" in str(exc) or "unsupported_parameter" in str(exc))\n''',
+              '''    return (\n        _is_payment_error(exc) or _is_connection_error(exc) or _is_auth_error(exc)\n        or _is_rate_limit_error(exc)\n        or "max_tokens" in str(exc) or "unsupported_parameter" in str(exc)\n    )\n''')
+          replace('agent/auxiliary_client.py',
+              '''    if reason == "payment error":\n        # Mark the concrete backend (not the "auto" label) unhealthy so later aux calls skip\n        # it instead of paying another doomed RTT.\n        _mark_provider_unhealthy(\n            _recoverable_pool_provider(resolved_provider, route.client, main_runtime=route.main_runtime)\n            or resolved_provider, base_url=route.base_info)\n''',
+              '''    if reason == "payment error":\n        payment = classify_api_error(\n            first_err, provider=_normalize_aux_provider(resolved_provider),\n            model=route.final_model or "",\n        )\n        # Ambiguous billing bodies still justify fallback for this request, but are\n        # not evidence that later requests should skip the endpoint for the full\n        # 600s payment-health TTL.\n        if not payment.billing_unverified:\n            _mark_provider_unhealthy(\n                _recoverable_pool_provider(\n                    resolved_provider, route.client, main_runtime=route.main_runtime\n                ) or resolved_provider,\n                base_url=route.base_info,\n            )\n''')
+
+          p = Path('tests/agent/test_gemini_quota_recovery.py')
+          text = p.read_text()
+          if 'from openai import RateLimitError\n' not in text:
+              text = text.replace('import pytest\n', 'import pytest\nfrom openai import RateLimitError\n', 1)
+          text += '''\n\ndef test_sdk_gemini_retryinfo_reaches_actual_backoff():\n    body = quota_body(limit=250000, delay="30s")\n    response = httpx.Response(\n        429, json=body, headers={"Retry-After": "2"},\n        request=httpx.Request("POST", BASE_URL + "/openai/chat/completions"),\n    )\n    error = RateLimitError("Gemini quota", response=response, body=body)\n    classified = classify_api_error(error, provider="gemini", model=MODEL)\n    assert classified.reason == FailoverReason.upstream_rate_limit\n    assert classified.error_context["retry_after"] == pytest.approx(30.0)\n    wait = compute_error_backoff(\n        recovery_agent(), error, retry_count=1, max_retries=3,\n        is_rate_limited=True, is_zai_coding_overload=False,\n        base_url=BASE_URL + "/openai", model=MODEL,\n        error_context=classified.error_context,\n    )\n    assert wait == pytest.approx(30.0)\n'''
+          p.write_text(text)
+
+          p = Path('tests/agent/test_auxiliary_quota_recovery.py')
+          text = p.read_text()
+          if 'from types import SimpleNamespace\n' not in text:
+              text = text.replace('import time\n', 'import time\nfrom types import SimpleNamespace\n', 1)
+          text += '''\n\nclass _ReviewError(Exception):\n    def __init__(self, message, status_code=None, body=None):\n        super().__init__(message)\n        self.status_code = status_code\n        self.body = body\n\n\ndef _drive_review_ladder(mode, ladder, perform):\n    if mode == "sync":\n        return aux._drive_ladder(ladder, perform)\n\n    async def async_perform(step):\n        return perform(step)\n\n    return asyncio.run(aux._drive_ladder_async(ladder, async_perform))\n\n\n@pytest.mark.parametrize("mode", ["sync", "async"])\ndef test_capacity_after_parameter_strip_reaches_fallback(monkeypatch, mode):\n    client = SimpleNamespace(api_key="offline-key", base_url=NVIDIA)\n    param_error = _ReviewError("Unsupported parameter: temperature", 400)\n    worker_error = _ReviewError(\n        "ResourceExhausted: Worker local total request limit reached (32/32)", 429\n    )\n    assert classify_api_error(worker_error).reason == FailoverReason.overloaded\n    healthy_response = object()\n    fallback_client = object()\n    monkeypatch.setattr(aux, "_recoverable_pool_provider", lambda *args, **kwargs: None)\n    monkeypatch.setattr(\n        aux, "_try_configured_fallback_chain",\n        lambda *args, **kwargs: (\n            fallback_client, NIM_HEALTHY, "fallback_chain[0](nvidia)"\n        ),\n    )\n    seen = []\n\n    def perform(step):\n        seen.append(step.kind)\n        if step.kind == "call":\n            _, kwargs = step.args\n            assert "temperature" not in kwargs\n            raise worker_error\n        if step.kind == "fallback":\n            return healthy_response\n        raise AssertionError(step)\n\n    ladder = aux._aux_recovery_ladder(\n        param_error, client=client,\n        kwargs={"model": NIM_LIMITED, "messages": [], "temperature": 0.2},\n        task="moa_reference", async_mode=(mode == "async"), base_info=NVIDIA,\n        resolved_provider="nvidia", resolved_model=NIM_LIMITED,\n        resolved_base_url=NVIDIA, resolved_api_key="offline-key",\n        resolved_api_mode="chat_completions", final_model=NIM_LIMITED,\n        max_tokens=None, main_runtime=None, route_info={},\n    )\n    assert _drive_review_ladder(mode, ladder, perform) is healthy_response\n    assert seen == ["call", "fallback"]\n\n\n@pytest.mark.parametrize("mode", ["sync", "async"])\n@pytest.mark.parametrize(\n    "message,status_code,should_quarantine",\n    [("You're out of extra usage", 400, False),\n     ("Payment required: insufficient credits", 402, True)],\n)\ndef test_unverified_billing_falls_back_without_health_quarantine(\n    monkeypatch, mode, message, status_code, should_quarantine,\n):\n    base_url = "https://claude-proxy.invalid/v1"\n    client = SimpleNamespace(api_key="offline-key", base_url=base_url)\n    error = _ReviewError(message, status_code)\n    classified = classify_api_error(error, provider="anthropic", model="claude-test")\n    assert classified.reason == FailoverReason.billing\n    assert classified.billing_unverified is (not should_quarantine)\n    fallback_client = object()\n    healthy_response = object()\n    quarantined = []\n    monkeypatch.setattr(aux, "_recoverable_pool_provider", lambda *args, **kwargs: None)\n    monkeypatch.setattr(\n        aux, "_mark_provider_unhealthy",\n        lambda *args, **kwargs: quarantined.append((args, kwargs)),\n    )\n    monkeypatch.setattr(\n        aux, "_try_configured_fallback_chain",\n        lambda *args, **kwargs: (fallback_client, "healthy-model", "fallback_chain[0](healthy)"),\n    )\n\n    def perform(step):\n        assert step.kind == "fallback"\n        return healthy_response\n\n    ladder = aux._aux_recovery_ladder(\n        error, client=client, kwargs={"model": "claude-test", "messages": []},\n        task="title", async_mode=(mode == "async"), base_info=base_url,\n        resolved_provider="anthropic", resolved_model="claude-test",\n        resolved_base_url=base_url, resolved_api_key="offline-key",\n        resolved_api_mode="chat_completions", final_model="claude-test",\n        max_tokens=None, main_runtime=None, route_info={},\n    )\n    assert _drive_review_ladder(mode, ladder, perform) is healthy_response\n    assert bool(quarantined) is should_quarantine\n'''
+          p.write_text(text)
+          PY
       - name: Install repository test dependencies
         run: |
           python3 -m venv .venv
           .venv/bin/python -m pip install -q 'uv==0.8.22'
           .venv/bin/uv pip install --python .venv/bin/python -q -e '.[dev]'
-      - name: Run focused Gemini quota regression file
+      - name: Run focused recovery suites
         env:
           HERMES_TEST_FILE_RETRIES: '0'
-        run: bash scripts/run_tests.sh tests/agent/test_gemini_quota_recovery.py -q --tb=short
+        run: |
+          bash scripts/run_tests.sh \
+            tests/agent/test_gemini_quota_recovery.py \
+            tests/agent/test_auxiliary_quota_recovery.py \
+            tests/agent/test_auxiliary_client.py \
+            tests/agent/test_error_classifier.py \
+            tests/agent/test_turn_api_error.py \
+            -q --tb=short
+          .venv/bin/python -m compileall -q agent/turn_recovery.py agent/turn_api_error.py agent/auxiliary_client.py
+          .venv/bin/ruff check --select F63,F7,F82 agent/turn_recovery.py agent/turn_api_error.py agent/auxiliary_client.py tests/agent/test_gemini_quota_recovery.py tests/agent/test_auxiliary_quota_recovery.py
+          git diff --check
+      - name: Publish reviewed fix
+        run: |
+          git config user.name Xipong
+          git config user.email 217837358+Xipong@users.noreply.github.com
+          git add agent/turn_recovery.py agent/turn_api_error.py agent/auxiliary_client.py tests/agent/test_gemini_quota_recovery.py tests/agent/test_auxiliary_quota_recovery.py
+          git commit -m 'fix: address recovery regressions found by @BearHuddleston'
+          git push origin HEAD:fix/gemini-model-quota-108656
+          echo "PUBLISHED_COMMIT=$(git rev-parse HEAD)"
