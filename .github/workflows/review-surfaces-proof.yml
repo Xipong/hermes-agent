@@ -7,6 +7,9 @@ permissions:
 concurrency:
   group: review-surfaces-proof
   cancel-in-progress: true
+defaults:
+  run:
+    shell: bash
 jobs:
   backend:
     if: github.repository == 'Xipong/hermes-agent'
@@ -17,10 +20,9 @@ jobs:
       HERMES_TEST_FILE_RETRIES: '0'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-      - name: Validate and stage source patch
+      - name: Stage facade and profile-key assertion
         run: |
           mkdir -p /tmp/review-proof
-          cp .github/review-backend-*.b64 /tmp/review-proof/
           python - <<'PY'
           import base64, hashlib, pathlib, zlib
           s = ''.join(pathlib.Path(f'.github/review-backend-{i}.b64').read_text().strip() for i in (1, 2))
@@ -30,40 +32,40 @@ jobs:
           assert hashlib.sha256(patch).hexdigest() == '5e534313a8dd66230d2347f0749a1b2203878cb5485041290afaa8a1676196da'
           pathlib.Path('/tmp/review-proof/backend.patch').write_bytes(patch)
           PY
-          git fetch origin d595e636c83aa0b9606d4e914e1140ae9c796897 --depth=1
-          git checkout -b fix/review-worker-ownership-cadence d595e636c83aa0b9606d4e914e1140ae9c796897
-          git apply --include='tests/*' /tmp/review-proof/backend.patch
+          git fetch origin fix/review-worker-ownership-cadence --depth=1
+          git checkout -b fix/review-worker-ownership-cadence FETCH_HEAD
+          git apply --include=run_agent.py /tmp/review-proof/backend.patch
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('tests/agent/test_review_idle_queue.py')
+          s = p.read_text()
+          assert '    assert key == "sess-x"' in s
+          s = s.replace('    assert key == "sess-x"', '    from hermes_constants import get_hermes_home\n    assert key == str(get_hermes_home()) + "::sess-x"')
+          p.write_text(s)
+          PY
+          git config user.name Xipong
+          git config user.email '217837358+Xipong@users.noreply.github.com'
+          git add run_agent.py tests/agent/test_review_idle_queue.py
+          git commit -m 'fix(agent): wire review worker ownership through the agent facade'
+          git diff --exit-code
       - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39
         with:
           version: '0.9.28'
           enable-cache: true
       - name: Install test dependencies
         run: uv sync --locked --python 3.11 --extra dev --extra anthropic
-      - name: Verify baseline failures
+      - name: Run regression selection on committed tree
         run: |
           source .venv/bin/activate
-          set +e
-          scripts/run_tests.sh tests/agent/test_review_worker_ownership.py tests/agent/test_review_cadence_durable.py tests/tui_gateway/test_review_orphan_ownership.py -k 'exit_waits or reconstructed_short or orphan_and_lru' > /tmp/review-proof/baseline.log 2>&1
-          rc=$?
-          cat /tmp/review-proof/baseline.log
-          test "$rc" -ne 0
-      - name: Apply production patch
-        run: git apply --exclude='tests/*' /tmp/review-proof/backend.patch
-      - name: Run regression selection
+          scripts/run_tests.sh tests/agent/test_review_worker_ownership.py tests/agent/test_review_cadence_durable.py tests/tui_gateway/test_review_orphan_ownership.py tests/run_agent/test_background_review.py tests/run_agent/test_background_review_cache_parity.py tests/run_agent/test_background_review_toolset_restriction.py tests/agent/test_review_idle_queue.py tests/tools/test_oneshot_completion_linger.py tests/tui_gateway/test_isolated_orphan_activity.py tests/tui_gateway/test_ws_orphan_races.py tests/tui_gateway/test_review_summary_callback.py tests/run_agent/test_background_review_cost_controls.py tests/agent/test_background_review_usage.py tests/agent/test_background_review_memory_scope.py tests/agent/test_skip_background_review.py tests/agent/test_turn_finalizer_cleanup_guard.py 2>&1 | tee /tmp/review-proof/regression.log
+      - name: Publish verified tree
         run: |
           source .venv/bin/activate
-          scripts/run_tests.sh tests/agent/test_review_worker_ownership.py tests/agent/test_review_cadence_durable.py tests/tui_gateway/test_review_orphan_ownership.py tests/run_agent/test_background_review.py tests/run_agent/test_background_review_cache_parity.py tests/run_agent/test_background_review_toolset_restriction.py tests/agent/test_review_idle_queue.py tests/tools/test_oneshot_completion_linger.py tests/tui_gateway/test_isolated_orphan_activity.py tests/tui_gateway/test_ws_orphan_races.py tests/tui_gateway/test_review_summary_callback.py tests/run_agent/test_background_review_cost_controls.py tests/agent/test_background_review_usage.py tests/agent/test_background_review_memory_scope.py 2>&1 | tee /tmp/review-proof/regression.log
-      - name: Lint and publish tested branch
-        run: |
-          source .venv/bin/activate
-          ruff check --fix agent/review_lifecycle.py agent/review_cadence.py tests/agent/test_review_worker_ownership.py tests/agent/test_review_cadence_durable.py tests/tui_gateway/test_review_orphan_ownership.py
+          ruff check agent/review_lifecycle.py agent/review_cadence.py tests/agent/test_review_worker_ownership.py tests/agent/test_review_cadence_durable.py tests/tui_gateway/test_review_orphan_ownership.py
           git diff --check
-          git config user.name Xipong
-          git config user.email '217837358+Xipong@users.noreply.github.com'
-          git add agent cli.py hermes_cli/oneshot.py hermes_cli/config_defaults.py tui_gateway tests/agent/test_review_worker_ownership.py tests/agent/test_review_cadence_durable.py tests/tui_gateway/test_review_orphan_ownership.py website/docs/user-guide/features/memory.md
-          git commit -m 'fix(agent): retain review ownership and cadence across short-lived workers'
+          git diff --exit-code
           git push origin HEAD:refs/heads/fix/review-worker-ownership-cadence
-          git show --stat --oneline HEAD
+          git show --stat --oneline HEAD | tee /tmp/review-proof/commit.log
       - name: Upload proof diagnostics
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
