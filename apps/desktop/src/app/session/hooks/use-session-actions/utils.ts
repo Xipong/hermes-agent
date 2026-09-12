@@ -1730,7 +1730,10 @@ export function applyRuntimeInfo(
     publishRuntimeToComposer(sessionState)
 
     if (info.usage) {
-      setCurrentUsage(current => ({ ...current, ...info.usage }))
+      // session.info/session.resume is an authoritative session snapshot, not a
+      // partial live tick. Clear a missing compression count so switching from
+      // a counted session to an older/cold runtime cannot leak the old value.
+      setCurrentUsage(current => ({ ...current, ...info.usage, compressions: info.usage?.compressions }))
     }
   }
 
@@ -1741,6 +1744,10 @@ export function applyStoredSessionPreviewRuntimeInfo(
   stored: { cwd?: null | string; model?: null | string } | undefined,
   storedSessionId: null | string
 ) {
+  // Compression count is live runtime state, not part of a durable session row.
+  // Drop the previous session's value immediately while the selected runtime
+  // resumes; the authoritative usage snapshot will repopulate it when present.
+  setCurrentUsage(current => ({ ...current, compressions: undefined }))
   setCurrentModel(stored?.model || '')
   setCurrentProvider('')
   setCurrentReasoningEffort('')
