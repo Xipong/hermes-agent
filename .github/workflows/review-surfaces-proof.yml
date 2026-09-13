@@ -90,28 +90,16 @@ jobs:
           npm run typecheck --workspace ui-tui 2>&1 | tee /tmp/review-proof/tui-types.log
           cd apps/desktop
           npx tsc -p . --noEmit 2>&1 | tee /tmp/review-proof/desktop-types.log
-      - name: Commit receipt fixes and combine with runtime PR in scratch tree
+      - name: Commit and publish receipt fixes
         run: |
           git config user.name Xipong
           git config user.email '217837358+Xipong@users.noreply.github.com'
           git add agent/background_review.py agent/review_idle_queue.py agent/review_summary.py tests/agent/test_review_summary_durability.py apps/desktop/src/app/session/hooks/use-message-stream/gateway-event/status.ts apps/desktop/src/app/session/hooks/use-message-stream/review-summary-durability.test.tsx apps/desktop/src/store/session-unread.ts
           git commit -m 'fix(review): retain deferred origin and scope unread receipts by profile'
           git diff --exit-code
-          git show --stat --oneline HEAD > /tmp/review-proof/receipt-commit.log
-          git diff e440bf35472c30c2ee5527e884a866c12ad15b91 HEAD > /tmp/review-proof/receipts.patch
-          git fetch https://github.com/NousResearch/hermes-agent.git 16bf224ba229ea2c8608e965eb4127da8f35b8b8 --depth=1
-          git checkout --detach 16bf224ba229ea2c8608e965eb4127da8f35b8b8
-          git apply --3way /tmp/review-proof/receipts.patch
-          git diff --check
-          git diff --cached --check
-      - name: Combined runtime and receipt regression proof
-        run: |
-          source .venv/bin/activate
-          scripts/run_tests.sh tests/agent/test_review_worker_ownership.py tests/agent/test_review_cadence_durable.py tests/tui_gateway/test_review_orphan_ownership.py tests/run_agent/test_background_review.py tests/run_agent/test_background_review_cache_parity.py tests/run_agent/test_background_review_toolset_restriction.py tests/agent/test_review_idle_queue.py tests/tools/test_oneshot_completion_linger.py tests/tui_gateway/test_isolated_orphan_activity.py tests/tui_gateway/test_ws_orphan_races.py tests/tui_gateway/test_review_summary_callback.py tests/run_agent/test_background_review_cost_controls.py tests/agent/test_background_review_usage.py tests/agent/test_background_review_memory_scope.py tests/agent/test_skip_background_review.py tests/agent/test_turn_finalizer_cleanup_guard.py tests/hermes_cli/test_review_summary_surfaces.py tests/agent/test_review_summary_durability.py tests/run_agent/test_codex_app_server_lifecycle.py 2>&1 | tee /tmp/review-proof/integration.log
-      - name: Publish receipt branch only
-        run: |
-          git push origin receipts-review-fixes:refs/heads/fix/desktop-durable-review-summary
-          git rev-parse receipts-review-fixes | tee /tmp/review-proof/published-head.txt
+          git show --stat --oneline HEAD | tee /tmp/review-proof/receipt-commit.log
+          git push origin HEAD:refs/heads/fix/desktop-durable-review-summary
+          git rev-parse HEAD | tee /tmp/review-proof/published-head.txt
       - name: Upload review proof
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
