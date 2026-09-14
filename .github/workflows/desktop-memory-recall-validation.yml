@@ -14,6 +14,8 @@ jobs:
       FEATURE: fix/desktop-memory-recall
       STATUS: apps/desktop/src/app/session/hooks/use-message-stream/gateway-event/status.ts
       TEST: apps/desktop/src/app/session/hooks/use-message-stream/memory-recall.test.tsx
+      RECON: apps/desktop/src/lib/chat-messages/reconciliation.ts
+      RECON_TEST: apps/desktop/src/lib/chat-messages/recall-reconciliation.test.ts
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -30,18 +32,20 @@ jobs:
           sed 's/^ diff --git /diff --git /' .github/desktop-memory-recall.patch > /tmp/recall.patch
           git apply --check /tmp/recall.patch
           git apply /tmp/recall.patch
+          git apply --check .github/desktop-recall-reconciliation.patch
+          git apply .github/desktop-recall-reconciliation.patch
           npm --version | grep -q '^12\.' || npm install -g npm@12
           npm ci --ignore-scripts
           uv sync --locked --python 3.11 --extra dev
       - name: Format and publish clean feature commit (no validation workflow)
         run: |
-          npx prettier --write "$STATUS" "$TEST"
-          npx eslint "$STATUS" "$TEST" --fix
+          npx eslint "$STATUS" "$TEST" "$RECON" "$RECON_TEST" --fix
+          npx prettier --write "$STATUS" "$TEST" "$RECON" "$RECON_TEST"
           git config user.name Xipong
           git config user.email '217837358+Xipong@users.noreply.github.com'
           export GIT_INDEX_FILE=/tmp/recall-feature-index
           git read-tree "$BASE"
-          git add -- agent/turn_context.py tests/agent/test_turn_context.py "$STATUS" "$TEST"
+          git add -- agent/turn_context.py tests/agent/test_turn_context.py "$STATUS" "$TEST" "$RECON" "$RECON_TEST"
           git diff --cached --check "$BASE"
           tree=$(git write-tree)
           parent="$BASE"
@@ -49,7 +53,7 @@ jobs:
             git fetch --no-tags origin "$FEATURE" --depth=1
             parent=$(git rev-parse FETCH_HEAD)
           fi
-          commit=$(printf 'fix(desktop): show automatic memory recall in the chat transcript\n' | git commit-tree "$tree" -p "$parent")
+          commit=$(printf 'fix(desktop): retain recall notices during transcript hydration\n' | git commit-tree "$tree" -p "$parent")
           git push origin "$commit:refs/heads/$FEATURE"
           mkdir -p /tmp/recall-results
           printf '%s\n' "$commit" | tee /tmp/recall-results/feature-sha.txt
@@ -58,27 +62,30 @@ jobs:
         run: |
           cp agent/turn_context.py /tmp/fixed-turn-context.py
           cp "$STATUS" /tmp/fixed-status.ts
+          cp "$RECON" /tmp/fixed-reconciliation.ts
           git show "$BASE:agent/turn_context.py" > agent/turn_context.py
           git show "$BASE:$STATUS" > "$STATUS"
+          git show "$BASE:$RECON" > "$RECON"
           set +e
-          (cd apps/desktop && npx vitest run src/app/session/hooks/use-message-stream/memory-recall.test.tsx --reporter=json --outputFile=/tmp/recall-results/base-ui.json) > /tmp/recall-results/base-ui.log 2>&1
+          (cd apps/desktop && npx vitest run src/app/session/hooks/use-message-stream/memory-recall.test.tsx src/lib/chat-messages/recall-reconciliation.test.ts --reporter=json --outputFile=/tmp/recall-results/base-ui.json) > /tmp/recall-results/base-ui.log 2>&1
           ui=$?
           scripts/run_tests.sh tests/agent/test_turn_context.py -k recall_indicator -q --file-retries 0 > /tmp/recall-results/base-python.log 2>&1
           py=$?
           set -e
           cp /tmp/fixed-turn-context.py agent/turn_context.py
           cp /tmp/fixed-status.ts "$STATUS"
+          cp /tmp/fixed-reconciliation.ts "$RECON"
           cat /tmp/recall-results/base-ui.log
           cat /tmp/recall-results/base-python.log
           test "$ui" -ne 0
           test "$py" -ne 0
-          node -e "const r=require('/tmp/recall-results/base-ui.json'); if(r.numFailedTests!==5 || r.numPassedTests!==1) process.exit(1)"
+          node -e "const r=require('/tmp/recall-results/base-ui.json'); if(r.numFailedTests!==6 || r.numPassedTests!==2) process.exit(1)"
           grep -q '1 failed, 1 passed' /tmp/recall-results/base-python.log
       - name: Run focused Desktop regression suite
         if: success() || failure()
         run: |
           cd apps/desktop
-          npx vitest run src/app/session/hooks/use-message-stream src/lib/gateway-events.test.ts src/lib/chat-runtime.test.ts --maxWorkers=2 2>&1 | tee /tmp/recall-results/fixed-ui.log
+          npx vitest run src/app/session/hooks/use-message-stream src/lib/gateway-events.test.ts src/lib/chat-runtime.test.ts src/lib/chat-messages.test.ts src/lib/chat-messages/recall-reconciliation.test.ts src/app/contrib/hooks/use-background-sync.test.ts src/app/session/hooks/use-session-state-cache.test.tsx --maxWorkers=2 2>&1 | tee /tmp/recall-results/fixed-ui.log
       - name: Run Python memory and status regression suite
         if: success() || failure()
         run: |
@@ -88,8 +95,8 @@ jobs:
         if: success() || failure()
         run: |
           npm run typecheck --workspace apps/desktop 2>&1 | tee /tmp/recall-results/typecheck.log
-          npx eslint "$STATUS" "$TEST" 2>&1 | tee /tmp/recall-results/lint.log
-          npx prettier --check "$STATUS" "$TEST"
+          npx eslint "$STATUS" "$TEST" "$RECON" "$RECON_TEST" 2>&1 | tee /tmp/recall-results/lint.log
+          npx prettier --check "$STATUS" "$TEST" "$RECON" "$RECON_TEST"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
