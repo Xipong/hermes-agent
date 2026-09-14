@@ -3,19 +3,97 @@ on:
   push:
     branches: [work/desktop-memory-recall-validation-20260914]
 permissions:
-  contents: read
+  contents: write
 jobs:
-  source:
+  validate:
+    if: github.repository == 'Xipong/hermes-agent'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 20
+    env:
+      BASE: ee4452991d17534aa561f31ee55596d082aa94e7
+      FEATURE: fix/desktop-memory-recall
+      STATUS: apps/desktop/src/app/session/hooks/use-message-stream/gateway-event/status.ts
+      TEST: apps/desktop/src/app/session/hooks/use-message-stream/memory-recall.test.tsx
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          persist-credentials: false
-      - name: Export pinned source for offline regression work
-        run: git archive --format=tar.gz HEAD > /tmp/hermes-source.tar.gz
+          node-version: 26
+          cache: npm
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          version: '0.9.28'
+          enable-cache: true
+      - name: Apply focused patch and install locked dependencies
+        run: |
+          git fetch --no-tags origin "$BASE" --depth=1
+          sed 's/^ diff --git /diff --git /' .github/desktop-memory-recall.patch > /tmp/recall.patch
+          git apply --check /tmp/recall.patch
+          git apply /tmp/recall.patch
+          npm --version | grep -q '^12\.' || npm install -g npm@12
+          npm ci --ignore-scripts
+          uv sync --locked --python 3.11 --extra dev
+      - name: Format and publish clean feature commit (no validation workflow)
+        run: |
+          npx prettier --write "$STATUS" "$TEST"
+          npx eslint "$STATUS" "$TEST" --fix
+          git config user.name Xipong
+          git config user.email '217837358+Xipong@users.noreply.github.com'
+          export GIT_INDEX_FILE=/tmp/recall-feature-index
+          git read-tree "$BASE"
+          git add -- agent/turn_context.py tests/agent/test_turn_context.py "$STATUS" "$TEST"
+          git diff --cached --check "$BASE"
+          tree=$(git write-tree)
+          parent="$BASE"
+          if git ls-remote --exit-code --heads origin "$FEATURE" >/dev/null; then
+            git fetch --no-tags origin "$FEATURE" --depth=1
+            parent=$(git rev-parse FETCH_HEAD)
+          fi
+          commit=$(printf 'fix(desktop): show automatic memory recall in the chat transcript\n' | git commit-tree "$tree" -p "$parent")
+          git push origin "$commit:refs/heads/$FEATURE"
+          mkdir -p /tmp/recall-results
+          printf '%s\n' "$commit" | tee /tmp/recall-results/feature-sha.txt
+          git diff "$BASE" "$commit" > /tmp/recall-results/feature.patch
+      - name: Prove regressions on unmodified production code
+        run: |
+          cp agent/turn_context.py /tmp/fixed-turn-context.py
+          cp "$STATUS" /tmp/fixed-status.ts
+          git show "$BASE:agent/turn_context.py" > agent/turn_context.py
+          git show "$BASE:$STATUS" > "$STATUS"
+          set +e
+          (cd apps/desktop && npx vitest run src/app/session/hooks/use-message-stream/memory-recall.test.tsx --reporter=json --outputFile=/tmp/recall-results/base-ui.json) > /tmp/recall-results/base-ui.log 2>&1
+          ui=$?
+          scripts/run_tests.sh tests/agent/test_turn_context.py -k recall_indicator -q --file-retries 0 > /tmp/recall-results/base-python.log 2>&1
+          py=$?
+          set -e
+          cp /tmp/fixed-turn-context.py agent/turn_context.py
+          cp /tmp/fixed-status.ts "$STATUS"
+          cat /tmp/recall-results/base-ui.log
+          cat /tmp/recall-results/base-python.log
+          test "$ui" -ne 0
+          test "$py" -ne 0
+          node -e "const r=require('/tmp/recall-results/base-ui.json'); if(r.numFailedTests!==5 || r.numPassedTests!==1) process.exit(1)"
+          grep -q '1 failed, 1 passed' /tmp/recall-results/base-python.log
+      - name: Run focused Desktop regression suite
+        if: success() || failure()
+        run: |
+          cd apps/desktop
+          npx vitest run src/app/session/hooks/use-message-stream src/lib/gateway-events.test.ts src/lib/chat-runtime.test.ts --maxWorkers=2 2>&1 | tee /tmp/recall-results/fixed-ui.log
+      - name: Run Python memory and status regression suite
+        if: success() || failure()
+        run: |
+          scripts/run_tests.sh tests/agent/test_turn_context.py tests/agent/test_memory_recall_indicator.py tests/agent/test_retry_status_buffer.py -q -j 2 --file-retries 0 2>&1 | tee /tmp/recall-results/fixed-python.log
+          .venv/bin/ruff check agent/turn_context.py tests/agent/test_turn_context.py
+      - name: Desktop typecheck and lint
+        if: success() || failure()
+        run: |
+          npm run typecheck --workspace apps/desktop 2>&1 | tee /tmp/recall-results/typecheck.log
+          npx eslint "$STATUS" "$TEST" 2>&1 | tee /tmp/recall-results/lint.log
+          npx prettier --check "$STATUS" "$TEST"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
         with:
-          name: desktop-recall-source
-          path: /tmp/hermes-source.tar.gz
-          retention-days: 1
+          name: desktop-recall-validation
+          path: /tmp/recall-results
+          if-no-files-found: warn
+          retention-days: 7
