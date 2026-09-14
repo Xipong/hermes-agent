@@ -1,0 +1,51 @@
+name: tmp rebase sanity fast 109474
+
+on:
+  push:
+    branches:
+      - tmp/rebase-sanity-fast-109474
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Restore upstream overlap after rebase
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EXPECTED_HEAD: a69c66bbd2e72b885d735c0ca42ad4766a90c351
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none --single-branch --branch fix/review-worker-ownership-cadence \
+            "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" repo
+          cd repo
+          git config user.name "Xipong"
+          git config user.email "217837358+Xipong@users.noreply.github.com"
+          python - <<'PY'
+          from pathlib import Path
+
+          cfg = Path('hermes_cli/config_defaults.py')
+          text = cfg.read_text(encoding='utf-8')
+          needle = '''        # before crossing it. <= 0 = unlimited.\n        "background_review": {"enabled": True, **_aux(120), "max_input_tokens": 600000, "shutdown_timeout_s": 120},\n'''
+          replacement = '''        # before crossing it. <= 0 = unlimited.\n        # reasoning_effort is IGNORED while the review stays on the main model: the fork inherits the\n        # conversation's reasoning config verbatim so its request bytes keep the parent's warm\n        # prompt-cache prefix (#30532). Set provider/model below to route the review to another model\n        # if you want a different effort level; a one-time warning says so when the key is set.\n        "background_review": {"enabled": True, **_aux(120), "max_input_tokens": 600000, "shutdown_timeout_s": 120},\n'''
+          if needle not in text:
+              raise SystemExit('config_defaults overlap marker not found')
+          cfg.write_text(text.replace(needle, replacement, 1), encoding='utf-8')
+
+          bridge = Path('tui_gateway/compute_host_bridge.py')
+          text = bridge.read_text(encoding='utf-8')
+          old = '''    kind = params.get("type") if isinstance(params, dict) else None\n    if kind == "review.status":\n        session = _sessions.get(str(params.get("session_id") or ""))\n        payload = params.get("payload")\n        if session is not None and isinstance(payload, dict):\n            with _history_lock(session):\n                revision = payload.get("revision", 0)\n                if isinstance(revision, int) and revision > session.get("_review_revision", -1):\n                    session["_review_revision"] = revision\n                    session["_review_pending"] = payload.get("pending") is True\n                    session["_review_shutdown_timeout_s"] = payload.get("shutdown_timeout_s", 120)\n    if kind in {"clarify.request", "clarify.expire"}:\n        session = _sessions.get(str(params.get("session_id") or ""))\n        payload = params.get("payload")\n        if session is not None and isinstance(payload, dict):\n            with _history_lock(session):\n                if _open_request_matches(session, payload.get("id")):\n                    session.pop("_compute_host_open_request", None)\n'''
+          new = '''    kind = params.get("type") if isinstance(params, dict) else None\n    if kind == "review.status":\n        session = _sessions.get(str(params.get("session_id") or ""))\n        payload = params.get("payload")\n        if session is not None and isinstance(payload, dict):\n            with _history_lock(session):\n                revision = payload.get("revision", 0)\n                if isinstance(revision, int) and revision > session.get("_review_revision", -1):\n                    session["_review_revision"] = revision\n                    session["_review_pending"] = payload.get("pending") is True\n                    session["_review_shutdown_timeout_s"] = payload.get("shutdown_timeout_s", 120)\n    if isinstance(message, dict) and isinstance(message.get("id"), str) and message.get("method") not in (None, "event"):\n        # A server request minted by the child: remember it against its session until it is answered/withdrawn.\n        session = _sessions.get(str((params or {}).get("session_id") or "")) if isinstance(params, dict) else None\n        if session is not None:\n            with _history_lock(session):\n                session["_compute_host_open_request"] = {\n                    "id": message["id"], "method": message["method"], "params": dict(params)}\n    elif kind == "request.cancel":\n        session = _sessions.get(str(params.get("session_id") or ""))\n        payload = params.get("payload")\n        if session is not None and isinstance(payload, dict):\n            with _history_lock(session):\n                if _open_request_matches(session, payload.get("id")):\n                    session.pop("_compute_host_open_request", None)\n'''
+          if old not in text:
+              raise SystemExit('compute_host_bridge overlap block not found')
+          bridge.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+          python -m py_compile hermes_cli/config_defaults.py tui_gateway/compute_host_bridge.py
+          git diff --check
+          git add hermes_cli/config_defaults.py tui_gateway/compute_host_bridge.py
+          git commit -m "fix(agent): preserve upstream changes across rebase"
+          git push origin HEAD:refs/heads/fix/review-worker-ownership-cadence \
+            --force-with-lease=refs/heads/fix/review-worker-ownership-cadence:${EXPECTED_HEAD}
