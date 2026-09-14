@@ -1,0 +1,21 @@
+name: Desktop memory recall validation
+on:
+  push:
+    branches: [work/desktop-memory-recall-validation-20260914]
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Export pinned source for offline regression work
+        run: git archive --format=tar.gz HEAD > /tmp/hermes-source.tar.gz
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: desktop-recall-source
+          path: /tmp/hermes-source.tar.gz
+          retention-days: 1
