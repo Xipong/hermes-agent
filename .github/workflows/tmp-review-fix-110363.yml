@@ -1,0 +1,54 @@
+name: tmp review fix 110363
+
+on:
+  push:
+    branches:
+      - tmp/review-fix-110363
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Apply focused review fix
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EXPECTED_HEAD: 3d6ff84ae359e849b98a3101bda4e8b6fa8ce9e4
+        run: |
+          set -euo pipefail
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" repo
+          cd repo
+          git config user.name "Xipong"
+          git config user.email "217837358+Xipong@users.noreply.github.com"
+          git fetch origin fix/update-provider-model-cache-refresh
+          git checkout -B review-fix origin/fix/update-provider-model-cache-refresh
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          production = Path('hermes_cli/model_catalog.py')
+          text = production.read_text(encoding='utf-8')
+          old = '''    try:\n        from hermes_constants import get_default_hermes_root\n\n        homes = [get_default_hermes_root()]\n    except Exception:\n        logger.debug("default provider model cache resolution after update failed", exc_info=True)\n        return\n\n    try:\n        from hermes_cli.profiles import _iter_named_profile_dirs\n\n        homes.extend(_iter_named_profile_dirs())\n    except Exception:\n        logger.debug("named-profile model cache enumeration after update failed", exc_info=True)\n'''
+          new = '''    homes = []\n    try:\n        from hermes_constants import get_default_hermes_root\n\n        homes.append(get_default_hermes_root())\n    except Exception:\n        logger.debug("default provider model cache resolution after update failed", exc_info=True)\n\n    try:\n        from hermes_cli.profiles import _iter_named_profile_dirs\n\n        homes.extend(_iter_named_profile_dirs())\n    except Exception:\n        logger.debug("named-profile model cache enumeration after update failed", exc_info=True)\n'''
+          if old not in text:
+              raise SystemExit('expected model_catalog review block not found')
+          production.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          tests = Path('tests/hermes_cli/test_model_catalog.py')
+          text = tests.read_text(encoding='utf-8')
+          replacement = '''class TestCheckoutRefresh:\n    def test_missing_manifest_still_invalidates_every_profile_provider_cache(\n        self, isolated_home, tmp_path\n    ):\n        from hermes_cli import model_catalog\n\n        provider_cache = isolated_home / "provider_models_cache.json"\n        provider_cache.write_text("{}", encoding="utf-8")\n        sibling_cache = isolated_home / "profiles" / "work" / "provider_models_cache.json"\n        sibling_cache.parent.mkdir(parents=True)\n        sibling_cache.write_text("{}", encoding="utf-8")\n\n        assert model_catalog.seed_cache_from_checkout(tmp_path / "missing-checkout") is False\n        assert not provider_cache.exists()\n        assert not sibling_cache.exists()\n\n    def test_default_root_failure_does_not_block_named_profile_invalidation(\n        self, isolated_home, tmp_path\n    ):\n        from hermes_cli import model_catalog\n\n        named_home = isolated_home / "profiles" / "work"\n        named_home.mkdir(parents=True, exist_ok=True)\n        named_cache = named_home / "provider_models_cache.json"\n        named_cache.write_text("{}", encoding="utf-8")\n\n        with (\n            patch(\n                "hermes_constants.get_default_hermes_root",\n                side_effect=OSError("default root unavailable"),\n            ),\n            patch(\n                "hermes_cli.profiles._iter_named_profile_dirs",\n                return_value=[named_home],\n            ),\n        ):\n            assert model_catalog.seed_cache_from_checkout(tmp_path / "missing-checkout") is False\n\n        assert not named_cache.exists()\n\n\nclass TestFetchFailure:'''
+          pattern = re.compile(r'class TestCheckoutRefresh:\n.*?\n\nclass TestFetchFailure:', re.S)
+          text, count = pattern.subn(replacement, text, count=1)
+          if count != 1:
+              raise SystemExit(f'expected one TestCheckoutRefresh block, found {count}')
+          tests.write_text(text, encoding='utf-8')
+          PY
+          python -m py_compile hermes_cli/model_catalog.py tests/hermes_cli/test_model_catalog.py
+          git diff --check
+          git add hermes_cli/model_catalog.py tests/hermes_cli/test_model_catalog.py
+          git commit -m "fix(update): isolate provider cache invalidation failures"
+          git push origin HEAD:refs/heads/fix/update-provider-model-cache-refresh \
+            --force-with-lease=refs/heads/fix/update-provider-model-cache-refresh:${EXPECTED_HEAD}
