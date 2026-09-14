@@ -267,11 +267,13 @@ def run_oneshot(
 
 def _create_session_db_for_oneshot():
     """Best-effort SessionDB — oneshot bypasses ``HermesCLI._init_agent()``, so it must wire the
-    SQLite store itself or ``session_search`` is advertised but always unavailable."""
+    SQLite store itself or ``session_search`` is advertised but always unavailable. The registry
+    handle is the one in-process tools (delegation, goals) acquire during the run, so the process
+    holds one writer; ``_close_agent``'s ``close()`` releases the refcount."""
     try:
-        from hermes_state import SessionDB
+        from hermes_state_registry import acquire
 
-        return SessionDB()
+        return acquire()
     except Exception as exc:
         logging.debug("SQLite session store not available for oneshot mode: %s", exc)
         return None
@@ -530,8 +532,6 @@ def _close_agent(agent, session_db) -> None:
         # close() kill_all()s the task and the dying parent owns the children's stdout pipes, so
         # exiting now destroys in-flight deliveries (e.g. Bot Mode handoff replies).
         _quietly("background completion wait", _linger_for_background_completions)
-        from agent.review_lifecycle import drain_background_reviews
-        _quietly("background review wait", lambda: drain_background_reviews(agent))
         session_messages = getattr(agent, "_session_messages", None)
         memory_args = (session_messages,) if isinstance(session_messages, list) else ()
         _quietly("memory/context cleanup", lambda: agent.shutdown_memory_provider(*memory_args))
