@@ -4,20 +4,104 @@ on:
     branches: [validate/bot-screen-lifecycle-108914]
     paths:
       - .github/workflows/bot-screen-lifecycle-validation.yml
+      - .review-bot-screen/**
 permissions:
   contents: read
 jobs:
-  snapshot:
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    defaults:
+      run:
+        shell: bash
+        working-directory: candidate
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          path: staging
+          sparse-checkout: .review-bot-screen
+          persist-credentials: false
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: 1a4d8761769f22f2930bdee65d23a977d7296dfe
+          path: candidate
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39
+        with:
+          version: 0.9.28
+          enable-cache: true
+          cache-dependency-glob: candidate/uv.lock
+      - name: Install locked test dependencies
+        run: uv sync --locked --python 3.11 --extra all --extra dev
+      - name: Regression tests fail on unchanged Bot Screen head
+        run: |
+          cp ../staging/.review-bot-screen/test_computer_use_backend_lifecycle.py tests/tools/
+          set +e
+          scripts/run_tests.sh -j 1 --file-retries 0 tests/tools/test_computer_use_backend_lifecycle.py -k test_dispatch_rechecks_admission --junitxml=../red.xml 2>&1 | tee ../red.log
+          status=${PIPESTATUS[0]}
+          set -e
+          test "$status" -eq 1
+          uv run python - <<'PY'
+          import xml.etree.ElementTree as ET
+          cases = ET.parse('../red.xml').findall('.//testcase')
+          assert len(cases) == 8, len(cases)
+          assert all(c.find('failure') is not None and c.find('error') is None for c in cases)
+          print('All eight admission regressions fail on unchanged 1a4d876.')
+          PY
+      - name: Apply only lifecycle fix and required test-fixture updates
+        run: |
+          python ../staging/.review-bot-screen/apply.py
+          git add -N tests/tools/test_computer_use_backend_lifecycle.py
+          git diff --check
+          git diff --stat
+      - name: Focused cross-platform regression tests
+        run: |
+          scripts/run_tests.sh -j 4 --file-retries 0 tests/tools/test_computer_use_backend_lifecycle.py tests/tools/test_computer_use.py tests/tools/test_bot_desktop_lease.py tests/tools/test_computer_use_capture_fence.py tests/tools/test_computer_use_native_platform.py tests/tools/test_browser_computer_use_profile_cache_keys.py 2>&1 | tee ../focused.log
+      - name: Broader Linux Computer Use and Bot Screen matrix
+        if: runner.os == 'Linux'
+        run: |
+          scripts/run_tests.sh -j 4 --file-retries 0 tests/computer_use tests/tools/test_computer_use*.py tests/tools/test_bot_desktop*.py tests/tools/test_browser_computer_use_profile_cache_keys.py 2>&1 | tee ../linux-matrix.log
+      - name: Python lint and diff checks
+        run: |
+          uv run ruff check --select F821 tools/computer_use/tool.py tests/tools/test_computer_use_backend_lifecycle.py tests/tools/test_bot_desktop_lease.py tests/tools/test_computer_use_capture_fence.py tests/tools/test_computer_use.py
+          git diff --check
+          git diff --binary HEAD -- tools/computer_use/tool.py tests/tools/test_computer_use_backend_lifecycle.py tests/tools/test_bot_desktop_lease.py tests/tools/test_computer_use_capture_fence.py tests/tools/test_computer_use.py > ../candidate.patch
+      - name: Keep proof and exact patch
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: bot-screen-lifecycle-${{ runner.os }}
+          path: |
+            red.log
+            red.xml
+            focused.log
+            linux-matrix.log
+            candidate.patch
+          retention-days: 3
+  candidate:
+    needs: tests
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           ref: 1a4d8761769f22f2930bdee65d23a977d7296dfe
-          persist-credentials: false
-      - run: git archive --format=tar.gz HEAD > /tmp/bot-screen-base.tar.gz
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          name: bot-screen-base
-          path: /tmp/bot-screen-base.tar.gz
-          retention-days: 1
+          name: bot-screen-lifecycle-Linux
+          path: proof
+      - name: Commit only the tested five files on a new branch
+        run: |
+          git apply --index proof/candidate.patch
+          test "$(git diff --cached --name-only | wc -l)" -eq 5
+          git config user.name Xipong
+          git config user.email 217837358+Xipong@users.noreply.github.com
+          git commit -m 'fix(computer-use): keep Bot Screen backend alive through dispatch' -m 'Extract only backend admission/lifetime protection from #114565 (484b5d7), adapted to the existing DISPLAY identity and human-lease fences in #108914. No WSL selection, installer, config or UI changes.'
+          git push origin HEAD:refs/heads/fix/bot-screen-backend-lifetime-${{ github.run_id }}
+          echo "Candidate: $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
