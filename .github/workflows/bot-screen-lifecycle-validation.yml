@@ -1,0 +1,23 @@
+name: Bot Screen lifecycle validation
+on:
+  push:
+    branches: [validate/bot-screen-lifecycle-108914]
+    paths:
+      - .github/workflows/bot-screen-lifecycle-validation.yml
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: 1a4d8761769f22f2930bdee65d23a977d7296dfe
+          persist-credentials: false
+      - run: git archive --format=tar.gz HEAD > /tmp/bot-screen-base.tar.gz
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: bot-screen-base
+          path: /tmp/bot-screen-base.tar.gz
+          retention-days: 1
