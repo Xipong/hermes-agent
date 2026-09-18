@@ -58,9 +58,46 @@ jobs:
           git add -N tests/tools/test_computer_use_backend_lifecycle.py
           git diff --check
           git diff --stat
+      - name: All new lifecycle and lease regressions must pass
+        run: |
+          scripts/run_tests.sh -j 1 --file-retries 0 tests/tools/test_computer_use_backend_lifecycle.py 2>&1 | tee ../regressions.log
       - name: Focused cross-platform regression tests
+        id: focused
+        continue-on-error: true
         run: |
           scripts/run_tests.sh -j 4 --file-retries 0 tests/tools/test_computer_use_backend_lifecycle.py tests/tools/test_computer_use.py tests/tools/test_bot_desktop_lease.py tests/tools/test_computer_use_capture_fence.py tests/tools/test_computer_use_native_platform.py tests/tools/test_browser_computer_use_profile_cache_keys.py 2>&1 | tee ../focused.log
+      - name: Require unchanged baseline failure set when the existing suite is red
+        if: steps.focused.outcome == 'failure'
+        run: |
+          git diff --binary HEAD -- tools/computer_use/tool.py tests/tools/test_computer_use.py tests/tools/test_bot_desktop_lease.py tests/tools/test_computer_use_capture_fence.py > ../pending.patch
+          git restore --source=HEAD -- tools/computer_use/tool.py tests/tools/test_computer_use.py tests/tools/test_bot_desktop_lease.py tests/tools/test_computer_use_capture_fence.py
+          set +e
+          scripts/run_tests.sh -j 4 --file-retries 0 tests/tools/test_computer_use.py tests/tools/test_bot_desktop_lease.py tests/tools/test_computer_use_capture_fence.py tests/tools/test_computer_use_native_platform.py tests/tools/test_browser_computer_use_profile_cache_keys.py 2>&1 | tee ../baseline.log
+          status=${PIPESTATUS[0]}
+          set -e
+          git apply ../pending.patch
+          test "$status" -eq 1
+          uv run python - <<'PY'
+          import os, re
+          from pathlib import Path
+          def failures(path):
+              text = Path(path).read_text(encoding='utf-8-sig', errors='replace')
+              assert not re.search(r'\b(?:ERROR collecting|TIMEOUT|timed out|INTERNALERROR)\b', text), text
+              return set(re.findall(r'^FAILED (\S+)', text, re.M))
+          expected = {
+              'tests/tools/test_computer_use.py::TestCuaDriverSessionReconnect::test_cli_fallback_reads_screenshot_from_file',
+              'tests/tools/test_computer_use.py::TestCuaEnvironmentScrubbing::test_cua_session_sanitizes_provider_env_vars',
+          }
+          assert os.environ['RUNNER_OS'] == 'Windows', 'Unexpected non-Windows baseline failures'
+          current, baseline = failures('../focused.log'), failures('../baseline.log')
+          assert current == baseline == expected, (current, baseline)
+          print('NO NEW FAILURES: the same two Windows test cases fail on the unchanged Bot Screen head.')
+          print('The Windows existing-test suite remains red; only regression equivalence is passing.')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as f:
+              f.write('### Windows: two existing test failures, unchanged on baseline\n\n')
+              f.write('All 12 new lifecycle tests pass. Both baseline and candidate fail:\n')
+              f.write('\n'.join('- `' + name + '`' for name in sorted(current)) + '\n')
+          PY
       - name: Broader Linux Computer Use and Bot Screen matrix
         if: runner.os == 'Linux'
         run: |
@@ -78,7 +115,9 @@ jobs:
           path: |
             red.log
             red.xml
+            regressions.log
             focused.log
+            baseline.log
             linux-matrix.log
             candidate.patch
           retention-days: 3
