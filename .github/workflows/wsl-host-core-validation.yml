@@ -1,0 +1,147 @@
+name: Minimal WSL Windows-host core
+on:
+  push:
+    branches: [validate/wsl-host-core-108914]
+    paths:
+      - .github/workflows/wsl-host-core-validation.yml
+      - .review-wsl-core/**
+permissions:
+  contents: read
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    defaults:
+      run:
+        shell: bash
+        working-directory: candidate
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          path: staging
+          sparse-checkout: .review-wsl-core
+          persist-credentials: false
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: 1a4d8761769f22f2930bdee65d23a977d7296dfe
+          path: candidate
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39
+        with:
+          version: 0.9.28
+          enable-cache: true
+          cache-dependency-glob: candidate/uv.lock
+      - name: Install locked Python dependencies
+        run: uv sync --locked --python 3.11 --extra all --extra dev
+      - name: Install checksummed regression tests
+        run: python ../staging/.review-wsl-core/prepare.py tests
+      - name: Original WSL routing reproduces before the fix
+        if: runner.os == 'Linux'
+        run: |
+          set +e
+          scripts/run_tests.sh -j 1 --file-retries 0 tests/tools/test_computer_use_wsl_host.py -k test_profile_selection_reaches_mcp_windows_and_capture --junitxml=../before.xml 2>&1 | tee ../before.log
+          status=${PIPESTATUS[0]}
+          set -e
+          test "$status" -eq 1
+          uv run python - <<'PY'
+          import xml.etree.ElementTree as ET
+          cases = ET.parse('../before.xml').findall('.//testcase')
+          assert len(cases) == 2, len(cases)
+          assert all(c.find('failure') is not None and c.find('error') is None for c in cases)
+          print('Both real-routing cases fail on unchanged Bot Screen head, not fixture/import errors.')
+          PY
+      - name: Apply minimal execution and install core
+        run: |
+          python ../staging/.review-wsl-core/prepare.py source
+          git add -N tests/tools/test_computer_use_wsl_host.py tests/hermes_cli/test_cua_wsl_host_install.py
+          git diff --check
+          git diff --stat
+          git diff --binary HEAD > ../candidate.patch
+      - name: WSL host execution and installation regressions
+        run: |
+          scripts/run_tests.sh -j 2 --file-retries 0 tests/tools/test_computer_use_wsl_host.py tests/hermes_cli/test_cua_wsl_host_install.py 2>&1 | tee ../core.log
+      - name: Existing platform regression matrix
+        id: matrix
+        continue-on-error: true
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            paths='tests/computer_use tests/tools/test_computer_use*.py tests/tools/test_bot_desktop*.py tests/tools/test_browser_computer_use_profile_cache_keys.py tests/hermes_cli/test_install_cua_driver.py tests/hermes_cli/test_computer_use_cli.py'
+          else
+            paths='tests/computer_use/test_cua_atexit_teardown.py tests/computer_use/test_cua_wsl_manifest_path.py tests/tools/test_computer_use_native_platform.py tests/hermes_cli/test_install_cua_driver.py'
+          fi
+          echo "$paths" > ../matrix-paths.txt
+          scripts/run_tests.sh -j 4 --file-retries 0 $paths 2>&1 | tee ../matrix.log
+      - name: Reproduce any existing failures on unchanged head
+        if: steps.matrix.outcome == 'failure'
+        run: |
+          git restore --source=HEAD -- hermes_cli/config_defaults.py hermes_cli/tools_config_cua.py tools/computer_use/cua_backend.py tools/computer_use/cua_backend_daemon.py tools/computer_use/cua_backend_driver.py tools/computer_use/tool.py website/docs/user-guide/features/computer-use.md
+          mv tests/tools/test_computer_use_wsl_host.py ../saved-runtime.py
+          mv tests/hermes_cli/test_cua_wsl_host_install.py ../saved-install.py
+          set +e
+          paths=$(cat ../matrix-paths.txt)
+          scripts/run_tests.sh -j 4 --file-retries 0 $paths 2>&1 | tee ../baseline.log
+          status=${PIPESTATUS[0]}
+          set -e
+          mv ../saved-runtime.py tests/tools/test_computer_use_wsl_host.py
+          mv ../saved-install.py tests/hermes_cli/test_cua_wsl_host_install.py
+          python ../staging/.review-wsl-core/prepare.py source
+          test "$status" -eq 1
+          uv run python - <<'PY'
+          import os, re
+          from pathlib import Path
+          def failed(path):
+              text = Path(path).read_text(encoding='utf-8-sig', errors='replace')
+              assert not re.search(r'ERROR collecting|INTERNALERROR|TIMEOUT|timed out', text), text
+              return set(re.findall(r'^FAILED (\S+)', text, re.M))
+          current, baseline = failed('../matrix.log'), failed('../baseline.log')
+          assert current and current == baseline, (current, baseline)
+          print('NO NEW FAILURES; these existing test cases remain red on unchanged head:', sorted(current))
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+              f.write('Existing regression suite is not green; baseline failure sets match:\n')
+              f.write('\n'.join('- `' + s + '`' for s in sorted(current)))
+          PY
+      - name: Lint and exact candidate patch
+        run: |
+          uv run ruff check --select F821 tools/computer_use/cua_backend_driver.py tools/computer_use/cua_backend_daemon.py tools/computer_use/cua_backend.py tools/computer_use/tool.py hermes_cli/tools_config_cua.py tests/tools/test_computer_use_wsl_host.py tests/hermes_cli/test_cua_wsl_host_install.py
+          git diff --check
+          git diff --binary HEAD > ../candidate.patch
+      - name: Keep logs and patch
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: wsl-host-core-${{ runner.os }}
+          path: |
+            before.log
+            before.xml
+            core.log
+            matrix.log
+            baseline.log
+            candidate.patch
+          retention-days: 3
+  commit:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: 1a4d8761769f22f2930bdee65d23a977d7296dfe
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: wsl-host-core-Linux
+          path: proof
+      - name: Commit only tested source, tests and documentation
+        run: |
+          git apply --index proof/candidate.patch
+          test "$(git diff --cached --name-only | wc -l)" -eq 9
+          git config user.name Xipong
+          git config user.email 217837358+Xipong@users.noreply.github.com
+          git commit -m 'fix(computer-use): run the Windows host driver from WSL' -m 'Extract the essential WSL host setup and execution route from #114565 for #108914 and #114531. Preserve auto/guest defaults; explicitly select the host in the backend profile. No Desktop UI, hot-switch, new relay, or lifecycle refactor.'
+          git push origin HEAD:refs/heads/fix/wsl-windows-host-core-${{ github.run_id }}
+          echo "Candidate: $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
