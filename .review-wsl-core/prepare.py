@@ -6,7 +6,6 @@ import subprocess
 import sys
 
 staging = Path(__file__).parent
-subprocess.run(['git', 'config', 'core.autocrlf', 'false'], check=True)
 if sys.argv[1] == 'tests':
     encoded = (staging / 'tests.patch.gz.b64').read_text(encoding='utf-8')
     # Correct transport transcription before decoding; enforce the original checksum.
