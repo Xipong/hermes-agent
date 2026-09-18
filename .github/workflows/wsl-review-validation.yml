@@ -4,22 +4,162 @@ on:
     branches: [fix/wsl-computer-use-review-validation]
     paths:
       - .github/workflows/wsl-review-validation.yml
-      - .review-wsl.patch
+      - .review-wsl/**
 permissions:
   contents: read
+concurrency:
+  group: wsl-review-validation
+  cancel-in-progress: true
+defaults:
+  run:
+    shell: bash
 jobs:
-  snapshot:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+  python:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
+          path: staging
+          sparse-checkout: .review-wsl
+          persist-credentials: false
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          path: candidate
           ref: cd2716ba603bdc75c9a5b0bea1d9d5bc4125807b
           persist-credentials: false
-      - name: Archive the exact reviewed source (no credentials or Git metadata)
-        run: git archive --format=tar.gz HEAD > /tmp/hermes-reviewed-source.tar.gz
-      - uses: actions/upload-artifact@v4
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39
         with:
-          name: hermes-reviewed-source
-          path: /tmp/hermes-reviewed-source.tar.gz
-          retention-days: 1
+          version: '0.9.28'
+          enable-cache: true
+          cache-dependency-glob: candidate/uv.lock
+      - name: Apply source changes and regression tests
+        working-directory: candidate
+        run: |
+          python ../staging/.review-wsl/apply.py
+          python ../staging/.review-wsl/python_tests.py
+          cp ../staging/.review-wsl/test_backend_call_lifecycle.py tests/computer_use/
+          git diff --check
+      - name: Install locked Python dependencies
+        working-directory: candidate
+        run: uv sync --locked --python 3.11 --extra all --extra dev
+      - name: Computer Use regression matrix
+        id: tests
+        working-directory: candidate
+        env:
+          HERMES_TEST_FILE_RETRIES: '0'
+        run: |
+          scripts/run_tests.sh -j 4 tests/computer_use tests/tools/test_computer_use*.py tests/tools/test_browser_computer_use_profile_cache_keys.py tests/hermes_cli/test_computer_use*.py tests/hermes_cli/test_install_cua_driver.py 2>&1 | tee "$RUNNER_TEMP/computer-use-${RUNNER_OS}.log"
+      - name: Undefined-name lint
+        if: always() && steps.tests.outcome != 'skipped'
+        working-directory: candidate
+        run: uv run ruff check --select F821 tools/computer_use/tool.py tools/computer_use/cua_backend_driver.py hermes_cli/tools_config_cua.py tests/computer_use/test_backend_call_lifecycle.py tests/computer_use/test_cua_target_selection.py tests/hermes_cli/test_computer_use_wsl_install.py
+      - name: Compare failures against the untouched reviewed commit
+        if: failure() && steps.tests.outcome == 'failure'
+        working-directory: candidate
+        env:
+          HERMES_TEST_FILE_RETRIES: '0'
+        run: |
+          PYTHON_PATH=$(uv run python -c 'import sys; print(sys.executable)')
+          git worktree add --detach ../baseline cd2716ba603bdc75c9a5b0bea1d9d5bc4125807b
+          cd ../baseline
+          HERMES_PYTHON="$PYTHON_PATH" scripts/run_tests.sh -j 4 tests/computer_use tests/tools/test_computer_use*.py tests/tools/test_browser_computer_use_profile_cache_keys.py tests/hermes_cli/test_computer_use*.py tests/hermes_cli/test_install_cua_driver.py 2>&1 | tee "$RUNNER_TEMP/baseline-${RUNNER_OS}.log"
+      - name: Keep verification logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: computer-use-python-${{ runner.os }}
+          path: |
+            ${{ runner.temp }}/computer-use-*.log
+            ${{ runner.temp }}/baseline-*.log
+          retention-days: 3
+  desktop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          path: staging
+          sparse-checkout: .review-wsl
+          persist-credentials: false
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          path: candidate
+          ref: cd2716ba603bdc75c9a5b0bea1d9d5bc4125807b
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: candidate/package-lock.json
+      - name: Apply all review changes
+        working-directory: candidate
+        run: |
+          python ../staging/.review-wsl/apply.py
+          python ../staging/.review-wsl/python_tests.py
+          python ../staging/.review-wsl/ui_tests.py
+          cp ../staging/.review-wsl/test_backend_call_lifecycle.py tests/computer_use/
+          git add -N tests/computer_use/test_backend_call_lifecycle.py
+          git diff --check
+      - name: Install locked workspace dependencies
+        working-directory: candidate
+        run: |
+          npm --version | grep -q '^12\.' || npm install -g npm@12
+          npm ci
+      - name: Format and lint changed Desktop files
+        working-directory: candidate/apps/desktop
+        run: |
+          npx prettier --write src/app/settings/computer-use-panel.tsx src/app/settings/computer-use-panel.test.tsx src/app/settings/toolset-config-panel.tsx src/app/settings/toolset-config-panel.test.tsx src/app/skills/index.tsx src/app/skills/index.test.tsx src/i18n/en.ts src/i18n/zh.ts src/i18n/zh-hant.ts
+          npx eslint --fix src/app/settings/computer-use-panel.tsx src/app/settings/computer-use-panel.test.tsx src/app/settings/toolset-config-panel.tsx src/app/settings/toolset-config-panel.test.tsx src/app/skills/index.tsx src/app/skills/index.test.tsx src/i18n/en.ts src/i18n/zh.ts src/i18n/zh-hant.ts
+      - name: Real Desktop panel integration tests
+        id: tests
+        working-directory: candidate/apps/desktop
+        run: npm run test:ui -- src/app/settings/computer-use-panel.test.tsx src/app/settings/toolset-config-panel.test.tsx src/app/skills/index.test.tsx src/hermes-capability-scope.test.ts 2>&1 | tee "$RUNNER_TEMP/desktop-tests.log"
+      - name: Desktop TypeScript checks
+        if: always() && steps.tests.outcome != 'skipped'
+        working-directory: candidate/apps/desktop
+        run: npm run typecheck 2>&1 | tee "$RUNNER_TEMP/desktop-typecheck.log"
+      - name: Export the exact formatted candidate diff
+        if: always()
+        working-directory: candidate
+        run: |
+          git diff --check
+          git diff --binary HEAD > "$RUNNER_TEMP/wsl-review-verified.patch"
+          git diff --stat HEAD
+      - name: Keep candidate patch and Desktop logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: wsl-review-candidate
+          path: |
+            ${{ runner.temp }}/wsl-review-verified.patch
+            ${{ runner.temp }}/desktop-*.log
+          retention-days: 3
+  candidate-commit:
+    needs: desktop
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: cd2716ba603bdc75c9a5b0bea1d9d5bc4125807b
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: wsl-review-candidate
+          path: /tmp/review-candidate
+      - name: Create a candidate commit without changing the PR branch
+        run: |
+          git apply --index /tmp/review-candidate/wsl-review-verified.patch
+          git diff --cached --check
+          test -z "$(git diff --cached --name-only | grep -vE '^(apps/desktop/src/|tools/computer_use/|hermes_cli/tools_config_cua.py$|tests/)' || true)"
+          git config user.name Xipong
+          git config user.email 217837358+Xipong@users.noreply.github.com
+          git commit -m 'fix(computer-use): synchronize backend lifecycle and WSL setup'
+          git push origin HEAD:refs/heads/review/wsl-114565-${{ github.run_id }}
+          echo "Candidate commit: $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
