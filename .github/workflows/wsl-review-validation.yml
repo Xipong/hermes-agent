@@ -1,0 +1,25 @@
+name: WSL review validation
+on:
+  push:
+    branches: [fix/wsl-computer-use-review-validation]
+    paths:
+      - .github/workflows/wsl-review-validation.yml
+      - .review-wsl.patch
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cd2716ba603bdc75c9a5b0bea1d9d5bc4125807b
+          persist-credentials: false
+      - name: Archive the exact reviewed source (no credentials or Git metadata)
+        run: git archive --format=tar.gz HEAD > /tmp/hermes-reviewed-source.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hermes-reviewed-source
+          path: /tmp/hermes-reviewed-source.tar.gz
+          retention-days: 1
