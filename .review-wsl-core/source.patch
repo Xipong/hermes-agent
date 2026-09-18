@@ -1,0 +1,362 @@
+diff --git a/hermes_cli/config_defaults.py b/hermes_cli/config_defaults.py
+index 859f3d7..af596a4 100644
+--- a/hermes_cli/config_defaults.py
++++ b/hermes_cli/config_defaults.py
+@@ -2322,6 +2322,7 @@ DEFAULT_CONFIG = {
+         "idle_stop_minutes": 30,
+     },
+     "computer_use": {
++        "target": "auto",  # auto preserves resolution; windows selects the WSL host. Restart after changing.
+         # cua-driver's upstream PostHog telemetry defaults ON; Hermes sets
+         # CUA_DRIVER_RS_TELEMETRY_ENABLED=0 in every child env unless this is true.
+         "cua_telemetry": False,
+diff --git a/hermes_cli/tools_config_cua.py b/hermes_cli/tools_config_cua.py
+index 1d3246f..8142c61 100644
+--- a/hermes_cli/tools_config_cua.py
++++ b/hermes_cli/tools_config_cua.py
+@@ -138,8 +138,10 @@ def _cua_driver_contract_status(binary: Optional[str] = None) -> dict:
+ 
+ def _cua_driver_install_ready() -> bool:
+     """Return whether an existing driver needs no install-time repair."""
++    from tools.computer_use.cua_backend_driver import is_windows_driver
+     return bool(_cua_driver_contract_status().get("ready")) and (
+-        sys.platform != "win32" or _cua_driver_autostart_registered_windows())
++        (sys.platform != "win32" and not is_windows_driver(_resolved_cua_driver_cmd()))
++        or _cua_driver_autostart_registered_windows())
+ 
+ 
+ def _pip_install(args: List[str], *, timeout: int = 300, capture_output: bool = True):
+@@ -256,12 +258,60 @@ def _report_repair_or_upgrade(ok: bool, *, repair_existing: bool, binary, before
+     return ok
+ 
+ 
++def _install_wsl_windows_driver(*, upgrade: bool, unattended: bool) -> bool:
++    """Explicit host installation uses Windows' installer and autostart, never POSIX cleanup."""
++    from tools.computer_use.cua_backend import sanitized_cua_driver_env
++    from tools.computer_use.cua_backend_driver import _wsl_windows_install_paths
++    binary = _resolved_cua_driver_cmd()
++    contract = _cua_driver_contract_status(binary) if binary else {}
++    if os.environ.get("HERMES_CUA_DRIVER_CMD", "").strip() and (not contract.get("ready") or upgrade):
++        return _fail("    Fix/update HERMES_CUA_DRIVER_CMD or unset it before installing the Windows driver.")
++    if unattended:
++        ready = bool(contract.get("ready")) and _cua_driver_autostart_registered_windows()
++        if not ready:
++            _print_warning("    Windows driver/autostart needs repair; run hermes computer-use install explicitly.")
++        return ready  # never download or elevate on an unattended cross-OS update
++    if contract.get("ready") and not upgrade:
++        return _repair_cua_driver_autostart_windows(binary, verbose=False)
++    powershell = shutil.which("powershell.exe")
++    if not powershell:
++        return _fail("    Windows PowerShell is unavailable through WSL interop; no Linux fallback was attempted.")
++    script = (f"$ErrorActionPreference='Stop'; $s=irm {_CUA_INSTALL_PS1_URL}; "
++              "& ([scriptblock]::Create($s))")
++    try:
++        result = _run_text([powershell, "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
++                            "-Command", script], timeout=_CUA_INSTALLER_TIMEOUT,
++                           stdin=subprocess.DEVNULL, env=sanitized_cua_driver_env())
++    except (OSError, subprocess.SubprocessError) as exc:
++        return _fail(f"    Windows-host installer failed: {exc}")
++    if result.returncode:
++        _print_output_tail(result)
++        return _fail("    Windows-host installer failed; no Linux fallback was attempted.")
++    _wsl_windows_install_paths.cache_clear()
++    binary = _resolved_cua_driver_cmd()
++    if not binary or not _cua_driver_contract_status(binary).get("ready"):
++        return _fail("    Windows installer exited, but the selected Windows driver is not usable.")
++    if not _repair_cua_driver_autostart_windows(binary, verbose=False):
++        return False
++    _print_success(f"    Windows-host cua-driver ready: {binary}. Restart the WSL backend after changing target.")
++    return True
++
++
+ def install_cua_driver(upgrade: bool = False, require_confirmed_update: bool = False,
+                        show_installer_progress: bool = True) -> bool:
+     """Install or refresh the cua-driver binary used by Computer Use.
+     Re-running the upstream installer (always the latest release tag) is the canonical upgrade.
+     ``upgrade=False`` (toolset enable flow) keeps a compatible installation, repairs an
+     old/incomplete one and installs when missing; ``upgrade=True`` always refreshes."""
++    from hermes_constants import is_wsl
++    from tools.computer_use.cua_backend_driver import computer_use_target, is_windows_driver
++    try:
++        target = computer_use_target()
++        if sys.platform == "linux" and is_wsl() and (
++                target == "windows" or is_windows_driver(_resolved_cua_driver_cmd())):
++            return _install_wsl_windows_driver(upgrade=upgrade, unattended=require_confirmed_update)
++    except ValueError as exc:
++        return _fail(str(exc))
+     system = platform.system()
+     if system not in ("Darwin", "Windows", "Linux"):
+         if not upgrade:  # silent under `hermes update`, which calls this for every user
+@@ -498,7 +548,8 @@ def _ps_single_quote(value: str) -> str:
+ 
+ def _cua_driver_autostart_registered_windows() -> bool:
+     """Return whether the Windows cua-driver scheduled task is registered."""
+-    if sys.platform != "win32":
++    from hermes_constants import is_wsl
++    if sys.platform != "win32" and not is_wsl():
+         return False
+     try:
+         return subprocess.run(["schtasks.exe", "/Query", "/TN", "cua-driver-serve"],
+@@ -513,12 +564,26 @@ def _repair_cua_driver_autostart_windows(driver_cmd: str, *, verbose: bool) -> b
+     Older install.ps1 builds interpolated the binary path into a PowerShell command string, which
+     split at the first space. If the scheduled task is missing, retry via Start-Process's
+     structured ``-FilePath`` / ``-ArgumentList`` parameters instead."""
+-    if sys.platform != "win32" or _cua_driver_autostart_registered_windows():
++    from hermes_constants import is_wsl
++    wsl = sys.platform == "linux" and is_wsl()
++    if (sys.platform != "win32" and not wsl) or _cua_driver_autostart_registered_windows():
+         return True
+     binary = shutil.which(driver_cmd)
+     if not binary:
+         return False
+-    ps = shutil.which("powershell") or shutil.which("powershell.exe") or "powershell"
++    if wsl:
++        try:
++            converted = _run_text(["wslpath", "-w", os.path.realpath(binary)], timeout=3,
++                                  stdin=subprocess.DEVNULL)
++            binary = (converted.stdout or "").strip()
++            if converted.returncode or not binary or "\n" in binary:
++                return _fail("    Cannot translate the Windows driver path for autostart repair.")
++        except (OSError, subprocess.SubprocessError) as exc:
++            return _fail(f"    Cannot translate the Windows driver path: {exc}")
++    ps = (shutil.which("powershell.exe") if wsl else
++          shutil.which("powershell") or shutil.which("powershell.exe") or "powershell")
++    if not ps:
++        return _fail("    Windows PowerShell is unavailable for autostart repair.")
+     ps_cmd = (f"$exe = {_ps_single_quote(binary)}; "
+               "$proc = Start-Process -FilePath $exe -ArgumentList @('autostart','enable') "
+               "-Verb RunAs -Wait -PassThru -ErrorAction Stop; exit $proc.ExitCode")
+@@ -531,7 +596,7 @@ def _repair_cua_driver_autostart_windows(driver_cmd: str, *, verbose: bool) -> b
+         return _fail("    cua-driver autostart registration timed out.")
+     except Exception as exc:
+         return _fail(f"    cua-driver autostart registration failed: {exc}")
+-    if result.returncode == 0:
++    if result.returncode == 0 and (not wsl or _cua_driver_autostart_registered_windows()):
+         return True
+     _print_warning("    cua-driver autostart registration failed.")
+     _print_output_tail(result)
+diff --git a/tools/computer_use/cua_backend.py b/tools/computer_use/cua_backend.py
+index 6301474..3d12238 100644
+--- a/tools/computer_use/cua_backend.py
++++ b/tools/computer_use/cua_backend.py
+@@ -201,6 +201,10 @@ def _maybe_repair_runtime_contract(contract: Dict[str, Any]) -> Dict[str, Any]:
+     global _contract_repair_attempted
+     if contract.get("ready") or _contract_repair_attempted or os.environ.get(_CUA_DRIVER_CMD_ENV, "").strip() or not contract.get("binary"):
+         return contract
++    from hermes_constants import is_wsl
++    from tools.computer_use.cua_backend_driver import is_windows_driver
++    if sys.platform == "linux" and is_wsl() and is_windows_driver(contract.get("binary")):
++        return contract  # Windows installation/UAC from WSL must be explicitly requested.
+     _contract_repair_attempted = True
+     logger.info("computer_use: installed cua-driver is not usable (%s); attempting automatic repair",
+                 contract.get("reason") or "runtime contract is incomplete")
+diff --git a/tools/computer_use/cua_backend_daemon.py b/tools/computer_use/cua_backend_daemon.py
+index 3f9bab5..8540676 100644
+--- a/tools/computer_use/cua_backend_daemon.py
++++ b/tools/computer_use/cua_backend_daemon.py
+@@ -125,7 +125,7 @@ class _EmbeddedCuaDaemon:
+         self._owns_runtime = self._running = False
+         self._stderr_tail: deque[str] = deque(maxlen=20)
+         token = uuid.uuid4().hex[:12]
+-        self.socket_path = (rf"\\.\pipe\hermes-cua-{token}" if sys.platform == "win32"
++        self.socket_path = (rf"\\.\pipe\hermes-cua-{token}" if _driver.is_windows_driver(driver_cmd)
+                             else os.path.join(tempfile.gettempdir(), f"hc-{token}.sock"))
+ 
+     def child_env(self) -> Dict[str, str]:
+@@ -150,7 +150,14 @@ class _EmbeddedCuaDaemon:
+         serve_args = ["serve", "--embedded", "--socket", self.socket_path, "--no-permissions-gate", "--permission-mode",
+                       self.permission_mode, *(["--dangerously-bypass-approvals"] if self.permission_mode == "unrestricted" else [])]
+         if self.manifest_applies:
+-            serve_args += ["--capability-manifest", str(self.capability_manifest), "--approve-capability-manifest"]
++            manifest = str(self.capability_manifest)
++            if sys.platform == "linux" and _driver.is_windows_driver(self._command):
++                # Windows receives argv unchanged through interop, including manifest paths.
++                converted = _cb()._run_quiet(["wslpath", "-w", manifest], timeout=3.0)
++                manifest = (converted.stdout or "").strip()
++                if converted.returncode or not manifest or "\n" in manifest:
++                    raise RuntimeError("Cannot translate the capability manifest for the Windows driver")
++            serve_args += ["--capability-manifest", manifest, "--approve-capability-manifest"]
+         # The private daemon owns the cursor overlay, so the overlay policy must apply to this long-lived serve
+         # process, not only its MCP proxy. Appended BEFORE the macOS app-launch wrapping so the flag travels inside
+         # `open ... --args` with the rest of the serve args.
+@@ -203,6 +210,6 @@ class _EmbeddedCuaDaemon:
+                              stderr=subprocess.DEVNULL, env=self._sanitized_env(), swallow=_QUIET_ERRORS)
+         if process is not None:
+             _wait_or_kill(process)
+-        if sys.platform != "win32" and os.path.exists(self.socket_path):
++        if not self.socket_path.startswith("\\\\.\\pipe\\") and os.path.exists(self.socket_path):
+             with contextlib.suppress(OSError):
+                 os.remove(self.socket_path)
+diff --git a/tools/computer_use/cua_backend_driver.py b/tools/computer_use/cua_backend_driver.py
+index 2beb284..84c2789 100644
+--- a/tools/computer_use/cua_backend_driver.py
++++ b/tools/computer_use/cua_backend_driver.py
+@@ -58,20 +58,64 @@ def _valid_mcp_args(invocation: Any) -> Optional[List[str]]:
+ def _has_path_separator(value: str) -> bool:
+     return os.sep in value or (os.altsep is not None and os.altsep in value)
+ 
++def computer_use_target() -> str:
++    """Profile-scoped target; auto keeps legacy resolution. Changes require a backend restart."""
++    from hermes_constants import is_wsl
++    target = str(_cb()._computer_use_cfg().get("target", "auto") or "auto").strip().lower()
++    if target not in {"auto", "windows", "linux"}:
++        raise ValueError("computer_use.target must be auto, windows, or linux")
++    if target == "windows" and sys.platform != "win32" and not (sys.platform == "linux" and is_wsl()):
++        raise ValueError("The Windows Computer Use target requires native Windows or WSL interop")
++    if target == "linux" and sys.platform != "linux":
++        raise ValueError("The Linux Computer Use target requires Linux or WSL")
++    return target
++
++
++def is_windows_driver(command: Optional[str]) -> bool:
++    """Use the executable's platform, including a POSIX symlink to a Windows executable."""
++    return bool(command) and (sys.platform == "win32" or
++        os.path.realpath(shutil.which(command) or command).lower().endswith(".exe"))
++
++
+ def _wsl_windows_path_to_posix(path: str) -> str:
+-    """Translate a Windows absolute manifest command to its DrvFS ``/mnt/<drive>/...`` form when Hermes runs in WSL
+-    (a Windows cua-driver manifest can report ``C:\\...`` while Hermes spawns via POSIX). Non-Windows paths and
+-    non-WSL hosts are returned unchanged."""
+-    if not re.match(r"^[A-Za-z]:[\\/]", path):
++    """Translate Windows manifest/install paths; wslpath respects custom automount roots."""
++    from hermes_constants import is_wsl
++    if not re.match(r"^[A-Za-z]:[\\/]", path) or not is_wsl():
+         return path
+-    try:
+-        from hermes_constants import is_wsl
+-        wsl = is_wsl()
+-    except Exception:
+-        wsl = False
++    if wslpath := shutil.which("wslpath"):
++        try:
++            proc = _cb()._run_quiet([wslpath, "-u", path], timeout=3.0)
++            converted = (proc.stdout or "").strip()
++            if proc.returncode == 0 and converted.startswith("/") and "\n" not in converted:
++                return converted
++        except (OSError, subprocess.SubprocessError):
++            pass
+     win = PureWindowsPath(path)
+-    drive = (win.drive or "").rstrip(":").lower()
+-    return os.path.join("/mnt", drive, *(str(part) for part in win.parts[1:])) if wsl and drive else path
++    return os.path.join("/mnt", win.drive.rstrip(":").lower(), *win.parts[1:])
++
++
++@functools.lru_cache(maxsize=1)
++def _wsl_windows_install_paths() -> Tuple[str, ...]:
++    """Cache successful Windows-root discovery only; exceptions remain retryable.
++
++    Keep Windows paths in the cache so a transient wslpath failure cannot freeze
++    an incorrect /mnt mapping on hosts with a custom automount root.
++    """
++    powershell = shutil.which("powershell.exe")
++    if not powershell:
++        raise OSError("Windows PowerShell is unavailable through WSL interop")
++    script = ("[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; "
++              "@([Environment]::GetFolderPath('LocalApplicationData'),"
++              "[Environment]::GetFolderPath('UserProfile'))|ConvertTo-Json -Compress")
++    proc = _cb()._run_quiet([powershell, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
++                          timeout=5.0, env=_cb().sanitized_cua_driver_env())
++    roots = json.loads((proc.stdout or "").lstrip("\ufeff")) if proc.returncode == 0 else None
++    if (not isinstance(roots, list) or len(roots) != 2 or any(
++            not isinstance(p, str) or len(p) > 1024 or not re.fullmatch(r"[A-Za-z]:[\\/][^\x00-\x1f]*", p)
++            for p in roots)):
++        raise ValueError("Windows install-directory discovery failed")
++    return (str(PureWindowsPath(roots[0]) / "Programs" / "Cua" / "cua-driver" / "bin" / "cua-driver.exe"),
++            str(PureWindowsPath(roots[1]) / ".local" / "bin" / "cua-driver.exe"))
+ 
+ def _candidate_cua_driver_commands(override: Optional[str] = None) -> List[str]:
+     """Candidate commands in resolution order. ``override`` / a non-empty ``HERMES_CUA_DRIVER_CMD`` is authoritative
+@@ -81,6 +125,15 @@ def _candidate_cua_driver_commands(override: Optional[str] = None) -> List[str]:
+     configured = (override if override is not None else os.environ.get(_CUA_DRIVER_CMD_ENV, "")).strip()
+     if configured:
+         return [configured]
++    target = computer_use_target()
++    if target == "windows" and sys.platform == "linux":
++        # Do not probe PowerShell when an executable is already on PATH.
++        if shutil.which("cua-driver.exe"):
++            return ["cua-driver.exe"]
++        try:
++            return ["cua-driver.exe", *_wsl_windows_install_paths()]
++        except (OSError, subprocess.SubprocessError, ValueError):
++            return ["cua-driver.exe"]
+     home = os.path.expanduser("~")
+     if sys.platform == "win32":
+         local_app_data = os.environ.get("LOCALAPPDATA") or os.path.join(home, "AppData", "Local")
+@@ -91,9 +144,19 @@ def _candidate_cua_driver_commands(override: Optional[str] = None) -> List[str]:
+ 
+ def resolve_cua_driver_cmd(override: Optional[str] = None) -> Optional[str]:
+     """Resolve the cua-driver executable for every runtime/status surface; an override is never silently replaced."""
++    target = computer_use_target()
+     for expanded in map(os.path.expanduser, _candidate_cua_driver_commands(override)):
++        expanded = _wsl_windows_path_to_posix(expanded)
+         resolved = shutil.which(expanded)
+         if resolved:
++            windows = is_windows_driver(resolved)
++            if target != "auto" and windows != (target == "windows"):
++                continue  # an incompatible authoritative override must never fall back
++            if windows and sys.platform == "linux":
++                from tools.bot_desktop.runtime import published_env
++                if published_env():
++                    raise ValueError("This profile has an active Linux Bot Screen; stop it or use a separate "
++                                     "profile for Windows-host Computer Use")
+             return expanded if _has_path_separator(expanded) else resolved
+     return None
+ 
+@@ -102,7 +165,7 @@ def cua_driver_binary_available() -> bool:
+     return resolve_cua_driver_cmd() is not None
+ 
+ def cua_driver_install_hint() -> str:
+-    installer = (f"  irm {_UPSTREAM_SCRIPTS}/install.ps1 | iex" if sys.platform == "win32"
++    installer = (f"  irm {_UPSTREAM_SCRIPTS}/install.ps1 | iex" if sys.platform == "win32" or computer_use_target() == "windows"
+                  else f'  /bin/bash -c "$(curl -fsSL {_UPSTREAM_SCRIPTS}/install.sh)"')
+     return ("cua-driver is not installed. Install with one of:\n  hermes computer-use install\n"
+             f"Or run the upstream installer directly:\n{installer}\n"
+diff --git a/tools/computer_use/tool.py b/tools/computer_use/tool.py
+index b2ee151..d57d76b 100644
+--- a/tools/computer_use/tool.py
++++ b/tools/computer_use/tool.py
+@@ -308,7 +308,12 @@ def handle_computer_use(args: Dict[str, Any], **kwargs) -> Any:
+         admitted = _bd_lease.assert_agent_may_act()
+     except _bd_lease.HumanHasControl as e:
+         return _refused(e)
+-    _bd_ensure_started()  # headless gateway: bring the profile's screen up before the backend probes DISPLAY
++    from tools.computer_use.cua_backend_driver import computer_use_target
++    try:
++        if computer_use_target() != "windows":
++            _bd_ensure_started()  # headless guest profiles keep the existing Xvnc path
++    except ValueError as e:
++        return json.dumps({"error": str(e)})
+     if (err := _reject_unsafe(action, args)) is not None:
+         return err
+     scopes = ([action] if action in _ACTIONS and _ACTIONS[action].destructive else []) + (
+diff --git a/website/docs/user-guide/features/computer-use.md b/website/docs/user-guide/features/computer-use.md
+index 05b75e6..7e041e7 100644
+--- a/website/docs/user-guide/features/computer-use.md
++++ b/website/docs/user-guide/features/computer-use.md
+@@ -638,3 +638,25 @@ autostart pattern — see
+   - [Connect your agent](https://cua.ai/docs/how-to-guides/driver/connect-your-agent) — register cua-driver with various harnesses (Hermes among them)
+ - [cua-driver source (trycua/cua)](https://github.com/trycua/cua)
+ - [Browser automation](./browser.md) for cross-platform web tasks where you don't need to drive native apps.
++
++
++### Windows-host control from a WSL backend
++
++A Windows Desktop **Remote** connection to WSL does not select the Windows desktop.
++In the **WSL backend profile** that should drive the Windows host, run:
++
++```bash
++hermes config set computer_use.target windows
++hermes computer-use install
++hermes computer-use status
++```
++
++For a named profile, run each command with `hermes -p PROFILE` instead of `hermes`.
++Restart that WSL backend after changing the target; this does not hot-switch existing sessions.
++Windows PowerShell/WSL interop must be enabled. Installation uses the official Windows installer
++and may request Windows UAC consent. Status prints the selected Windows executable path.
++The same resolver is used by the agent and by Desktop's existing status/install endpoints.
++`computer_use.target: auto` keeps legacy resolution; `linux` restricts it to the guest.
++An incompatible `HERMES_CUA_DRIVER_CMD` is not silently replaced. A Windows-host profile cannot
++also drive a running Linux **Bot Screen**: stop that screen or use a separate profile.
++This uses same-PC executable interop, not a relay to an arbitrary remote frontend's desktop.
