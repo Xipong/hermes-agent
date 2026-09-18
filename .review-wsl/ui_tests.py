@@ -80,7 +80,11 @@ describe('Computer Use target and provider matrix integration', { timeout: 60_00
 '''
 p.write_text(s, encoding='utf-8')
 p = root / 'apps/desktop/src/app/settings/computer-use-panel.test.tsx'
-s = p.read_text(encoding='utf-8') + '''
+s = p.read_text(encoding='utf-8')
+old = "    expect(screen.getByText(/through WSL/)).toBeTruthy()"
+assert s.count(old) == 1
+s = s.replace(old, "    expect(screen.getByRole('button', { name: 'Automatic' }).getAttribute('aria-pressed')).toBe('true')")
+s += '''
 
 it.each(['macos', 'darwin'])('formats the effective macOS driver platform %s', async driverPlatform => {
   getComputerUseStatus.mockResolvedValue(status({ platform: 'darwin', is_wsl: false, driver_platform: driverPlatform }))
