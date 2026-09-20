@@ -1,0 +1,169 @@
+name: WSL host target diagnostic review
+on:
+  push:
+    branches: [validate/wsl-host-status-review-115033]
+    paths:
+      - .github/workflows/wsl-host-status-review.yml
+      - .review-wsl-status/**
+permissions:
+  contents: read
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    defaults:
+      run:
+        shell: bash
+        working-directory: candidate
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          path: staging
+          sparse-checkout: .review-wsl-status
+          persist-credentials: false
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: d95f999780df62dfb5af386fe72ac6613a813b00
+          path: candidate
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v7
+        with:
+          version: 0.9.28
+          enable-cache: true
+          cache-dependency-glob: candidate/uv.lock
+      - name: Install locked Python dependencies
+        run: uv sync --locked --python 3.11 --extra all --extra dev
+      - name: Install regression tests
+        run: python ../staging/.review-wsl-status/prepare.py tests
+      - name: Reproduce target-status exceptions on the unchanged PR head
+        run: |
+          set +e
+          scripts/run_tests.sh -j 1 --file-retries 0 tests/tools/test_computer_use_target_status.py --junitxml=../before.xml 2>&1 | tee ../before.log
+          status=${PIPESTATUS[0]}
+          set -e
+          test "$status" -eq 1
+          uv run python - <<'PY'
+          import xml.etree.ElementTree as ET
+          cases = ET.parse('../before.xml').findall('.//testcase')
+          assert len(cases) == 2, len(cases)
+          for case in cases:
+              failure = case.find('failure')
+              assert failure is not None and case.find('error') is None, ET.tostring(case)
+              assert 'ValueError' in (failure.text or ''), ET.tostring(case)
+          print('Both target diagnostics reproduce as ValueError failures on unchanged PR head.')
+          PY
+      - name: Verify existing fail-closed manifest translation boundary
+        if: runner.os == 'Linux'
+        run: |
+          scripts/run_tests.sh -j 1 --file-retries 0 tests/tools/test_computer_use_wsl_host.py -k test_manifest_translation_failure_is_a_retryable_tool_error 2>&1 | tee ../daemon-before.log
+      - name: Apply the permissions-surface fix
+        run: |
+          python ../staging/.review-wsl-status/prepare.py source
+          git add -N tests/tools/test_computer_use_target_status.py
+          git diff --check
+          git diff --stat
+      - name: Target diagnostics and WSL routing regressions
+        run: |
+          scripts/run_tests.sh -j 2 --file-retries 0 tests/tools/test_computer_use_target_status.py tests/tools/test_computer_use_wsl_host.py tests/hermes_cli/test_cua_wsl_host_install.py 2>&1 | tee ../focused.log
+      - name: Existing platform regression matrix
+        id: matrix
+        continue-on-error: true
+        run: |
+          uv run python - <<'PY'
+          import glob, os
+          from pathlib import Path
+          if os.environ['RUNNER_OS'] == 'Linux':
+              paths = ['tests/computer_use', *glob.glob('tests/tools/test_computer_use*.py'),
+                       *glob.glob('tests/tools/test_bot_desktop*.py'),
+                       'tests/tools/test_browser_computer_use_profile_cache_keys.py',
+                       'tests/hermes_cli/test_install_cua_driver.py', 'tests/hermes_cli/test_computer_use_cli.py']
+          else:
+              paths = ['tests/computer_use/test_cua_atexit_teardown.py',
+                       'tests/computer_use/test_cua_wsl_manifest_path.py',
+                       'tests/tools/test_computer_use_native_platform.py',
+                       'tests/hermes_cli/test_install_cua_driver.py']
+              paths.extend(str(p) for p in Path('tests/computer_use').glob('*permission*.py'))
+          paths = sorted(set(p for p in paths if p != 'tests/tools/test_computer_use_target_status.py'))
+          Path('../matrix-paths.txt').write_text(' '.join(paths), encoding='utf-8')
+          print('Regression paths:', paths)
+          PY
+          paths=$(cat ../matrix-paths.txt)
+          scripts/run_tests.sh -j 4 --file-retries 0 $paths 2>&1 | tee ../matrix.log
+      - name: Compare any existing failures to the unchanged PR head
+        if: steps.matrix.outcome == 'failure'
+        run: |
+          git restore --source=HEAD -- tools/computer_use/permissions.py
+          set +e
+          paths=$(cat ../matrix-paths.txt)
+          scripts/run_tests.sh -j 4 --file-retries 0 $paths 2>&1 | tee ../baseline.log
+          status=${PIPESTATUS[0]}
+          set -e
+          python ../staging/.review-wsl-status/prepare.py source
+          test "$status" -eq 1
+          uv run python - <<'PY'
+          import os, re
+          from pathlib import Path
+          def failures(path):
+              text = Path(path).read_text(encoding='utf-8-sig', errors='replace')
+              assert not re.search(r'ERROR collecting|INTERNALERROR|TIMEOUT|timed out', text), text
+              return set(re.findall(r'^FAILED (\S+)', text, re.M))
+          actual, baseline = failures('../matrix.log'), failures('../baseline.log')
+          assert actual and actual == baseline, (actual, baseline)
+          print('NO NEW FAILURES; unchanged PR head has the same failures:', sorted(actual))
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+              summary.write('Existing failure sets match the unchanged PR head:\n')
+              summary.write('\n'.join('- `' + s + '`' for s in sorted(actual)))
+          PY
+      - name: Lint and preserve the exact tested patch
+        run: |
+          uv run ruff check --select F821 tools/computer_use/permissions.py tests/tools/test_computer_use_target_status.py tests/tools/test_computer_use_wsl_host.py
+          git diff --check
+          git diff --binary HEAD > ../candidate.patch
+      - name: Keep reproduction logs and tested patch
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v4
+        with:
+          name: wsl-status-review-${{ runner.os }}
+          path: |
+            before.log
+            before.xml
+            daemon-before.log
+            focused.log
+            matrix.log
+            baseline.log
+            candidate.patch
+          retention-days: 7
+  commit:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: d95f999780df62dfb5af386fe72ac6613a813b00
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: wsl-status-review-*
+          path: proof
+      - name: Publish only the byte-identical tested source and regression tests
+        run: |
+          cmp proof/wsl-status-review-Linux/candidate.patch proof/wsl-status-review-Windows/candidate.patch
+          cmp proof/wsl-status-review-Linux/candidate.patch proof/wsl-status-review-macOS/candidate.patch
+          git apply --index proof/wsl-status-review-Linux/candidate.patch
+          python - <<'PY'
+          import subprocess
+          expected = {'tools/computer_use/permissions.py', 'tests/tools/test_computer_use_target_status.py', 'tests/tools/test_computer_use_wsl_host.py'}
+          actual = set(subprocess.check_output(['git', 'diff', '--cached', '--name-only'], text=True).splitlines())
+          assert actual == expected, actual
+          PY
+          git config user.name Xipong
+          git config user.email 217837358+Xipong@users.noreply.github.com
+          git commit -m 'fix(computer-use): report target errors on permission surfaces' -m 'Preserve the readiness payload and return resolver diagnostics instead of raising on invalid or unsupported targets. Handle the same resolver failure in macOS permissions grant. Verify that manifest translation failures already fail closed through the tool boundary and remain retryable without discarding the manifest.'
+          git push origin HEAD:refs/heads/fix/wsl-host-status-tested-${{ github.run_id }}
+          echo "Tested commit: $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
