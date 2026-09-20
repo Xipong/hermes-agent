@@ -3,24 +3,40 @@ on:
   push:
     branches: [work/hindsight-user-input-117487]
 permissions:
-  contents: read
+  contents: write
 jobs:
-  source:
+  publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
-          ref: 3a6e96352230b25a58414ec303e4a0b049741b89
-          persist-credentials: false
-      - name: Export frozen source for regression tests
+          fetch-depth: 0
+      - name: Apply only the tested patch to the frozen upstream base
         run: |
-          mkdir -p /tmp/hermes-source
-          git rev-parse HEAD > /tmp/hermes-source/base.txt
-          git archive --format=tar.gz --output=/tmp/hermes-source/source.tar.gz HEAD
-          sha256sum /tmp/hermes-source/source.tar.gz
-      - uses: actions/upload-artifact@v4
+          set -euo pipefail
+          echo '7021fdbf5de10992457d7a5e6737bcca83cfb0aa403526c74d91bfe8d0a63c35  hindsight-input-117487.patch' | sha256sum -c -
+          cp hindsight-input-117487.patch "$RUNNER_TEMP/hindsight.patch"
+          git checkout --detach 3a6e96352230b25a58414ec303e4a0b049741b89
+          git apply --check "$RUNNER_TEMP/hindsight.patch"
+          git apply "$RUNNER_TEMP/hindsight.patch"
+          git add agent/turn_facade.py agent/turn_origin.py plugins/memory/hindsight/README.md plugins/memory/hindsight/__init__.py tests/agent/test_turn_origin.py tests/plugins/memory/test_hindsight_turn_origin.py website/docs/developer-guide/memory-provider-plugin.md
+          git diff --cached --check
+          git diff --cached --stat
+          python -m py_compile agent/turn_origin.py agent/turn_facade.py plugins/memory/hindsight/__init__.py tests/agent/test_turn_origin.py tests/plugins/memory/test_hindsight_turn_origin.py
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39
         with:
-          name: hermes-hindsight-117487-source
-          path: /tmp/hermes-source/
-          retention-days: 1
+          version: '0.9.28'
+      - name: Check repository lint rules
+        run: uvx --from ruff==0.15.10 ruff check agent/turn_origin.py agent/turn_facade.py plugins/memory/hindsight/__init__.py tests/agent/test_turn_origin.py tests/plugins/memory/test_hindsight_turn_origin.py
+      - name: Publish a clean single-commit branch (never main)
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 3a6e96352230b25a58414ec303e4a0b049741b89
+          test "$(git diff --cached --name-only | wc -l)" -eq 7
+          git config user.name Xipong
+          git config user.email 217837358+Xipong@users.noreply.github.com
+          git commit -m 'fix(hindsight): skip automatic memory work on non-user turns'
+          git show --stat --oneline HEAD
+          git push origin HEAD:refs/heads/fix/hindsight-user-input-117487
+          echo "Published commit: $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
