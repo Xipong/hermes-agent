@@ -1,0 +1,26 @@
+name: Hindsight input provenance workspace
+on:
+  push:
+    branches: [work/hindsight-user-input-117487]
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: 3a6e96352230b25a58414ec303e4a0b049741b89
+          persist-credentials: false
+      - name: Export frozen source for regression tests
+        run: |
+          mkdir -p /tmp/hermes-source
+          git rev-parse HEAD > /tmp/hermes-source/base.txt
+          git archive --format=tar.gz --output=/tmp/hermes-source/source.tar.gz HEAD
+          sha256sum /tmp/hermes-source/source.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hermes-hindsight-117487-source
+          path: /tmp/hermes-source/
+          retention-days: 1
