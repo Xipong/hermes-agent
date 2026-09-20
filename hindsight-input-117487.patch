@@ -1,0 +1,496 @@
+diff --git a/agent/turn_facade.py b/agent/turn_facade.py
+index f308203..b763ea0 100644
+--- a/agent/turn_facade.py
++++ b/agent/turn_facade.py
+@@ -51,6 +51,7 @@ class TurnFacadeMixin:
+         from agent.subagent_lifecycle import bind_subagent_parent
+         from agent.interrupt_scope import track_in_interrupt_scope
+         from agent.turn_facade_lease import admit_durable_turn_lease, carry_unadmitted_user_message
++        from agent.turn_origin import turn_input_scope
+         from hermes_cli.observability.relay_shared_metrics import finish_task_run, start_task_run
+ 
+         effective_task_id = task_id or str(uuid.uuid4())
+@@ -130,7 +131,15 @@ class TurnFacadeMixin:
+ 
+             # Keep the ContextVar scope local (agent tokens may be observed from another thread).
+             # A host that owns this thread (Hermes Console) may cancel the turn cross-thread.
+-            with bind_subagent_parent(self), scoped_runtime_main({}), track_in_interrupt_scope(self):
++            with (
++                bind_subagent_parent(self), scoped_runtime_main({}), track_in_interrupt_scope(self),
++                turn_input_scope(
++                    display_kind=persist_user_display_kind, turn_author=turn_author,
++                    platform=getattr(self, "platform", None),
++                    staged_message=getattr(self, "_pending_cli_user_message", None),
++                    user_message=persist_user_message if persist_user_message is not None else user_message,
++                ),
++            ):
+                 try:
+                     if lease is not None:
+                         lease.start()
+diff --git a/agent/turn_origin.py b/agent/turn_origin.py
+new file mode 100644
+index 0000000..c5bac54
+--- /dev/null
++++ b/agent/turn_origin.py
+@@ -0,0 +1,55 @@
++"""Host-declared input origin for the current turn (never inferred from prompt text).
++
++Context-local so queued memory work keeps the originating turn's provenance when
++another session, notification or human turn starts before its worker runs.
++"""
++
++from contextlib import contextmanager
++from contextvars import ContextVar
++from typing import Any, Iterator
++
++from agent.turn_author import parse_turn_author
++
++# Typed by the CLI/TUI process notification producers and the messaging gateway.
++# `hidden` (widget/onboarding input) and `steer` are not machine-origin signals.
++_RUNTIME_DISPLAY_KINDS = frozenset({
++    "process_complete", "async_delegation_complete", "internal_notification",
++})
++_NON_USER_PLATFORMS = frozenset({"cron", "subagent"})
++
++# Preserve the direct provider-call contract when no host turn has been bound.
++_user_input: ContextVar[bool] = ContextVar("hermes_turn_user_input", default=True)
++
++
++def is_user_input_turn() -> bool:
++    """Whether automatic work belongs to a user-originated turn in this context."""
++    return _user_input.get()
++
++
++@contextmanager
++def turn_input_scope(*, display_kind: str | None = None, turn_author: Any = None,
++                     platform: str | None = None, staged_message: Any = None,
++                     user_message: Any = None) -> Iterator[None]:
++    """Bind trusted ingress metadata; restore the previous origin even on failure.
++
++    No content matching: a human pasting a notification or a log is still a human
++    input. This signal does not change execution, history, prompts or tool access;
++    consumers choose their own policy (e.g. Hindsight's automatic memory hooks).
++    """
++    # The classic CLI types its current row before entering the agent thread.
++    # Match the clean input as the turn prologue does; a stale staged row must
++    # never classify an unrelated new turn.
++    if (not display_kind and isinstance(staged_message, dict)
++            and staged_message.get("content") == user_message):
++        display_kind = staged_message.get("display_kind")
++    author = parse_turn_author(turn_author)
++    user_input = (
++        display_kind not in _RUNTIME_DISPLAY_KINDS
++        and (platform or "").lower() not in _NON_USER_PLATFORMS
++        and not (author and author["is_bot"])
++    )
++    token = _user_input.set(user_input)
++    try:
++        yield
++    finally:
++        _user_input.reset(token)
+diff --git a/plugins/memory/hindsight/README.md b/plugins/memory/hindsight/README.md
+index 06382a4..e8c06b4 100644
+--- a/plugins/memory/hindsight/README.md
++++ b/plugins/memory/hindsight/README.md
+@@ -44,6 +44,24 @@ hindsight-embed -p hermes ui start
+ 
+ Points the plugin at an existing Hindsight instance you're already running (Docker, self-hosted, etc.). No daemon management — just a URL and an optional API key.
+ 
++## Automatic memory and turn origin
++
++Automatic recall (including reflect-prefetch), queued prefetch, and automatic retain
++skip Hermes' typed runtime notifications: process completions, asynchronous delegation
++completions, and internal gateway notices such as a session handoff. Bot-authored turns
++and cron/subagent surfaces also skip these automatic operations. Ordinary human input,
++including pasted logs, voice transcripts, steering, and user-triggered hidden widget
++messages, keeps the configured memory behavior.
++
++A skipped turn does not consume a buffered recall or cancel already queued work from a
++human turn. The origin travels with background work instead of being stored in a mutable
++per-agent flag. Explicit `hindsight_recall`, `hindsight_reflect`, and `hindsight_retain`
++tools remain available. Existing memories are not deleted or reclassified.
++
++This uses host-supplied metadata, not matching words in prompt text. A custom caller that
++delivers an internal notification without origin metadata retains the legacy behavior;
++it should pass the appropriate `persist_user_display_kind` to `run_conversation`.
++
+ ## Config
+ 
+ Config file: `~/.hermes/hindsight/config.json`
+diff --git a/plugins/memory/hindsight/__init__.py b/plugins/memory/hindsight/__init__.py
+index 20236b0..6882b47 100644
+--- a/plugins/memory/hindsight/__init__.py
++++ b/plugins/memory/hindsight/__init__.py
+@@ -26,6 +26,7 @@ from typing import Any, Callable, Dict, List, Optional
+ 
+ from agent.memory_provider import MemoryProvider, RecallStatus, spawn_context_thread
+ from agent.secret_scope import UnscopedSecretError, get_secret
++from agent.turn_origin import is_user_input_turn
+ from hermes_cli.config import cfg_get
+ from hermes_constants import get_hermes_home
+ from hermes_time import now as _hermes_now
+@@ -879,7 +880,8 @@ class HindsightMemoryProvider(MemoryProvider):
+ 
+     def _recall_disabled(self) -> bool:
+         """Guards shared by the async and synchronous recall paths."""
+-        why = ("tools-only mode" if self._memory_mode == "tools" else "auto_recall disabled" if not self._auto_recall
++        why = ("non-user turn" if not is_user_input_turn() else
++               "tools-only mode" if self._memory_mode == "tools" else "auto_recall disabled" if not self._auto_recall
+                else "shutting down" if self._shutting_down.is_set() else None)
+         if why:
+             logger.debug("Prefetch: skipped (%s)", why)
+@@ -940,6 +942,10 @@ class HindsightMemoryProvider(MemoryProvider):
+         self._prefetch_thread.join(timeout=timeout)
+ 
+     def prefetch(self, query: str, *, session_id: str = "") -> str:
++        # Do not consume a previous human turn's cached recall on a runtime wake.
++        # Only clear the current indicator; queued human work keeps its own scope.
++        if not is_user_input_turn():
++            return self._finish_prefetch("", 0)
+         # Opt-in: recall synchronously against the *current* message so the
+         # injected memories match this turn's query, not the previous turn's.
+         # See NousResearch/hermes-agent#5820.
+@@ -1047,7 +1053,8 @@ class HindsightMemoryProvider(MemoryProvider):
+     def sync_turn(self, user_content: str, assistant_content: str, *, session_id: str = "") -> None:
+         """Enqueue a retain for the current turn (non-blocking; writer thread). Dropped
+         once shutdown() fired so post-exit retains never reach aiohttp during teardown."""
+-        why = "auto_retain disabled" if not self._auto_retain else "shutting down" if self._shutting_down.is_set() else None
++        why = ("non-user turn" if not is_user_input_turn() else "auto_retain disabled" if not self._auto_retain
++               else "shutting down" if self._shutting_down.is_set() else None)
+         if why:
+             logger.debug("sync_turn: skipped (%s)", why)
+             return
+diff --git a/tests/agent/test_turn_origin.py b/tests/agent/test_turn_origin.py
+new file mode 100644
+index 0000000..25dac7c
+--- /dev/null
++++ b/tests/agent/test_turn_origin.py
+@@ -0,0 +1,72 @@
++"""Host input provenance is scoped, typed, and independent of prompt wording."""
++
++from contextvars import copy_context
++
++import pytest
++
++from agent.turn_origin import is_user_input_turn, turn_input_scope
++
++
++@pytest.mark.parametrize("kind", ["process_complete", "async_delegation_complete", "internal_notification"])
++def test_runtime_display_kinds_are_not_user_input(kind):
++    with turn_input_scope(display_kind=kind):
++        assert not is_user_input_turn()
++    assert is_user_input_turn()
++
++
++@pytest.mark.parametrize("kind", [None, "", "steer", "hidden"])
++def test_user_presentation_kinds_keep_user_authority(kind):
++    with turn_input_scope(display_kind=kind):
++        assert is_user_input_turn()
++
++
++@pytest.mark.parametrize("platform", ["cli", "tui", "desktop", "telegram"])
++def test_human_surfaces_are_not_blanket_disabled(platform):
++    with turn_input_scope(platform=platform):
++        assert is_user_input_turn()
++
++
++@pytest.mark.parametrize("platform", ["cron", "subagent"])
++def test_automated_surfaces_are_not_user_input(platform):
++    with turn_input_scope(platform=platform):
++        assert not is_user_input_turn()
++
++
++@pytest.mark.parametrize("value,expected", [(True, False), ("true", False), (False, True), ("false", True)])
++def test_author_uses_existing_bot_flag_normalization(value, expected):
++    with turn_input_scope(turn_author={"id": "sender", "is_bot": value}):
++        assert is_user_input_turn() is expected
++
++
++def test_cli_staged_notification_matches_clean_input_only():
++    staged = {"role": "user", "content": "notification", "display_kind": "process_complete"}
++    with turn_input_scope(staged_message=staged, user_message="notification"):
++        assert not is_user_input_turn()
++    with turn_input_scope(staged_message=staged, user_message="new human question"):
++        assert is_user_input_turn()
++    with turn_input_scope(display_kind="steer", staged_message=staged, user_message="notification"):
++        assert is_user_input_turn()
++    assert staged["display_kind"] == "process_complete"
++
++
++@pytest.mark.parametrize("text", [
++    "[ASYNC DELEGATION BATCH COMPLETE — pasted by a human]",
++    "[IMPORTANT: Background process proc_example completed normally with exit code 0.]",
++    "[Session was just handed off from CLI ...]",
++])
++def test_notification_text_alone_does_not_change_origin(text):
++    with turn_input_scope(user_message=text):
++        assert is_user_input_turn()
++
++
++def test_nested_scopes_restore_on_exception_and_copied_context_keeps_origin():
++    with turn_input_scope():
++        user_context = copy_context()
++        with pytest.raises(RuntimeError), turn_input_scope(display_kind="internal_notification"):
++            runtime_context = copy_context()
++            assert not is_user_input_turn()
++            assert user_context.run(is_user_input_turn)
++            raise RuntimeError("turn failed")
++        assert is_user_input_turn()
++        assert not runtime_context.run(is_user_input_turn)
++    assert is_user_input_turn()
+diff --git a/tests/plugins/memory/test_hindsight_turn_origin.py b/tests/plugins/memory/test_hindsight_turn_origin.py
+new file mode 100644
+index 0000000..f080d5f
+--- /dev/null
++++ b/tests/plugins/memory/test_hindsight_turn_origin.py
+@@ -0,0 +1,228 @@
++"""Automatic Hindsight work follows input origin; explicit tools remain available."""
++
++import json
++import threading
++from types import SimpleNamespace
++from unittest.mock import Mock
++
++import pytest
++
++from agent.memory_manager import MemoryManager
++from agent.turn_origin import is_user_input_turn, turn_input_scope
++from plugins.memory import load_memory_provider
++from run_agent import AIAgent
++
++
++@pytest.fixture
++def provider(tmp_path, monkeypatch):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    config_dir = tmp_path / "hindsight"
++    config_dir.mkdir()
++    (config_dir / "config.json").write_text(json.dumps({
++        "mode": "local_external", "api_url": "http://localhost:9999",
++        "bank_id": "test-bank", "memory_mode": "hybrid", "recall_sync": True,
++    }), encoding="utf-8")
++    monkeypatch.setattr("plugins.memory.hindsight.get_hermes_home", lambda: tmp_path)
++    monkeypatch.setattr("plugins.memory.hindsight._maybe_upgrade_client", lambda: None)
++    # Real discovery, construction and config loading; only the external backend is replaced.
++    p = load_memory_provider("hindsight", register_skills=False)
++    assert p is not None
++    p.initialize(session_id="test-session", platform="cli")
++    p._prefetch_waits_for_retain = False
++    monkeypatch.setattr(p, "_do_recall", Mock(return_value=("- relevant memory", 1)))
++    monkeypatch.setattr(p, "_resolve_retain_target", lambda _doc: ("test-document", None))
++    monkeypatch.setattr(p, "_enqueue_retain", Mock())
++    yield p
++    p.shutdown()
++
++
++@pytest.mark.parametrize("kind", ["process_complete", "async_delegation_complete", "internal_notification"])
++@pytest.mark.parametrize("sync", [False, True])
++def test_runtime_turn_skips_all_automatic_paths_and_preserves_cached_recall(provider, kind, sync):
++    p = provider
++    p._recall_sync = sync
++    p._prefetch_result, p._prefetch_count = "- earlier human memory", 1
++    p._last_recall_returned, p._last_recall_count = True, 1
++    with turn_input_scope(display_kind=kind):
++        assert p.prefetch("runtime notification") == ""
++        p.queue_prefetch("runtime notification")
++        p.sync_turn("runtime notification", "notification response")
++        assert p.recall_status() is None
++    p._do_recall.assert_not_called()
++    p._enqueue_retain.assert_not_called()
++    assert p._prefetch_thread is None
++    assert p._prefetch_result == "- earlier human memory"
++    assert p._prefetch_count == 1
++    assert p._turn_counter == 0
++    assert p._session_turns == []
++    # The next real input uses normal settings; async mode consumes the original cache.
++    with turn_input_scope():
++        result = p.prefetch("human question")
++        p.sync_turn("human question", "answer")
++    assert ("relevant memory" if sync else "earlier human memory") in result
++    assert p._enqueue_retain.call_count == 1
++
++
++def test_runtime_turn_does_not_advance_retain_cadence(provider):
++    p = provider
++    p._retain_every_n_turns = 2
++    with turn_input_scope():
++        p.sync_turn("first human question", "answer")
++    with turn_input_scope(display_kind="internal_notification"):
++        p.sync_turn("handoff notification", "response")
++    assert p._turn_counter == 1
++    p._enqueue_retain.assert_not_called()
++    with turn_input_scope():
++        p.sync_turn("second human question", "answer")
++    assert p._turn_counter == 2
++    p._enqueue_retain.assert_called_once()
++    assert "handoff notification" not in "".join(p._session_turns)
++
++
++def test_real_background_prefetch_captures_the_human_turn(provider):
++    p = provider
++    p._recall_sync = False
++    entered, release = threading.Event(), threading.Event()
++    origins = []
++
++    def recall(query):
++        entered.set()
++        assert release.wait(3)
++        origins.append((query, is_user_input_turn()))
++        return "- queued human memory", 1
++
++    p._do_recall.side_effect = recall
++    try:
++        with turn_input_scope():
++            p.queue_prefetch("human question")
++        assert entered.wait(3)
++        with turn_input_scope(display_kind="process_complete"):
++            release.set()
++            p._prefetch_thread.join(timeout=3)
++            assert not p._prefetch_thread.is_alive()
++            assert p.prefetch("process completed") == ""
++        assert origins == [("human question", True)]
++        with turn_input_scope():
++            assert "queued human memory" in p.prefetch("next question")
++    finally:
++        release.set()
++
++
++def test_serialized_manager_queue_keeps_each_turn_origin(provider):
++    p, manager = provider, MemoryManager()
++    manager.add_provider(p)
++    entered, release = threading.Event(), threading.Event()
++
++    def hold_worker():
++        entered.set()
++        assert release.wait(3)
++
++    try:
++        manager._submit_background(hold_worker)
++        assert entered.wait(3)
++        with turn_input_scope():
++            manager.sync_all("queued human question", "answer")
++        with turn_input_scope(display_kind="async_delegation_complete"):
++            manager.sync_all("delegation notification", "response")
++            release.set()
++            assert manager.flush_pending(timeout=3)
++        p._enqueue_retain.assert_called_once()
++        saved = "".join(p._session_turns)
++        assert "queued human question" in saved
++        assert "delegation notification" not in saved
++    finally:
++        release.set()
++        manager.shutdown_all()
++
++
++def test_explicit_tools_still_work_on_a_non_user_turn(provider, monkeypatch):
++    p = provider
++    recall = Mock(return_value=[SimpleNamespace(text="explicit recall")])
++    reflect = Mock(return_value="explicit reflection")
++    retain = Mock()
++    monkeypatch.setattr(p, "_recall", recall)
++    monkeypatch.setattr(p, "_reflect", reflect)
++    monkeypatch.setattr(p, "_retain_batch", retain)
++    manager = MemoryManager()
++    manager.add_provider(p)
++    with turn_input_scope(display_kind="internal_notification"):
++        assert "explicit recall" in json.loads(manager.handle_tool_call("hindsight_recall", {"query": "q"}))["result"]
++        assert "explicit reflection" in json.loads(manager.handle_tool_call("hindsight_reflect", {"query": "q"}))["result"]
++        result = json.loads(manager.handle_tool_call("hindsight_retain", {"content": "chosen fact"}))
++    assert result["result"] == "Memory stored successfully."
++    recall.assert_called_once_with("q")
++    reflect.assert_called_once_with("q")
++    retain.assert_called_once()
++
++
++def _bare_agent(manager):
++    agent = AIAgent.__new__(AIAgent)
++    agent.session_id = "turn-origin-test"
++    agent.platform = "desktop"
++    agent.model = "test-model"
++    agent._session_db = None
++    agent._persist_disabled = True
++    agent._parent_session_id = None
++    agent._memory_manager = manager
++    agent._reset_activity_labels_after_turn = lambda: None
++    agent._conversation_root_id = lambda: agent.session_id
++    agent._interrupt_requested = False
++    agent._interrupt_message = None
++    agent._pending_redirect = None
++    agent._execution_thread_id = None
++    agent._interrupt_thread_signal_pending = False
++    return agent
++
++
++@pytest.mark.parametrize("cli_staging", [False, True])
++def test_public_turn_entry_binds_origin_for_real_manager_and_provider(provider, monkeypatch, cli_staging):
++    manager = MemoryManager()
++    manager.add_provider(provider)
++    agent = _bare_agent(manager)
++    agent.platform = "cli" if cli_staging else "desktop"
++
++    def loop(_agent, message, *_args, **_kwargs):
++        recalled = manager.prefetch_all(message, session_id=agent.session_id)
++        manager.sync_all(message, "answer", session_id=agent.session_id)
++        manager.queue_prefetch_all(message, session_id=agent.session_id)
++        assert manager.flush_pending(timeout=3)
++        return {"final_response": recalled, "messages": [], "failed": False}
++
++    monkeypatch.setattr("agent.conversation_loop.run_conversation", loop)
++    try:
++        assert "relevant memory" in agent.run_conversation("human question")["final_response"]
++        if cli_staging:
++            agent._pending_cli_user_message = {"role": "user", "content": "notification", "display_kind": "process_complete"}
++            kwargs = {}
++        else:
++            kwargs = {"persist_user_display_kind": "process_complete"}
++        assert agent.run_conversation("notification", **kwargs)["final_response"] == ""
++        # A stale staged row must not poison the next real turn on the reused agent.
++        assert "relevant memory" in agent.run_conversation("next human question")["final_response"]
++        assert provider._do_recall.call_count == 2
++        assert provider._enqueue_retain.call_count == 2
++        assert is_user_input_turn()
++    finally:
++        manager.shutdown_all()
++
++
++def test_other_memory_provider_keeps_its_existing_non_human_policy():
++    from agent.memory_provider import MemoryProvider
++
++    other = Mock(spec=MemoryProvider)
++    other.name = "other-provider"
++    other.get_tool_schemas.return_value = []
++    other.prefetch.return_value = "other provider memory"
++    manager = MemoryManager()
++    manager.add_provider(other)
++    try:
++        with turn_input_scope(display_kind="internal_notification"):
++            assert "other provider memory" in manager.prefetch_all("notification")
++            manager.sync_all("notification", "response")
++            manager.queue_prefetch_all("notification")
++            assert manager.flush_pending(timeout=3)
++        other.prefetch.assert_called_once()
++        other.sync_turn.assert_called_once()
++        other.queue_prefetch.assert_called_once()
++    finally:
++        manager.shutdown_all()
+diff --git a/website/docs/developer-guide/memory-provider-plugin.md b/website/docs/developer-guide/memory-provider-plugin.md
+index d4ca52f..cd71057 100644
+--- a/website/docs/developer-guide/memory-provider-plugin.md
++++ b/website/docs/developer-guide/memory-provider-plugin.md
+@@ -473,3 +473,17 @@ plugins/memory/my-provider/
+ ## Single Provider Rule
+ 
+ Only **one** external memory provider can be active at a time. If a user tries to register a second, the MemoryManager rejects it with a warning. This prevents tool schema bloat and conflicting backends.
++
++### Per-turn input origin
++
++`agent.turn_origin.is_user_input_turn()` exposes the host's input-origin signal during
++`AIAgent.run_conversation()`. It is false for typed runtime notifications, explicitly
++bot-authored input, and cron/subagent surfaces. It does not inspect prompt text and does
++not change tool permissions or other providers' policy. Hindsight uses it only in its
++automatic `prefetch`, `queue_prefetch`, and `sync_turn` paths, not its explicit tools.
++
++The signal is a `ContextVar`: use `ctx_bound` / `spawn_context_thread` for deferred work
++so a later turn cannot reclassify a queued job. It is reset on all turn exits. Direct
++provider calls outside a bound agent turn keep the legacy user-input default. Hosts
++must label runtime notifications through `persist_user_display_kind`; the classic CLI's
++matching staged message carries the same metadata.
