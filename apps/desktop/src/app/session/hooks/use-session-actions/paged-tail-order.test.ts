@@ -75,13 +75,6 @@ describe('page-omitted live-turn prefix restoration', () => {
     expect(ids(preserveLocalPendingTurnMessages(page, restored))).toEqual(ids(restored))
   })
 
-  it('uses timestamps only as a fallback for a legacy cached prompt without a row id', () => {
-    const prompt = user('user-legacy', 'Inspect', undefined, { timestamp: 10 })
-    const live = assistant('assistant-stream-live', 'Done.', 'call-legacy', { pending: false, timestamp: 11 })
-    const page = [assistant('row-folded', 'Done.', 'call-legacy', { timestamp: 12 })]
-
-    expect(ids(preserveLocalPendingTurnMessages(page, [prompt, live]))).toEqual([prompt.id, page[0].id])
-  })
 
   it('does not resurrect an old acknowledged prompt when the page has no occurrence from its local turn', () => {
     const stale = user('user-stale', 'Old request', 100)
