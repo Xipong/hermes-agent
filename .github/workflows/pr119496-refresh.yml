@@ -1,0 +1,84 @@
+name: PR119496 refresh validation
+
+on:
+  push:
+    branches:
+      - workbench/pr119496-refresh
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr119496-refresh-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest-32-core
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 26
+          cache: npm
+
+      - run: npm i -g npm@12
+      - uses: ./.github/actions/retry
+        with:
+          command: npm ci
+
+      - name: Focused Desktop tests and typecheck
+        working-directory: apps/desktop
+        run: |
+          npx vitest run --project ui             src/app/session/hooks/use-session-actions/paged-tail-order.test.ts             src/app/session/hooks/use-session-actions/utils.test.ts             src/app/session/hooks/resume-occurrences.test.tsx
+          npm run typecheck
+          npx prettier --check             src/app/session/hooks/use-session-actions/utils.ts             src/app/session/hooks/use-session-actions/index.ts             src/app/session/hooks/use-session-actions/paged-tail-order.test.ts             e2e/core/transcript-integrity.spec.ts
+
+      - name: Install system dependencies for Electron
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq             xvfb             libgtk-3-0 libnotify4 libnss3 libxss1 libxtst6             xdg-utils libatspi2.0-0 libdrm2 libgbm1 libasound2t64
+
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39
+        with:
+          version: '0.9.28'
+          enable-cache: true
+          cache-dependency-glob: |
+            pyproject.toml
+            uv.lock
+
+      - uses: ./.github/actions/retry
+        with:
+          command: uv python install 3.11
+
+      - uses: ./.github/actions/retry
+        with:
+          command: uv sync --locked --python 3.11 --extra all --extra dev
+
+      - name: Build Desktop
+        working-directory: apps/desktop
+        run: npm run build
+
+      - name: Run transcript integrity E2E
+        working-directory: apps/desktop
+        run: |
+          xvfb-run -a --server-args="-screen 0 1280x1024x24"             npx playwright test -c e2e/core/playwright.config.ts e2e/core/transcript-integrity.spec.ts
+        env:
+          CI: 'true'
+          OPENROUTER_API_KEY: ''
+          OPENAI_API_KEY: ''
+          NOUS_API_KEY: ''
+          ANTHROPIC_API_KEY: ''
+
+      - name: Upload E2E failure artifacts
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: pr119496-refresh-${{ github.sha }}
+          path: |
+            apps/desktop/test-results/core
+            apps/desktop/playwright-report/core
+          retention-days: 7
+          if-no-files-found: ignore
