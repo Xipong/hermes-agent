@@ -1,47 +1,51 @@
-diff --git a/apps/desktop/src/app/session/hooks/use-message-stream/delta-flush.test.tsx b/apps/desktop/src/app/session/hooks/use-message-stream/delta-flush.test.tsx
-index 9b7be39..19d228c 100644
---- a/apps/desktop/src/app/session/hooks/use-message-stream/delta-flush.test.tsx
-+++ b/apps/desktop/src/app/session/hooks/use-message-stream/delta-flush.test.tsx
-@@ -44,7 +44,7 @@ describe('useMessageStream delta flush scheduling', () => {
-     vi.spyOn(performance, 'now').mockReturnValue(100)
-     vi.spyOn(window, 'requestAnimationFrame').mockImplementation(() => 1)
-     vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => undefined)
--    vi.spyOn(document, 'hasFocus').mockReturnValue(false)
-+    vi.spyOn(window.document, 'hasFocus').mockReturnValue(false)
-   })
+diff --git a/apps/desktop/e2e/codex-commentary-hydration.spec.ts b/apps/desktop/e2e/codex-commentary-hydration.spec.ts
+index 7b4b587..c214bb3 100644
+--- a/apps/desktop/e2e/codex-commentary-hydration.spec.ts
++++ b/apps/desktop/e2e/codex-commentary-hydration.spec.ts
+@@ -183,7 +183,8 @@ async function assertHydrationBoundaries(page: Page, label: string): Promise<voi
+     `${label}: canonical final markdown must not have a Thought ancestor`
+   ).toBe(true)
  
-   afterEach(() => {
-@@ -252,7 +252,7 @@ describe('useMessageStream composed with the real useSessionStateCache', () => {
-     vi.spyOn(performance, 'now').mockReturnValue(100)
-     vi.spyOn(window, 'requestAnimationFrame').mockImplementation(() => 1)
-     vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => undefined)
--    vi.spyOn(document, 'hasFocus').mockReturnValue(false)
-+    vi.spyOn(window.document, 'hasFocus').mockReturnValue(false)
-   })
+-  const tool = surface.locator('[data-slot="tool-block"]:visible')
++  // ToolRunGroup and its child both have tool-block; count actual cards, not wrappers.
++  const tool = surface.locator('[data-tool-row]:visible')
+   await expect(tool, `${label}: exactly one visible tool row should follow the canonical final`).toHaveCount(1)
  
-   afterEach(() => {
-diff --git a/apps/desktop/src/app/session/hooks/use-prompt-actions/steering-recovery.test.tsx b/apps/desktop/src/app/session/hooks/use-prompt-actions/steering-recovery.test.tsx
-index 3b994b3..c567a26 100644
---- a/apps/desktop/src/app/session/hooks/use-prompt-actions/steering-recovery.test.tsx
-+++ b/apps/desktop/src/app/session/hooks/use-prompt-actions/steering-recovery.test.tsx
-@@ -353,6 +353,7 @@ it.each(rebuiltRuntimeCases)(
-           appendAssistantDelta: vi.fn(),
-           appendReasoningDelta: vi.fn(),
-           completeAssistantMessage: vi.fn(),
-+          completeReasoningSource: vi.fn(),
-           failAssistantMessage: vi.fn(),
-           flushQueuedDeltas: vi.fn(),
-           dropQueuedDeltas: vi.fn(),
+   const thoughtHandle = await thought.elementHandle()
+diff --git a/apps/desktop/src/lib/chat-messages/hydration.ts b/apps/desktop/src/lib/chat-messages/hydration.ts
+index f4a7c12..7e8402f 100644
+--- a/apps/desktop/src/lib/chat-messages/hydration.ts
++++ b/apps/desktop/src/lib/chat-messages/hydration.ts
+@@ -251,6 +251,7 @@ function nativeReasoningParts(value: unknown, expected: string, timestamp?: numb
+   if (!Array.isArray(value) || !expected) {
+     return []
+   }
++
+   const result: ChatMessagePart[] = []
+   const groups: string[] = []
+   const seen = new Set<string>()
+@@ -275,6 +276,7 @@ function nativeReasoningParts(value: unknown, expected: string, timestamp?: numb
+       if (!part || part.type !== 'summary_text' || typeof part.text !== 'string' || !part.text) {
+         return []
+       }
++
+       texts.push(part.text)
+       result.push(reasoningPart(part.text, timestamp, `${item.id}:summary:${index}`))
+     }
 diff --git a/tests/agent/test_codex_commentary_channels.py b/tests/agent/test_codex_commentary_channels.py
-index a255d80..c5f0d72 100644
+index b286257..b7d0f01 100644
 --- a/tests/agent/test_codex_commentary_channels.py
 +++ b/tests/agent/test_codex_commentary_channels.py
-@@ -111,7 +111,7 @@ def test_normalized_commentary_and_encrypted_state_replay_without_reclassificati
-     )
- 
-     assert replay == [
--        {"role": "user", "content": "Check the file."},
-+        {"role": "user", "content": [{"type": "input_text", "text": "Check the file."}]},
-         {
-             "type": "reasoning",
+@@ -120,8 +120,11 @@ def test_normalized_commentary_and_encrypted_state_replay_without_reclassificati
              "encrypted_content": "opaque-replay-state",
+             "summary": [{"type": "summary_text", "text": "Reasoning summary."}],
+         },
+-        *message.codex_message_items,
++        *[{k: v for k, v in item.items() if k != "id"} for item in message.codex_message_items],
+     ]
++    # Existing store=False replay drops message IDs bound to encrypted reasoning;
++    # persisted phases/IDs remain exact and are not rewritten by normalization.
++    assert [item["id"] for item in message.codex_message_items] == ["msg_progress", "msg_final"]
+     assert history == original
+ 
+ 

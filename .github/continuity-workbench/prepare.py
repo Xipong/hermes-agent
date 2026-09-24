@@ -1,10 +1,10 @@
-"""Apply review fixes to the published candidate, retaining its full authored history."""
+"""Apply final fixture corrections, retaining the candidate's authored history."""
 import os
 from pathlib import Path
 import shutil
 import subprocess
 
-HEAD = 'd1aedc0022e86e36affaae53ebeb0f3158212efd'
+HEAD = '9c4c962d20a32a2140197013bc3b024399b5d01f'
 BASE = '32eeacdf7c1eba14a2abc51f4b7545b7e98afa40'
 root = Path('.github/continuity-workbench')
 tmp = Path(os.environ['RUNNER_TEMP']) / 'continuity-receipt'
@@ -19,4 +19,4 @@ subprocess.run(['git', 'switch', '--detach', HEAD], check=True)
 subprocess.run(['git', 'apply', '--check', str(tmp / 'followup.diff')], check=True)
 subprocess.run(['git', 'apply', str(tmp / 'followup.diff')], check=True)
 subprocess.run(['git', 'add', '-u'], check=True)
-subprocess.run(['git', 'commit', '-m', 'test: align consolidated fixtures with current replay and event contracts'], check=True)
+subprocess.run(['git', 'commit', '-m', 'test: pin replay ID compatibility and count actual Electron tool cards'], check=True)
