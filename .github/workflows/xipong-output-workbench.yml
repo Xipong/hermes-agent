@@ -8,20 +8,51 @@ on:
 permissions:
   contents: read
 jobs:
-  collect:
+  validate:
     if: github.repository == 'Xipong/hermes-agent'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 35
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           persist-credentials: false
-      - name: Collect pinned source and selected predecessor patches
+      - name: Apply source series onto pinned upstream
+        run: python .github/continuity-workbench/prepare.py
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 26
+          cache: npm
+      - name: Install Node dependencies
+        run: npm install -g npm@12 && npm ci
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39
+        with:
+          version: '0.9.28'
+          enable-cache: true
+      - name: Install Python dependencies
+        run: uv python install 3.11 && uv sync --locked --python 3.11 --extra all --extra dev
+      - name: Install Electron runtime dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb libgtk-3-0 libnotify4 libnss3 libxss1 libxtst6 xdg-utils libatspi2.0-0 libdrm2 libgbm1 libasound2t64
+      - name: Validate isolated candidate
+        env:
+          CI: 'true'
+        run: python "$RUNNER_TEMP/continuity-receipt/validate.py"
+      - name: Publish clean candidate branch only
+        if: always() && hashFiles('**/continuity-publish-ready') != 'never'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python .github/continuity-workbench/collect.py
-      - uses: actions/upload-artifact@v4
+        run: |
+          test -f "$RUNNER_TEMP/continuity-receipt/publish-ready" || exit 0
+          git diff --exit-code
+          test -z "$(git ls-tree -r --name-only HEAD .github/continuity-workbench .github/workflows/xipong-output-workbench.yml)"
+          header=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $header" push https://github.com/Xipong/hermes-agent.git HEAD:refs/heads/fix/codex-output-continuity
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
         with:
-          name: codex-output-sources
-          path: /tmp/codex-output-sources.zip
-          retention-days: 3
+          name: codex-output-validation
+          path: ${{ runner.temp }}/continuity-receipt
+          retention-days: 7
