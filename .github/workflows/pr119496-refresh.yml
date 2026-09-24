@@ -6,7 +6,7 @@ on:
       - workbench/pr119496-refresh
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: pr119496-refresh-${{ github.ref }}
@@ -71,6 +71,19 @@ jobs:
           OPENAI_API_KEY: ''
           NOUS_API_KEY: ''
           ANTHROPIC_API_KEY: ''
+
+      - name: Publish formatted product head
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            apps/desktop/src/app/session/hooks/use-session-actions/utils.ts \
+            apps/desktop/src/app/session/hooks/use-session-actions/index.ts \
+            apps/desktop/src/app/session/hooks/use-session-actions/paged-tail-order.test.ts \
+            apps/desktop/e2e/core/transcript-integrity.spec.ts
+          git commit -m "chore(workbench): materialize formatted paged-tail patch"
+          git push origin HEAD:refs/heads/workbench/pr119496-formatted --force
 
       - name: Upload formatted product sources
         if: always()
