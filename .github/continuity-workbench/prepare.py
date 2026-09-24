@@ -1,30 +1,22 @@
-"""Apply the authored, hash-pinned patch series to real upstream main (fork workbench only)."""
-import base64
-import gzip
-import hashlib
+"""Apply review fixes to the published candidate, retaining its full authored history."""
 import os
 from pathlib import Path
 import shutil
 import subprocess
 
+HEAD = 'd1aedc0022e86e36affaae53ebeb0f3158212efd'
 BASE = '32eeacdf7c1eba14a2abc51f4b7545b7e98afa40'
-EXPECTED = 'd211a365a29124522b135ab1cd8aa0d446b7b2967f8d2f81067e18e47f79bc5b'
 root = Path('.github/continuity-workbench')
 tmp = Path(os.environ['RUNNER_TEMP']) / 'continuity-receipt'
 tmp.mkdir(exist_ok=True)
-parts = [(root / f'implementation.part{i}').read_bytes() for i in range(4)]
-# Correct one diagnosed transport transcription before checking the full source hash.
-# This is a workbench-only byte transfer, never part of the product patch.
-encoded = base64.b64encode(parts[1]).decode()
-encoded = encoded.replace('vXp28euxv', 'vXp28+xv') + 'Z'
-parts[1] = base64.b64decode(encoded, validate=True)
-patch = gzip.decompress(b''.join(parts))
-assert hashlib.sha256(patch).hexdigest() == EXPECTED, 'Source archive integrity mismatch'
-(tmp / 'implementation.mbox').write_bytes(patch)
-shutil.copy(root / 'validate.py', tmp / 'validate.py')
+for name in ('validate.py', 'followup.diff'):
+    shutil.copy(root / name, tmp / name)
 subprocess.run(['git', 'config', 'user.name', 'Xipong'], check=True)
 subprocess.run(['git', 'config', 'user.email', '217837358+Xipong@users.noreply.github.com'], check=True)
-subprocess.run(['git', 'fetch', '--no-tags', '--depth=1', 'https://github.com/NousResearch/hermes-agent.git', BASE], check=True)
-subprocess.run(['git', 'switch', '--detach', BASE], check=True)
-subprocess.run(['git', 'am', str(tmp / 'implementation.mbox')], check=True)
-print('Applied pinned source series; no workbench files are in the candidate tree.')
+for sha in (BASE, HEAD):
+    subprocess.run(['git', 'fetch', '--no-tags', '--depth=16', 'https://github.com/Xipong/hermes-agent.git', sha], check=True)
+subprocess.run(['git', 'switch', '--detach', HEAD], check=True)
+subprocess.run(['git', 'apply', '--check', str(tmp / 'followup.diff')], check=True)
+subprocess.run(['git', 'apply', str(tmp / 'followup.diff')], check=True)
+subprocess.run(['git', 'add', '-u'], check=True)
+subprocess.run(['git', 'commit', '-m', 'test: align consolidated fixtures with current replay and event contracts'], check=True)

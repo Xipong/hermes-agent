@@ -1,0 +1,47 @@
+diff --git a/apps/desktop/src/app/session/hooks/use-message-stream/delta-flush.test.tsx b/apps/desktop/src/app/session/hooks/use-message-stream/delta-flush.test.tsx
+index 9b7be39..19d228c 100644
+--- a/apps/desktop/src/app/session/hooks/use-message-stream/delta-flush.test.tsx
++++ b/apps/desktop/src/app/session/hooks/use-message-stream/delta-flush.test.tsx
+@@ -44,7 +44,7 @@ describe('useMessageStream delta flush scheduling', () => {
+     vi.spyOn(performance, 'now').mockReturnValue(100)
+     vi.spyOn(window, 'requestAnimationFrame').mockImplementation(() => 1)
+     vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => undefined)
+-    vi.spyOn(document, 'hasFocus').mockReturnValue(false)
++    vi.spyOn(window.document, 'hasFocus').mockReturnValue(false)
+   })
+ 
+   afterEach(() => {
+@@ -252,7 +252,7 @@ describe('useMessageStream composed with the real useSessionStateCache', () => {
+     vi.spyOn(performance, 'now').mockReturnValue(100)
+     vi.spyOn(window, 'requestAnimationFrame').mockImplementation(() => 1)
+     vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => undefined)
+-    vi.spyOn(document, 'hasFocus').mockReturnValue(false)
++    vi.spyOn(window.document, 'hasFocus').mockReturnValue(false)
+   })
+ 
+   afterEach(() => {
+diff --git a/apps/desktop/src/app/session/hooks/use-prompt-actions/steering-recovery.test.tsx b/apps/desktop/src/app/session/hooks/use-prompt-actions/steering-recovery.test.tsx
+index 3b994b3..c567a26 100644
+--- a/apps/desktop/src/app/session/hooks/use-prompt-actions/steering-recovery.test.tsx
++++ b/apps/desktop/src/app/session/hooks/use-prompt-actions/steering-recovery.test.tsx
+@@ -353,6 +353,7 @@ it.each(rebuiltRuntimeCases)(
+           appendAssistantDelta: vi.fn(),
+           appendReasoningDelta: vi.fn(),
+           completeAssistantMessage: vi.fn(),
++          completeReasoningSource: vi.fn(),
+           failAssistantMessage: vi.fn(),
+           flushQueuedDeltas: vi.fn(),
+           dropQueuedDeltas: vi.fn(),
+diff --git a/tests/agent/test_codex_commentary_channels.py b/tests/agent/test_codex_commentary_channels.py
+index a255d80..c5f0d72 100644
+--- a/tests/agent/test_codex_commentary_channels.py
++++ b/tests/agent/test_codex_commentary_channels.py
+@@ -111,7 +111,7 @@ def test_normalized_commentary_and_encrypted_state_replay_without_reclassificati
+     )
+ 
+     assert replay == [
+-        {"role": "user", "content": "Check the file."},
++        {"role": "user", "content": [{"type": "input_text", "text": "Check the file."}]},
+         {
+             "type": "reasoning",
+             "encrypted_content": "opaque-replay-state",
