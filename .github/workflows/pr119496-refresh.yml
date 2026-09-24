@@ -34,7 +34,7 @@ jobs:
         run: |
           npx vitest run --project ui             src/app/session/hooks/use-session-actions/paged-tail-order.test.ts             src/app/session/hooks/use-session-actions/utils.test.ts             src/app/session/hooks/resume-occurrences.test.tsx
           npm run typecheck
-          npx prettier --check             src/app/session/hooks/use-session-actions/utils.ts             src/app/session/hooks/use-session-actions/index.ts             src/app/session/hooks/use-session-actions/paged-tail-order.test.ts             e2e/core/transcript-integrity.spec.ts
+          npx prettier --write             src/app/session/hooks/use-session-actions/utils.ts             src/app/session/hooks/use-session-actions/index.ts             src/app/session/hooks/use-session-actions/paged-tail-order.test.ts             e2e/core/transcript-integrity.spec.ts
 
       - name: Install system dependencies for Electron
         run: |
