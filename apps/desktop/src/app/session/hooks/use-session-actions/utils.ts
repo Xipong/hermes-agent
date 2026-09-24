@@ -698,9 +698,6 @@ function durableFoldCoversLiveResponse(folds: ChatMessage[], live: ChatMessage):
 const isOptimisticTurnUser = (message: ChatMessage): boolean =>
   message.role === 'user' && message.id.startsWith('user-') && !message.id.startsWith('user-queued-')
 
-const validPagedBoundary = (value: unknown): value is number =>
-  typeof value === 'number' && Number.isFinite(value) && value > 0
-
 function currentOptimisticTurnUsers(previousMessages: ChatMessage[]): Set<ChatMessage> {
   const users = new Set<ChatMessage>()
   const newest = [...previousMessages].reverse().find(isOptimisticTurnUser)
@@ -791,9 +788,9 @@ function localOccurrenceCoveredByPage(
  *
  * Restore only the contiguous optimistic/live prefix of that latest turn, and
  * only when a later row from the SAME local turn is proven present on the
- * loaded page. Durable ids are preferred; timestamps are a legacy fallback
- * only when the cached user has no row id. A page containing a foreign user
- * occurrence is never repaired here.
+ * loaded page. Durable row identity is required: prose and clocks are never
+ * enough to resurrect a cached user occurrence. A page containing a foreign
+ * user occurrence is never repaired here.
  */
 function restorePageOmittedLivePrefix(
   nextMessages: ChatMessage[],
@@ -822,21 +819,12 @@ function restorePageOmittedLivePrefix(
   const storedRowIds = new Set(nextMessages.flatMap(transcriptRowIds))
   const rowIds = [...storedRowIds]
   const firstStoredRowId = rowIds.length ? Math.min(...rowIds) : undefined
-  const timestamps = nextMessages.map(message => message.timestamp).filter(validPagedBoundary)
-  const firstStoredTimestamp = timestamps.length ? Math.min(...timestamps) : undefined
 
-  const pageStartsAfterUser = [...liveUsers].some(user => {
-    if (user.rowId !== undefined && firstStoredRowId !== undefined) {
-      return !storedRowIds.has(user.rowId) && user.rowId < firstStoredRowId
-    }
-
-    return (
-      user.rowId === undefined &&
-      validPagedBoundary(user.timestamp) &&
-      firstStoredTimestamp !== undefined &&
-      user.timestamp <= firstStoredTimestamp
+  const pageStartsAfterUser =
+    firstStoredRowId !== undefined &&
+    [...liveUsers].some(
+      user => user.rowId !== undefined && !storedRowIds.has(user.rowId) && user.rowId < firstStoredRowId
     )
-  })
 
   if (!pageStartsAfterUser) {
     return nextMessages
