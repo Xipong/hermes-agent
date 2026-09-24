@@ -72,6 +72,19 @@ jobs:
           NOUS_API_KEY: ''
           ANTHROPIC_API_KEY: ''
 
+      - name: Upload formatted product sources
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: pr119496-formatted-${{ github.sha }}
+          path: |
+            apps/desktop/src/app/session/hooks/use-session-actions/utils.ts
+            apps/desktop/src/app/session/hooks/use-session-actions/index.ts
+            apps/desktop/src/app/session/hooks/use-session-actions/paged-tail-order.test.ts
+            apps/desktop/e2e/core/transcript-integrity.spec.ts
+          retention-days: 7
+          if-no-files-found: error
+
       - name: Upload E2E failure artifacts
         if: failure() || cancelled()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
