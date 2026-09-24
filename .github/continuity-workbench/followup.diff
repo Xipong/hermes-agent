@@ -1,51 +1,54 @@
-diff --git a/apps/desktop/e2e/codex-commentary-hydration.spec.ts b/apps/desktop/e2e/codex-commentary-hydration.spec.ts
-index 7b4b587..c214bb3 100644
---- a/apps/desktop/e2e/codex-commentary-hydration.spec.ts
-+++ b/apps/desktop/e2e/codex-commentary-hydration.spec.ts
-@@ -183,7 +183,8 @@ async function assertHydrationBoundaries(page: Page, label: string): Promise<voi
-     `${label}: canonical final markdown must not have a Thought ancestor`
-   ).toBe(true)
- 
--  const tool = surface.locator('[data-slot="tool-block"]:visible')
-+  // ToolRunGroup and its child both have tool-block; count actual cards, not wrappers.
-+  const tool = surface.locator('[data-tool-row]:visible')
-   await expect(tool, `${label}: exactly one visible tool row should follow the canonical final`).toHaveCount(1)
- 
-   const thoughtHandle = await thought.elementHandle()
-diff --git a/apps/desktop/src/lib/chat-messages/hydration.ts b/apps/desktop/src/lib/chat-messages/hydration.ts
-index f4a7c12..7e8402f 100644
---- a/apps/desktop/src/lib/chat-messages/hydration.ts
-+++ b/apps/desktop/src/lib/chat-messages/hydration.ts
-@@ -251,6 +251,7 @@ function nativeReasoningParts(value: unknown, expected: string, timestamp?: numb
-   if (!Array.isArray(value) || !expected) {
-     return []
-   }
+diff --git a/agent/notification_presentation.py b/agent/notification_presentation.py
+index e99fd28..630c474 100644
+--- a/agent/notification_presentation.py
++++ b/agent/notification_presentation.py
+@@ -7,11 +7,11 @@ _muted_surface: ContextVar[str | None] = ContextVar("muted_notification_surface"
+ # These are text/media UI events, not approval/clarify/connection requests or outcomes.
+ _FREEFORM_EVENTS = frozenset({
+     "message.start", "message.delta", "message.interim", "message.complete",
+-    "reasoning.delta", "thinking.delta", "status.update", "notification.show",
++    "reasoning.start", "reasoning.delta", "reasoning.end", "thinking.delta", "status.update", "notification.show",
+     "tool.start", "tool.complete", "tool.generating", "error", "reaction",
+ })
+ _PRESENTATION_CALLBACKS = (
+-    "stream_delta_callback", "interim_assistant_callback", "reasoning_callback",
++    "stream_delta_callback", "interim_assistant_callback", "reasoning_callback", "reasoning_event_callback",
+     "tool_progress_callback",
+     "tool_start_callback", "tool_complete_callback", "tool_gen_callback", "reaction_callback",
+ )
+diff --git a/tests/agent/test_reasoning_identity.py b/tests/agent/test_reasoning_identity.py
+index 1dd6246..490180e 100644
+--- a/tests/agent/test_reasoning_identity.py
++++ b/tests/agent/test_reasoning_identity.py
+@@ -101,3 +101,31 @@ def test_identified_delta_keeps_writer_fencing_legacy_fallback_and_observer_once
+     agent._fire_reasoning_event("delta", "rs:summary:1", "Fallback")
+     assert legacy == ["Fallback"]
+     assert len(hooks) == 2
 +
-   const result: ChatMessagePart[] = []
-   const groups: string[] = []
-   const seen = new Set<string>()
-@@ -275,6 +276,7 @@ function nativeReasoningParts(value: unknown, expected: string, timestamp?: numb
-       if (!part || part.type !== 'summary_text' || typeof part.text !== 'string' || !part.text) {
-         return []
-       }
 +
-       texts.push(part.text)
-       result.push(reasoningPart(part.text, timestamp, `${item.id}:summary:${index}`))
-     }
-diff --git a/tests/agent/test_codex_commentary_channels.py b/tests/agent/test_codex_commentary_channels.py
-index b286257..b7d0f01 100644
---- a/tests/agent/test_codex_commentary_channels.py
-+++ b/tests/agent/test_codex_commentary_channels.py
-@@ -120,8 +120,11 @@ def test_normalized_commentary_and_encrypted_state_replay_without_reclassificati
-             "encrypted_content": "opaque-replay-state",
-             "summary": [{"type": "summary_text", "text": "Reasoning summary."}],
-         },
--        *message.codex_message_items,
-+        *[{k: v for k, v in item.items() if k != "id"} for item in message.codex_message_items],
-     ]
-+    # Existing store=False replay drops message IDs bound to encrypted reasoning;
-+    # persisted phases/IDs remain exact and are not rewritten by normalization.
-+    assert [item["id"] for item in message.codex_message_items] == ["msg_progress", "msg_final"]
-     assert history == original
- 
- 
++def test_native_reasoning_obeys_muted_notification_turn_and_restores_delivery():
++    from agent.notification_presentation import event_presentation_muted, notification_turn
++
++    agent = StreamDeliveryMixin()
++    seen = []
++    def callback(*args):
++        seen.append(args)
++
++    agent.reasoning_event_callback = callback
++    agent.reasoning_callback = lambda text: seen.append(("legacy", text))
++    agent._stream_reasoning_hooks_enabled = False
++    agent._claim_stream_writer()
++    phases = [("start", ""), ("delta", "Diagnostic only"), ("end", "")]
++    with notification_turn(agent, muted=True, session_id="owner"):
++        for phase, text in phases:
++            agent._fire_reasoning_event(phase, "rs_muted", text)
++        assert seen == []
++        for phase, _ in phases:
++            assert event_presentation_muted("reasoning." + phase, "owner")
++            assert not event_presentation_muted("reasoning." + phase, "other")
++        assert not event_presentation_muted("notification.clear", "owner")
++    assert agent.reasoning_event_callback is callback
++    for phase, text in phases:
++        agent._fire_reasoning_event(phase, "rs_restored", text)
++        assert not event_presentation_muted("reasoning." + phase, "owner")
++    assert seen == [(phase, "rs_restored", text) for phase, text in phases]
