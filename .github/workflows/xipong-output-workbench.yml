@@ -1,0 +1,27 @@
+name: Codex output integration workbench
+on:
+  push:
+    branches: [workbench/codex-output-107350]
+    paths:
+      - .github/workflows/xipong-output-workbench.yml
+      - .github/continuity-workbench/**
+permissions:
+  contents: read
+jobs:
+  collect:
+    if: github.repository == 'Xipong/hermes-agent'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Collect pinned source and selected predecessor patches
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python .github/continuity-workbench/collect.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: codex-output-sources
+          path: /tmp/codex-output-sources.zip
+          retention-days: 3
