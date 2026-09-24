@@ -191,7 +191,6 @@ test('transcript oracle holds across every transition', async () => {
       await assertTranscriptOracle(page, ws, provider, sessionB, 'warm resume B + new turn')
     })
 
-
     await test.step('paged tail: a >120-row tool turn keeps its omitted prompt before the hydrated reply', async () => {
       // Isolate the pagination case in its own session so later cold-reload
       // checks on A/B keep their smaller full transcripts. 61 sequential tool

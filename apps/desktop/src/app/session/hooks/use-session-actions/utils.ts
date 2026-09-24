@@ -694,7 +694,6 @@ function durableFoldCoversLiveResponse(folds: ChatMessage[], live: ChatMessage):
   )
 }
 
-
 const isOptimisticTurnUser = (message: ChatMessage): boolean =>
   message.role === 'user' && message.id.startsWith('user-') && !message.id.startsWith('user-queued-')
 
@@ -792,10 +791,7 @@ function localOccurrenceCoveredByPage(
  * enough to resurrect a cached user occurrence. A page containing a foreign
  * user occurrence is never repaired here.
  */
-function restorePageOmittedLivePrefix(
-  nextMessages: ChatMessage[],
-  previousMessages: ChatMessage[]
-): ChatMessage[] {
+function restorePageOmittedLivePrefix(nextMessages: ChatMessage[], previousMessages: ChatMessage[]): ChatMessage[] {
   if (!nextMessages.length || !previousMessages.length) {
     return nextMessages
   }
@@ -808,11 +804,7 @@ function restorePageOmittedLivePrefix(
 
   const pageUsers = nextMessages.filter(isPrompt)
 
-  if (
-    pageUsers.some(
-      pageUser => ![...liveUsers].some(localUser => sameDurableOccurrence(localUser, pageUser))
-    )
-  ) {
+  if (pageUsers.some(pageUser => ![...liveUsers].some(localUser => sameDurableOccurrence(localUser, pageUser)))) {
     return nextMessages
   }
 

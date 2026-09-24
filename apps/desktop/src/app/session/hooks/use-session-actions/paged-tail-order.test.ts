@@ -4,25 +4,18 @@ import { type ChatMessage, chatMessageText, textPart } from '@/lib/chat-messages
 
 import { appendLiveSessionProjection, preserveLocalPendingTurnMessages } from './utils'
 
-const user = (
-  id: string,
-  text: string,
-  rowId?: number,
-  extra: Partial<ChatMessage> = {}
-): ChatMessage => ({ id, role: 'user', parts: [textPart(text)], ...(rowId !== undefined ? { rowId } : {}), ...extra })
+const user = (id: string, text: string, rowId?: number, extra: Partial<ChatMessage> = {}): ChatMessage => ({
+  id,
+  role: 'user',
+  parts: [textPart(text)],
+  ...(rowId !== undefined ? { rowId } : {}),
+  ...extra
+})
 
-const assistant = (
-  id: string,
-  text: string,
-  toolCallId: string,
-  extra: Partial<ChatMessage> = {}
-): ChatMessage => ({
+const assistant = (id: string, text: string, toolCallId: string, extra: Partial<ChatMessage> = {}): ChatMessage => ({
   id,
   role: 'assistant',
-  parts: [
-    { type: 'tool-call', toolCallId, toolName: 'terminal', result: 'ok' },
-    ...(text ? [textPart(text)] : [])
-  ],
+  parts: [{ type: 'tool-call', toolCallId, toolName: 'terminal', result: 'ok' }, ...(text ? [textPart(text)] : [])],
   ...extra
 })
 
@@ -75,7 +68,6 @@ describe('page-omitted live-turn prefix restoration', () => {
     expect(ids(preserveLocalPendingTurnMessages(page, restored))).toEqual(ids(restored))
   })
 
-
   it('does not resurrect an old acknowledged prompt when the page has no occurrence from its local turn', () => {
     const stale = user('user-stale', 'Old request', 100)
     const staleReply = assistant('assistant-stream-stale', 'Old answer', 'call-old', { pending: false })
@@ -87,10 +79,7 @@ describe('page-omitted live-turn prefix restoration', () => {
   it('does not cross a foreign persisted user occurrence to repair an older local prefix', () => {
     const prompt = user('user-paged', 'Inspect', 100)
     const live = assistant('assistant-stream-live', 'Done.', 'call-1', { pending: false })
-    const page = [
-      user('row-other-user', 'Other turn', 110),
-      assistant('row-other', 'Done.', 'call-1', { rowId: 120 })
-    ]
+    const page = [user('row-other-user', 'Other turn', 110), assistant('row-other', 'Done.', 'call-1', { rowId: 120 })]
 
     expect(preserveLocalPendingTurnMessages(page, [prompt, live])).toEqual(page)
   })
