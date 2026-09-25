@@ -1,0 +1,37 @@
+name: Verify PR 122141 harness fix
+on:
+  push:
+    branches: [workbench/pr122141-harness-verify]
+permissions:
+  contents: read
+jobs:
+  focused:
+    if: github.repository == 'Xipong/hermes-agent'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - name: Setup locked test environment
+        uses: ./.github/actions/setup-pm
+        with:
+          extras: '["all", "anthropic"]'
+          test-environment: 'true'
+          cache-suffix: pr122141-harness
+      - name: Fetch exact PR head
+        run: |
+          git fetch origin refs/heads/fix/codex-commentary-incomplete-stall
+          git worktree add --detach "$RUNNER_TEMP/pr122141" c1a2b924d668d8a472996c3055b5677f91aacd04
+      - name: Focused regressions
+        working-directory: ${{ runner.temp }}/pr122141
+        env:
+          HERMES_TEST_WORKERS: '2'
+          HERMES_TEST_FILE_TIMEOUT: '300'
+          HERMES_TEST_FILE_RETRIES: '0'
+        run: |
+          bash scripts/run_tests.sh             tests/agent/test_codex_reasoning_only_streak.py             tests/agent/test_codex_incomplete_budget_escalation.py             --file-retries 0 -q --tb=short
+      - name: Static checks
+        working-directory: ${{ runner.temp }}/pr122141
+        run: |
+          "$HERMES_PYTHON" -m py_compile             agent/turn_truncation.py             tests/agent/test_codex_reasoning_only_streak.py
+          "$HERMES_PYTHON" -m ruff check --select F821,F822,F823             agent/turn_truncation.py             tests/agent/test_codex_reasoning_only_streak.py
+          git diff --check HEAD^ HEAD
