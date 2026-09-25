@@ -1,0 +1,21 @@
+name: PR 120894 review and rebase workbench
+on:
+  push:
+    branches: [workbench/pr120894-review-rebase]
+permissions:
+  contents: read
+jobs:
+  review:
+    if: github.repository == 'Xipong/hermes-agent'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Inspect source and conflicts without changing product branches
+        run: python3 workbench/pr120894_inspect.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: pr120894-evidence
+          path: ${{ runner.temp }}/pr120894-evidence/
+          retention-days: 14
