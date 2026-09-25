@@ -1,7 +1,10 @@
-"""Reviewed second pass; orchestration remains outside the product PR."""
+"""Reviewed finalization; orchestration remains outside the product PR."""
+import os
+
 import pr120894_apply as a
 
 base_patch = a.patch_runtime
+base_patch_sources = a.patch_sources
 
 
 def patch_runtime(text):
@@ -15,7 +18,23 @@ def patch_runtime(text):
     return text
 
 
+def patch_sources():
+    base_patch_sources()
+    # Current main moved these shared fixture writers out of e2e/fixtures.ts.
+    # Adapt our spec to the canonical helper, not a new re-export or a copied writer.
+    spec = a.CANDIDATE / "apps/desktop/e2e/codex-commentary-hydration.spec.ts"
+    text = a.replace(spec.read_text(),
+        "import { type MockServer, startMockServer } from '../../../tests-js/scripts/mock-server'",
+        "import { writeEnvFile, writeMockProviderConfig } from '../../../tests-js/scripts/mock-provider-config'\nimport { type MockServer, startMockServer } from '../../../tests-js/scripts/mock-server'")
+    text = a.replace(text,
+        "  waitForAppReady,\n  writeEnvFile,\n  writeMockProviderConfig\n",
+        "  waitForAppReady\n")
+    spec.write_text(text)
+
+
 def main():
+    # Explicit disposable PM interpreter for the existing Electron fixture contract.
+    os.environ["HERMES_DESKTOP_PYTHON"] = os.environ["HERMES_PYTHON"]
     timeline = a.ROOT / "workbench/pr120894_boundary_test.ts"
     timeline.write_text(a.replace(timeline.read_text(), "}, 'start')[0]", "}, 'running')[0]"))
     tests = a.ROOT / "workbench/pr120894_segments_test.py"
@@ -33,6 +52,7 @@ def main():
         assert _observed(observers) == "Fresh"
 ''')
     a.patch_runtime = patch_runtime
+    a.patch_sources = patch_sources
     a.main()
 
 
