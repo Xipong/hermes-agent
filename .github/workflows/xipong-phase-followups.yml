@@ -1,0 +1,35 @@
+name: Codex phase follow-up workbench
+on:
+  push:
+    branches: [workbench/codex-phase-followups-20260925]
+permissions:
+  contents: write
+jobs:
+  validate:
+    if: github.repository == 'Xipong/hermes-agent'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - name: Fetch immutable source base
+        run: git fetch --depth=1 origin 8623cd4a8403f020090c9c3e8feae943b4dac55e
+      - name: Build locked test environment
+        uses: ./.github/actions/setup-pm
+        with:
+          extras: '["all", "anthropic"]'
+          test-environment: 'true'
+          cache-suffix: codex-phase-followups
+      - name: Reproduce, fix, verify, and publish clean product branches
+        run: '"$HERMES_PYTHON" workbench/phase_followups.py'
+        env:
+          HERMES_TEST_WORKERS: '2'
+          HERMES_TEST_FILE_TIMEOUT: '300'
+          HERMES_TEST_FILE_RETRIES: '0'
+      - name: Preserve exact test and patch receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-phase-followup-evidence
+          path: ${{ runner.temp }}/phase-followup-results/
+          if-no-files-found: warn
+          retention-days: 14
