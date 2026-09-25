@@ -2,6 +2,9 @@ name: PR 120894 review and rebase workbench
 on:
   push:
     branches: [workbench/pr120894-review-rebase]
+concurrency:
+  group: pr120894-isolated-review-rebase
+  cancel-in-progress: true
 permissions:
   contents: write
 jobs:
@@ -19,7 +22,7 @@ jobs:
           test-environment: 'true'
           cache-suffix: pr120894-review
       - name: Rebase, reproduce review findings, fix and verify the candidate
-        run: '"$HERMES_PYTHON" workbench/pr120894_apply.py'
+        run: '"$HERMES_PYTHON" workbench/pr120894_finalize.py'
         env:
           HERMES_TEST_WORKERS: '2'
           HERMES_TEST_FILE_TIMEOUT: '300'
