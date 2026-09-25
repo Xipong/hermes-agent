@@ -29,6 +29,11 @@ def patch_sources():
     text = a.replace(text,
         "  waitForAppReady,\n  writeEnvFile,\n  writeMockProviderConfig\n",
         "  waitForAppReady\n")
+    # The shared writer only supplies the configured OPENAI_API_KEY when given
+    # the mock URL; match current main's own setupMockBackend/setupDeadBackend.
+    text = a.replace(text,
+        "    writeEnvFile(sandbox.hermesHome)",
+        "    writeEnvFile(sandbox.hermesHome, 'e2e-mock-key', mock.url)")
     spec.write_text(text)
 
 
