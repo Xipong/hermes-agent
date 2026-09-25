@@ -3,16 +3,28 @@ on:
   push:
     branches: [workbench/pr120894-review-rebase]
 permissions:
-  contents: read
+  contents: write
 jobs:
   review:
     if: github.repository == 'Xipong/hermes-agent'
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - name: Inspect source and conflicts without changing product branches
-        run: python3 workbench/pr120894_inspect.py
+      - name: Prepare locked Python and Node test toolchains
+        uses: ./.github/actions/setup-pm
+        with:
+          toolchain: all
+          extras: '["all", "anthropic"]'
+          test-environment: 'true'
+          cache-suffix: pr120894-review
+      - name: Rebase, reproduce review findings, fix and verify the candidate
+        run: '"$HERMES_PYTHON" workbench/pr120894_apply.py'
+        env:
+          HERMES_TEST_WORKERS: '2'
+          HERMES_TEST_FILE_TIMEOUT: '300'
+          HERMES_TEST_FILE_RETRIES: '0'
+          NODE_OPTIONS: --max-old-space-size=8192
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
