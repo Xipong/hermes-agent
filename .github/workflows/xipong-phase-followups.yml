@@ -19,8 +19,8 @@ jobs:
           extras: '["all", "anthropic"]'
           test-environment: 'true'
           cache-suffix: codex-phase-followups
-      - name: Reproduce, fix, verify, and publish clean product branches
-        run: '"$HERMES_PYTHON" workbench/phase_followups.py'
+      - name: Reproduce and validate the reviewed stream candidate
+        run: '"$HERMES_PYTHON" workbench/phase_review.py'
         env:
           HERMES_TEST_WORKERS: '2'
           HERMES_TEST_FILE_TIMEOUT: '300'
