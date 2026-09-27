@@ -8,7 +8,7 @@ on:
       - workbench/history_review.py
       - .github/workflows/issue125766-history-workbench.yml
 permissions:
-  contents: write
+  contents: read
 concurrency:
   group: issue125766-history-workbench
   cancel-in-progress: true
@@ -16,28 +16,5 @@ jobs:
   verify:
     if: github.repository == 'Xipong/hermes-agent'
     runs-on: ubuntu-latest
-    timeout-minutes: 35
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - name: Prepare locked test toolchains
-        if: hashFiles('workbench/history_fix.py') != ''
-        uses: ./.github/actions/setup-pm
-        with:
-          toolchain: all
-          extras: '["all", "anthropic"]'
-          test-environment: 'true'
-          cache-suffix: issue125766-history
-      - name: Apply and verify candidate
-        if: hashFiles('workbench/history_fix.py') != ''
-        run: '"$HERMES_PYTHON" workbench/history_finalize.py'
-        env:
-          HERMES_TEST_WORKERS: '2'
-          HERMES_TEST_FILE_TIMEOUT: '300'
-          HERMES_TEST_FILE_RETRIES: '0'
-          NODE_OPTIONS: --max-old-space-size=8192
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: always()
-        with:
-          name: issue125766-history-evidence
-          path: ${{ runner.temp }}/history-evidence/
-          retention-days: 7
+      - run: echo 'Fenced obsolete-base publication; reconcile the concurrent rebase before verifying the product again.'
