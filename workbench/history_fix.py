@@ -7,6 +7,7 @@ import runpy
 import shutil
 import subprocess
 import sys
+import tarfile
 
 ROOT = Path.cwd()
 BASE = '6e69a8933adda7dbbff7cf3009a259a4524477e9'
@@ -16,7 +17,13 @@ EVIDENCE.mkdir(parents=True, exist_ok=True)
 EDITS = {}
 for index in range(4):
     EDITS.update(runpy.run_path(str(ROOT / f'workbench/history_edits_{index}.py'))['EDITS'])
+# Restore the extra escape layer required by Python embedded in a JS template.
+spec = EDITS['apps/desktop/e2e/history-navigation.spec.ts']['edits'][0]
+slash = chr(92)
+spec[2] = spec[2].replace('Navigation answer' + slash + 'n' + slash + 'n', 'Navigation answer' + slash * 2 + 'n' + slash * 2 + 'n')
 assert hashlib.sha256(json.dumps(EDITS, ensure_ascii=False, sort_keys=True).encode()).hexdigest() == 'a5ec9994945ffd0ec4ee535e81e64ba8b582df3af81236ef18366caf8068f6cc', 'Transfer checksum mismatch'
+review = ROOT / 'workbench/history_review.py'
+REVISE = runpy.run_path(str(review))['revise'] if review.exists() else lambda root: None
 STATUS = {}
 ENV = dict(os.environ, HERMES_DESKTOP_PYTHON=os.environ['HERMES_PYTHON'])
 
@@ -66,13 +73,15 @@ def publish():
     parent = remote.split()[0] if remote else BASE
     if remote:
         git('fetch', '--depth=1', 'origin', parent)
-    # A retry is a normal fast-forward commit; never force-push someone else's work.
     ENV.update(GIT_AUTHOR_NAME='Xipong', GIT_AUTHOR_EMAIL='217837358+Xipong@users.noreply.github.com',
                GIT_COMMITTER_NAME='Xipong', GIT_COMMITTER_EMAIL='217837358+Xipong@users.noreply.github.com')
     sha = git('commit-tree', tree, '-p', parent, '-m', 'fix(desktop): make bounded history navigation contiguous and occurrence-stable')
     git('push', 'origin', f'{sha}:refs/heads/{BRANCH}')
     (EVIDENCE / 'candidate-sha.txt').write_text(sha + '\n')
     (EVIDENCE / 'candidate.patch').write_text(git('diff', BASE, sha) + '\n')
+    with tarfile.open(EVIDENCE / 'candidate-source.tar.gz', 'w:gz') as archive:
+        for name in EDITS:
+            archive.add(ROOT / name, arcname=name)
     print(f'PRODUCT_CANDIDATE={sha}', flush=True)
     return sha
 
@@ -85,6 +94,7 @@ def main():
     run('red-backend', ['bash', 'scripts/run_tests.sh', test_path, '-k', 'adjacent'], timeout=400)
     git('restore', '--', test_path)
     apply(EDITS)
+    REVISE(ROOT)
     run('npm-ci', ['npm', 'ci', '--no-audit', '--no-fund'], timeout=600, required=True)
     desktop = ROOT / 'apps/desktop'
     ts_paths = [str(Path(name).relative_to('apps/desktop')) for name in EDITS if name.endswith(('.ts', '.tsx'))]
@@ -115,7 +125,6 @@ def main():
         if source.exists():
             shutil.copytree(source, EVIDENCE / name, dirs_exist_ok=True)
     (EVIDENCE / 'status.json').write_text(json.dumps(STATUS, indent=2))
-    # Red is expected to fail; lint-fix can report transient issues fixed by prettier.
     required = ('npm-ci', 'prettier', 'lint', 'diff-check', 'backend', 'ui', 'renderer-types', 'e2e-types', 'build', 'native')
     return 0 if STATUS.get('red-backend', 0) != 0 and all(STATUS.get(key) == 0 for key in required) else 1
 
