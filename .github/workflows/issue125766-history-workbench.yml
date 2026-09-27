@@ -4,6 +4,8 @@ on:
     branches: [workbench/issue125766-history]
     paths:
       - workbench/history_fix.py
+      - workbench/history_finalize.py
+      - workbench/history_review.py
       - .github/workflows/issue125766-history-workbench.yml
 permissions:
   contents: write
@@ -27,7 +29,7 @@ jobs:
           cache-suffix: issue125766-history
       - name: Apply and verify candidate
         if: hashFiles('workbench/history_fix.py') != ''
-        run: '"$HERMES_PYTHON" workbench/history_fix.py'
+        run: '"$HERMES_PYTHON" workbench/history_finalize.py'
         env:
           HERMES_TEST_WORKERS: '2'
           HERMES_TEST_FILE_TIMEOUT: '300'
