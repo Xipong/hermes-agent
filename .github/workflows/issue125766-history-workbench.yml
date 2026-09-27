@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
-      PRODUCT_SHA: 8e83057ca30f35b9e2a595f429a21c1c6a2ca243
+      PRODUCT_SHA: 46d0b7c21f8bb561458379e97f0fc842145b2905
       HERMES_TEST_WORKERS: '2'
       HERMES_TEST_FILE_TIMEOUT: '300'
       HERMES_TEST_FILE_RETRIES: '0'
