@@ -3,9 +3,7 @@ on:
   push:
     branches: [workbench/issue125766-history]
     paths:
-      - workbench/history_fix.py
-      - workbench/history_finalize.py
-      - workbench/history_review.py
+      - workbench/history_verify_readonly.py
       - .github/workflows/issue125766-history-workbench.yml
 permissions:
   contents: read
@@ -16,5 +14,32 @@ jobs:
   verify:
     if: github.repository == 'Xipong/hermes-agent'
     runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      PRODUCT_SHA: 8e83057ca30f35b9e2a595f429a21c1c6a2ca243
+      HERMES_TEST_WORKERS: '2'
+      HERMES_TEST_FILE_TIMEOUT: '300'
+      HERMES_TEST_FILE_RETRIES: '0'
+      NODE_OPTIONS: --max-old-space-size=8192
     steps:
-      - run: echo 'Fenced obsolete-base publication; reconcile the concurrent rebase before verifying the product again.'
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Select immutable product commit
+        run: |
+          cp workbench/history_verify_readonly.py "$RUNNER_TEMP/history_verify_readonly.py"
+          git fetch --depth=1 origin "$PRODUCT_SHA"
+          git checkout --detach "$PRODUCT_SHA"
+      - name: Prepare locked test toolchains
+        uses: ./.github/actions/setup-pm
+        with:
+          toolchain: all
+          extras: '["all", "anthropic"]'
+          test-environment: 'true'
+          cache-suffix: issue125766-history
+      - name: Verify product without mutations
+        run: '"$HERMES_PYTHON" "$RUNNER_TEMP/history_verify_readonly.py"'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: issue125766-history-evidence
+          path: ${{ runner.temp }}/history-evidence/
+          retention-days: 7
