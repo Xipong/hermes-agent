@@ -15,9 +15,10 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - name: Export source for isolated inspection
+        shell: bash
         run: |
           mkdir -p "$RUNNER_TEMP/history-evidence"
-          git archive HEAD apps/desktop apps/shared AGENTS.md hermes_state_timeline.py hermes_cli/web_routers/sessions.py tests/hermes_cli/test_session_timeline.py tests/test_hermes_state.py .github/actions/setup-pm scripts | gzip > "$RUNNER_TEMP/history-evidence/source.tar.gz"
+          git archive HEAD apps/desktop apps/shared AGENTS.md hermes_state_timeline.py hermes_cli/web_routers/sessions.py tests/hermes_cli/test_session_timeline.py .github/actions/setup-pm scripts | gzip > "$RUNNER_TEMP/history-evidence/source.tar.gz"
       - name: Prepare locked test toolchains
         if: hashFiles('workbench/history_fix.py') != ''
         uses: ./.github/actions/setup-pm
