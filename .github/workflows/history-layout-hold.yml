@@ -1,0 +1,84 @@
+name: History deferred layout anchor validation
+on:
+  push:
+    branches: [workbench/history-suite-125766]
+    paths: [.github/workflows/history-layout-hold.yml]
+permissions:
+  contents: read
+jobs:
+  candidate:
+    if: github.repository == 'Xipong/hermes-agent'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      sha: ${{ steps.make.outputs.sha }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - id: make
+        name: Construct reviewed event-driven hold
+        run: |
+          cp workbench/history_layout_hold_candidate.py "$RUNNER_TEMP/make_candidate.py"
+          python3 -m py_compile "$RUNNER_TEMP/make_candidate.py"
+          git fetch --depth=1 origin da7f4d0a35e73411a460af0c45434f2d979bceff
+          git checkout --detach da7f4d0a35e73411a460af0c45434f2d979bceff
+          python3 "$RUNNER_TEMP/make_candidate.py"
+  verify:
+    needs: candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [standalone, integration]
+    env:
+      MODE: ${{ matrix.mode }}
+      PRODUCT_SHA: ${{ needs.candidate.outputs.sha }}
+      ORIGINAL_SHA: 46d0b7c21f8bb561458379e97f0fc842145b2905
+      MAIN_SHA: 2ffa4977baf9874c498453a09447dc399b0fd215
+      RAIL_SHA: e993464b1e0312063d2d3c4ef5c2af4d616e601f
+      BELOW_SHA: fbfd4f98c70cf7a18d2f053f3d9f32c82024f27f
+      HERMES_TEST_WORKERS: '2'
+      HERMES_TEST_FILE_RETRIES: '0'
+      NODE_OPTIONS: --max-old-space-size=8192
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Select pinned tree and check set
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          text = Path('workbench/history_suite_125766.py').read_text()
+          shared = [line for line in text.splitlines() if line.startswith('candidate_suites = ')]
+          assert len(shared) == 1
+          text = text.replace(shared[0], shared[0][:-1] + ", PREFIX + 'history-layout-hold.test.ts']")
+          first = text.index('# The new tests must fail')
+          second = text.index('# All commits below are local')
+          last = text.index("run('restored-product'")
+          shared = [line for line in text.splitlines() if line.startswith('candidate_suites = ')]
+          if os.environ['MODE'] == 'standalone':
+              text = text[:second] + text[last:]
+          else:
+              text = text[:first] + shared[0] + '\n\n' + text[second:]
+          target = Path(os.environ['RUNNER_TEMP']) / 'history_suite.py'
+          target.write_text(text)
+          compile(text, str(target), 'exec')
+          PY
+          git fetch --depth=100 origin "$PRODUCT_SHA" "$ORIGINAL_SHA" "$MAIN_SHA" "$RAIL_SHA" "$BELOW_SHA"
+          git checkout --detach "$PRODUCT_SHA"
+      - uses: ./.github/actions/setup-pm
+        with:
+          toolchain: all
+          extras: '["all", "anthropic"]'
+          test-environment: 'true'
+          cache-suffix: issue125766-history
+      - name: Verify exact tree
+        run: '"$HERMES_PYTHON" "$RUNNER_TEMP/history_suite.py"'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: history-layout-hold-${{ matrix.mode }}
+          path: ${{ runner.temp }}/history-suite-evidence/
+          retention-days: 7
