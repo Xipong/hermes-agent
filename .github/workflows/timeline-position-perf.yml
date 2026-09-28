@@ -14,14 +14,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
-      PRODUCT_SHA: 3c9ef611152327bf2a9d59abcbb9fcdd8a4c654c
+      PRODUCT_SHA: e993464b1e0312063d2d3c4ef5c2af4d616e601f
       BASE_SHA: 801a9022a742562a3c4578c0d8dd12cfd393fc47
+      COMPANION_SHA: 46d0b7c21f8bb561458379e97f0fc842145b2905
       NODE_OPTIONS: --max-old-space-size=8192
+      HERMES_TEST_WORKERS: '2'
+      HERMES_TEST_FILE_RETRIES: '0'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - name: Select immutable product
         run: |
-          git fetch --depth=1 origin "$PRODUCT_SHA" "$BASE_SHA"
+          git fetch --depth=100 origin "$PRODUCT_SHA" "$BASE_SHA" "$COMPANION_SHA"
           git checkout --detach "$PRODUCT_SHA"
       - uses: ./.github/actions/setup-pm
         with:
@@ -29,7 +32,7 @@ jobs:
           extras: '["all", "anthropic"]'
           test-environment: 'true'
           cache-suffix: issue125766-history
-      - name: Validate source, regression contrast, and native geometry
+      - name: Validate product, then a disposable companion merge
         run: |
           "$HERMES_PYTHON" - <<'PY'
           from pathlib import Path
@@ -42,6 +45,8 @@ jobs:
           assert sha == os.environ['PRODUCT_SHA']
           (out / 'product-sha.txt').write_text(sha + '\n')
           base = os.environ['BASE_SHA']
+          companion = os.environ['COMPANION_SHA']
+          env = dict(os.environ, HERMES_DESKTOP_PYTHON=os.environ['HERMES_PYTHON'])
           (out / 'product.patch').write_bytes(subprocess.check_output(['git', 'diff', base, sha]))
           status = {}
           def run(name, args, cwd=desktop, timeout=600, expected=0):
@@ -49,14 +54,18 @@ jobs:
               with (out / (name + '.log')).open('w') as log:
                   log.write('$ ' + ' '.join(args) + '\n'); log.flush()
                   try:
-                      result = subprocess.run(args, cwd=cwd, stdout=log, stderr=subprocess.STDOUT, timeout=timeout).returncode
+                      result = subprocess.run(args, cwd=cwd, env=env, stdout=log, stderr=subprocess.STDOUT, timeout=timeout).returncode
                   except subprocess.TimeoutExpired:
                       result = 124
               status[name] = {'exit': result, 'expected': expected, 'passed': result == expected}
               (out / 'status.json').write_text(json.dumps(status, indent=2))
-              print((out / (name + '.log')).read_text(errors='replace')[-18000:], flush=True)
+              print((out / (name + '.log')).read_text(errors='replace')[-14000:], flush=True)
               print(f'Exit: {result} (expected {expected})\n::endgroup::', flush=True)
               return result
+          def save_reports(label):
+              for name in ('test-results', 'playwright-report'):
+                  if (desktop / name).exists():
+                      shutil.copytree(desktop / name, out / label / name, dirs_exist_ok=True)
           if run('npm-ci', ['npm', 'ci', '--no-audit', '--no-fund'], root):
               raise SystemExit(1)
           prefix = 'src/components/assistant-ui/thread/'
@@ -70,15 +79,71 @@ jobs:
               source.write_bytes(original)
           suites = [focused, prefix + 'timeline-idle.test.tsx', prefix + 'timeline-rail.test.tsx', prefix + 'use-timeline-reveal.test.tsx', prefix + 'use-timeline-history.test.tsx', prefix + 'streaming.test.tsx', 'src/lib/chat-messages.test.ts']
           run('ui', ['npx', 'vitest', 'run', '--project', 'ui', '--maxWorkers=2', *suites])
-          run('lint', ['npx', 'eslint', prefix + 'timeline.tsx', prefix + 'timeline-position.ts', focused])
+          run('lint', ['npx', 'eslint', '--max-warnings=0', prefix + 'timeline.tsx', prefix + 'timeline-position.ts', focused])
           run('renderer-types', ['npx', 'tsc', '-p', '.', '--noEmit'])
           run('e2e-types', ['npx', 'tsc', '-p', 'tsconfig.e2e.json', '--noEmit'])
           run('native', ['xvfb-run', '-a', 'npx', 'playwright', 'test', 'e2e/timeline-position.spec.ts', '--workers=1', '--retries=0'])
+          save_reports('product')
           run('diff-check', ['git', 'diff', '--check', base, sha], root)
           run('unchanged-product', ['git', 'diff', '--exit-code', 'HEAD'], root)
-          for name in ('test-results', 'playwright-report'):
-              if (desktop / name).exists():
-                  shutil.copytree(desktop / name, out / name, dirs_exist_ok=True)
+          if not all(s['passed'] for s in status.values()):
+              raise SystemExit(1)
+          # Integration is deliberately separate from exact-product validation.
+          # No branch updates, commits or pushes occur in this read-only workflow.
+          try:
+              merge = subprocess.run(['git', '-c', 'user.name=Integration verification', '-c', 'user.email=verification@example.invalid', 'merge', '--no-commit', '--no-ff', companion], capture_output=True, text=True)
+              (out / 'integration-merge.log').write_text(merge.stdout + merge.stderr)
+              conflicts = subprocess.check_output(['git', 'diff', '--name-only', '--diff-filter=U'], text=True).splitlines()
+              timeline_path = 'apps/desktop/' + prefix + 'timeline.tsx'
+              assert merge.returncode in (0, 1) and set(conflicts) <= {timeline_path}, conflicts
+              # Preserve the companion's exact jump/cancellation logic, replacing
+              # only its full active-marker sweep with this PR's reader.
+              combined = subprocess.check_output(['git', 'show', companion + ':' + timeline_path], text=True)
+              combined = combined.replace("import { TimelineRail } from './timeline-rail'", "import { createTimelinePositionReader } from './timeline-position'\nimport { TimelineRail } from './timeline-rail'")
+              combined = combined.replace('scrollTimelineTarget, timelineTarget', 'scrollTimelineTarget')
+              signature = '    const indexes = new Map(railEntries.map((entry, index) => [entry.id, index]))'
+              assert combined.count(signature) == 1
+              combined = combined.replace(signature, signature + '\n    const position = createTimelinePositionReader(viewport, indexes)')
+              start = combined.index('      const top = viewport.getBoundingClientRect().top')
+              stop_text = '      setActiveIndex(active === -1 ? Math.max(0, first) : active)'
+              stop = combined.index(stop_text, start) + len(stop_text)
+              combined = combined[:start] + '''      const leadingIndex =
+                  history.isHistorical && history.leadingRowId != null
+                    ? railEntries.findIndex(entry => entry.rowId === history.leadingRowId)
+                    : -1
+
+                setActiveIndex(position.read(leadingIndex))''' + combined[stop:]
+              combined = combined.replace('const observer = new MutationObserver(schedule)', 'const observer = new MutationObserver(records => {\n      position.invalidate(records)\n      schedule()\n    })')
+              combined = combined.replace("    viewport.addEventListener('pointerdown', cancelJump)", "    resize.observe(viewport)\n    viewport.addEventListener('pointerdown', cancelJump)")
+              source.write_text(combined)
+              # Extend only the disposable acceptance fixture to pin the leading
+              # prompt while its own payload has been evicted from the window.
+              acceptance = desktop / 'e2e/history-navigation.spec.ts'
+              text = acceptance.read_text()
+              needle = "      expect(await viewport.locator('[data-message-id]').count()).toBeLessThanOrEqual(360)"
+              assert needle in text
+              text = text.replace(needle, needle + '''
+                if (pageNumber === 2) {
+                  await viewport.evaluate(element => { element.scrollTop = 0 })
+                  await expect(rail.getByRole('button', { name: 'NAV prompt 20', exact: true })).toHaveAttribute('aria-current', 'location')
+                }''', 1)
+              acceptance.write_text(text)
+              subprocess.run(['git', 'add', timeline_path, 'apps/desktop/e2e/history-navigation.spec.ts'], check=True)
+              tree = subprocess.check_output(['git', 'write-tree'], text=True).strip()
+              (out / 'integration-tree.json').write_text(json.dumps({'product': sha, 'companion': companion, 'tree': tree, 'conflicts': conflicts}, indent=2))
+              (out / 'integration.patch').write_bytes(subprocess.check_output(['git', 'diff', '--cached', sha]))
+              (out / 'integration-timeline.tsx').write_text(combined)
+              combined_suites = suites + ['src/app/chat/history-window.test.tsx', prefix + 'history-scroll.test.ts', prefix + 'list-session-scroll.test.tsx']
+              run('integration-ui', ['npx', 'vitest', 'run', '--project', 'ui', '--maxWorkers=2', *combined_suites])
+              run('integration-backend', ['bash', 'scripts/run_tests.sh', 'tests/hermes_cli/test_session_timeline.py'], root)
+              run('integration-types', ['npx', 'tsc', '-p', '.', '--noEmit'])
+              run('integration-e2e-types', ['npx', 'tsc', '-p', 'tsconfig.e2e.json', '--noEmit'])
+              if run('integration-build', ['npm', 'run', 'build', '--workspace=apps/desktop'], root, timeout=900) == 0:
+                  run('integration-native', ['xvfb-run', '-a', 'npx', 'playwright', 'test', 'e2e/history-navigation.spec.ts', 'e2e/timeline-position.spec.ts', '--workers=1', '--retries=0'])
+              save_reports('integration')
+          finally:
+              subprocess.run(['git', 'merge', '--abort'], check=True)
+          run('restored-product', ['git', 'diff', '--exit-code', 'HEAD'], root)
           raise SystemExit(0 if all(s['passed'] for s in status.values()) else 1)
           PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
