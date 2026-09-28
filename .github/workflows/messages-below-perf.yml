@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
-      PRODUCT_SHA: ea83b44790d381391533af69bb4f26ebc0f28134
+      PRODUCT_SHA: d18cd3bfee2f2efc1957ff4b30d1ff160bf14299
       BASE_SHA: 801a9022a742562a3c4578c0d8dd12cfd393fc47
       NODE_OPTIONS: --max-old-space-size=8192
     steps:
