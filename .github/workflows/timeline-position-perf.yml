@@ -1,0 +1,89 @@
+name: Timeline position performance verification
+on:
+  push:
+    branches: [workbench/timeline-position-perf]
+    paths: [.github/workflows/timeline-position-perf.yml]
+permissions:
+  contents: read
+concurrency:
+  group: timeline-position-perf
+  cancel-in-progress: true
+jobs:
+  verify:
+    if: github.repository == 'Xipong/hermes-agent'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PRODUCT_SHA: 3c9ef611152327bf2a9d59abcbb9fcdd8a4c654c
+      BASE_SHA: 801a9022a742562a3c4578c0d8dd12cfd393fc47
+      NODE_OPTIONS: --max-old-space-size=8192
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Select immutable product
+        run: |
+          git fetch --depth=1 origin "$PRODUCT_SHA" "$BASE_SHA"
+          git checkout --detach "$PRODUCT_SHA"
+      - uses: ./.github/actions/setup-pm
+        with:
+          toolchain: all
+          extras: '["all", "anthropic"]'
+          test-environment: 'true'
+          cache-suffix: issue125766-history
+      - name: Validate source, regression contrast, and native geometry
+        run: |
+          "$HERMES_PYTHON" - <<'PY'
+          from pathlib import Path
+          import json, os, shutil, subprocess
+          root = Path.cwd()
+          desktop = root / 'apps/desktop'
+          out = Path(os.environ['RUNNER_TEMP']) / 'timeline-perf-evidence'
+          out.mkdir(parents=True, exist_ok=True)
+          sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          assert sha == os.environ['PRODUCT_SHA']
+          (out / 'product-sha.txt').write_text(sha + '\n')
+          base = os.environ['BASE_SHA']
+          (out / 'product.patch').write_bytes(subprocess.check_output(['git', 'diff', base, sha]))
+          status = {}
+          def run(name, args, cwd=desktop, timeout=600, expected=0):
+              print('::group::' + name, flush=True)
+              with (out / (name + '.log')).open('w') as log:
+                  log.write('$ ' + ' '.join(args) + '\n'); log.flush()
+                  try:
+                      result = subprocess.run(args, cwd=cwd, stdout=log, stderr=subprocess.STDOUT, timeout=timeout).returncode
+                  except subprocess.TimeoutExpired:
+                      result = 124
+              status[name] = {'exit': result, 'expected': expected, 'passed': result == expected}
+              (out / 'status.json').write_text(json.dumps(status, indent=2))
+              print((out / (name + '.log')).read_text(errors='replace')[-18000:], flush=True)
+              print(f'Exit: {result} (expected {expected})\n::endgroup::', flush=True)
+              return result
+          if run('npm-ci', ['npm', 'ci', '--no-audit', '--no-fund'], root):
+              raise SystemExit(1)
+          prefix = 'src/components/assistant-ui/thread/'
+          focused = prefix + 'timeline-position.test.tsx'
+          source = desktop / (prefix + 'timeline.tsx')
+          original = source.read_bytes()
+          try:
+              source.write_bytes(subprocess.check_output(['git', 'show', base + ':apps/desktop/' + prefix + 'timeline.tsx']))
+              run('red-original-timeline', ['npx', 'vitest', 'run', '--project', 'ui', focused], expected=1)
+          finally:
+              source.write_bytes(original)
+          suites = [focused, prefix + 'timeline-idle.test.tsx', prefix + 'timeline-rail.test.tsx', prefix + 'use-timeline-reveal.test.tsx', prefix + 'use-timeline-history.test.tsx', prefix + 'streaming.test.tsx', 'src/lib/chat-messages.test.ts']
+          run('ui', ['npx', 'vitest', 'run', '--project', 'ui', '--maxWorkers=2', *suites])
+          run('lint', ['npx', 'eslint', prefix + 'timeline.tsx', prefix + 'timeline-position.ts', focused])
+          run('renderer-types', ['npx', 'tsc', '-p', '.', '--noEmit'])
+          run('e2e-types', ['npx', 'tsc', '-p', 'tsconfig.e2e.json', '--noEmit'])
+          run('native', ['xvfb-run', '-a', 'npx', 'playwright', 'test', 'e2e/timeline-position.spec.ts', '--workers=1', '--retries=0'])
+          run('diff-check', ['git', 'diff', '--check', base, sha], root)
+          run('unchanged-product', ['git', 'diff', '--exit-code', 'HEAD'], root)
+          for name in ('test-results', 'playwright-report'):
+              if (desktop / name).exists():
+                  shutil.copytree(desktop / name, out / name, dirs_exist_ok=True)
+          raise SystemExit(0 if all(s['passed'] for s in status.values()) else 1)
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: timeline-position-perf-evidence
+          path: ${{ runner.temp }}/timeline-perf-evidence/
+          retention-days: 7
