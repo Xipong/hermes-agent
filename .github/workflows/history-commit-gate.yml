@@ -1,0 +1,88 @@
+name: History anchor publication gate
+on:
+  push:
+    branches: [workbench/history-suite-125766]
+    paths: [.github/workflows/history-commit-gate.yml]
+permissions:
+  contents: read
+jobs:
+  candidate:
+    if: github.repository == 'Xipong/hermes-agent'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      sha: ${{ steps.make.outputs.sha }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: e7176142b0da4c31ab7b5583bd18fcbc66a47038
+      - name: Construct only the reviewed publication gate
+        id: make
+        env:
+          BASE: e7176142b0da4c31ab7b5583bd18fcbc66a47038
+          DEST: verify/history-commit-gate-125766
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import os, subprocess
+          assert subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip() == os.environ['BASE']
+          path = Path('apps/desktop/src/components/assistant-ui/thread/list.tsx')
+          text = path.read_text()
+          edits = [
+              ("  const weightSignature = useAuiState(s =>", "  const runtimeMessageIds = useAuiState(s => s.thread.messages.map(message => message.id).join('\\n'))\n\n  const weightSignature = useAuiState(s =>"),
+              ("    if (!el || !historyAnchorRef.current.length) {", "    // The selected source arrives before assistant-ui publishes its new rows.\n    // Do not spend the anchor on the old DOM: eviction may commit after the\n    // two follow-up frames have already elapsed. Wait for that publication.\n    if (\n      !el ||\n      !historyAnchorRef.current.length ||\n      runtimeMessageIds !== currentMessages.map(message => message.id).join('\\n')\n    ) {"),
+              ("  }, [currentMessages, structuralSignature, weightSignature, scrollRef])", "  }, [currentMessages, runtimeMessageIds, structuralSignature, weightSignature, scrollRef])")
+          for old, new in edits:
+              assert text.count(old) == 1, old
+              text = text.replace(old,new,1)
+          path.write_text(text)
+          changed = subprocess.check_output(['git','diff','--name-only'],text=True).splitlines()
+          assert changed == [str(path)], changed
+          subprocess.run(['git','diff','--check'],check=True)
+          subprocess.run(['git','add',str(path)],check=True)
+          subprocess.run(['git','-c','user.name=Xipong','-c','user.email=217837358+Xipong@users.noreply.github.com','commit','-m','fix(desktop): retain history anchors until runtime rows commit'],check=True)
+          sha = subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
+          # Create-only lease: this job cannot replace any existing branch.
+          dest = 'refs/heads/' + os.environ['DEST']
+          subprocess.run(['git','push','--force-with-lease=' + dest + ':','origin','HEAD:' + dest],check=True)
+          with open(os.environ['GITHUB_OUTPUT'],'a') as output:
+              output.write('sha=' + sha + '\n')
+          print('CANDIDATE_SHA=' + sha)
+          PY
+  verify:
+    needs: candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    env:
+      PRODUCT_SHA: ${{ needs.candidate.outputs.sha }}
+      ORIGINAL_SHA: 46d0b7c21f8bb561458379e97f0fc842145b2905
+      MAIN_SHA: 2ffa4977baf9874c498453a09447dc399b0fd215
+      RAIL_SHA: e993464b1e0312063d2d3c4ef5c2af4d616e601f
+      BELOW_SHA: fbfd4f98c70cf7a18d2f053f3d9f32c82024f27f
+      HERMES_TEST_WORKERS: '2'
+      HERMES_TEST_FILE_RETRIES: '0'
+      NODE_OPTIONS: --max-old-space-size=8192
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Select immutable candidate
+        run: |
+          cp workbench/history_suite_125766.py "$RUNNER_TEMP/history_suite_125766.py"
+          git fetch --depth=100 origin "$PRODUCT_SHA" "$ORIGINAL_SHA" "$MAIN_SHA" "$RAIL_SHA" "$BELOW_SHA"
+          git checkout --detach "$PRODUCT_SHA"
+      - uses: ./.github/actions/setup-pm
+        with:
+          toolchain: all
+          extras: '["all", "anthropic"]'
+          test-environment: 'true'
+          cache-suffix: issue125766-history
+      - name: Exact candidate and disposable three-PR acceptance
+        run: '"$HERMES_PYTHON" "$RUNNER_TEMP/history_suite_125766.py"'
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: history-commit-gate-evidence
+          path: ${{ runner.temp }}/history-suite-evidence/
+          retention-days: 7
