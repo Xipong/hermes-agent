@@ -13,7 +13,7 @@ old = '''      // Capture after Playwright's explicit movement to the page contr
 new = '''      // Start a real wheel gesture away from either paging edge. This releases
       // the previous reading hold, as manual scrolling does, before Playwright
       // positions the page control. Programmatic scrolling alone is not intent.
-      await viewport.hover({ position: { x: 10, y: 10 } })
+      await viewport.hover()
       const delta = await viewport.evaluate(element =>
         element.scrollHeight - element.clientHeight - element.scrollTop <= 48 ? -1 : 1
       )
