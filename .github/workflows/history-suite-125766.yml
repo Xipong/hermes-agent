@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
-      PRODUCT_SHA: 48a2db6ac9318c6fa028bf015dbc65e74009f756
+      PRODUCT_SHA: e7176142b0da4c31ab7b5583bd18fcbc66a47038
       ORIGINAL_SHA: 46d0b7c21f8bb561458379e97f0fc842145b2905
       MAIN_SHA: 2ffa4977baf9874c498453a09447dc399b0fd215
       RAIL_SHA: e993464b1e0312063d2d3c4ef5c2af4d616e601f
