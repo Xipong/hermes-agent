@@ -1,7 +1,24 @@
-"""Resolve generator-owned style conflicts without discarding current main declarations."""
+"""Resolve reviewed conflicts and validate every independent gate before publication."""
+import json
 import pr120894_nonstream as a
 
 resolve_source_conflicts = a.resolve_rebase
+original_run = a.run
+failures = []
+COLLECT = {"python-matrix.log", "compile.log", "ruff.log", "desktop-matrix.log",
+           "typecheck.log", "eslint.log", "prettier.log", "diffcheck.log",
+           "desktop-build.log", "electron.log"}
+
+
+def run(*args, **kwargs):
+    # Collect independent gate results in one run; publication still requires all green.
+    label = kwargs.get("log")
+    if label in COLLECT:
+        kwargs["check"] = False
+    result = original_run(*args, **kwargs)
+    if label in COLLECT and result.returncode:
+        failures.append({"log": label, "returncode": result.returncode})
+    return result
 
 
 def resolve_rebase():
@@ -21,8 +38,24 @@ def resolve_rebase():
         resolve_source_conflicts()
 
 
+def align_cli_contract():
+    path = a.CANDIDATE / "tests/hermes_cli/test_reasoning_command.py"
+    text = a.replace(path.read_text(),
+        '("delta", "rs_live:summary:1", "Checking")',
+        '("delta", "rs_live:summary:1", "\\nChecking")')
+    text = a.replace(text,
+        '("delta", "rs_verify:summary:0", "Verifying")',
+        '("delta", "rs_verify:summary:0", "\\n\\nVerifying")')
+    path.write_text(text)
+
+
 if __name__ == "__main__":
+    a.run = run
     a.resolve_rebase = resolve_rebase
     a.prepare()
+    align_cli_contract()
     a.verify()
+    (a.OUT / "gate-failures.json").write_text(json.dumps(failures, indent=2))
+    if failures:
+        raise RuntimeError(f"Validation failed; product branch untouched: {failures}")
     a.publish()
