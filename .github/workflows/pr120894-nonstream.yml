@@ -20,7 +20,7 @@ jobs:
           toolchain: all
           cache-suffix: pr120894-review
       - name: Rebase, reproduce, fix, validate and publish with a lease
-        run: '"$HERMES_PYTHON" workbench/pr120894_nonstream.py'
+        run: '"$HERMES_PYTHON" workbench/pr120894_nonstream_finalize.py'
         env:
           HERMES_TEST_WORKERS: '2'
           HERMES_TEST_FILE_TIMEOUT: '300'
