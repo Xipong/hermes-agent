@@ -1,5 +1,6 @@
 """Resolve reviewed conflicts and validate every independent gate before publication."""
 import json
+import time
 import pr120894_nonstream as a
 
 resolve_source_conflicts = a.resolve_rebase
@@ -11,6 +12,18 @@ COLLECT = {"python-matrix.log", "compile.log", "ruff.log", "desktop-matrix.log",
 
 
 def run(*args, **kwargs):
+    if args[:2] == ("git", "fetch"):
+        options = {**kwargs, "check": False}
+        for attempt, delay in enumerate((0, 15, 30, 60, 120)):
+            if delay:
+                print(f"Transient GitHub fetch failure; retry {attempt} after {delay}s", flush=True)
+                time.sleep(delay)
+            result = original_run(*args, **options)
+            if result.returncode == 0:
+                return result
+            if not any(token in result.stdout for token in ("HTTP 429", "HTTP 500", "HTTP 502", "HTTP 503", "HTTP 504")):
+                break
+        raise RuntimeError(f"Git fetch did not complete; no product branch was updated: {args}")
     # Collect independent gate results in one run; publication still requires all green.
     label = kwargs.get("log")
     if label in COLLECT:
