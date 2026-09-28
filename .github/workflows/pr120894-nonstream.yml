@@ -1,0 +1,63 @@
+name: PR 120894 nonstream review and rebase
+on:
+  push:
+    branches: [workbench/pr120894-nonstream-rebase]
+concurrency:
+  group: pr120894-nonstream-rebase
+  cancel-in-progress: true
+permissions:
+  contents: write
+jobs:
+  inspect:
+    if: github.repository == 'Xipong/hermes-agent'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - name: Inspect exact-head rebase without publishing the product branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/pr120894-evidence"
+          mkdir -p "$OUT"
+          OLD=d39d5cf86a1a51cd86f97e23271291143f242a6e
+          COMMON=59004a62356f3a4697ab0fe8ad5086d2b405e2a6
+          BASE=7dbbb0f4a6ebeec9a8714ec37fa41340fe9e4e00
+          git fetch --no-tags origin "$OLD" "$COMMON"
+          git fetch --no-tags https://github.com/NousResearch/hermes-agent.git "$BASE"
+          git config user.name Xipong
+          git config user.email 217837358+Xipong@users.noreply.github.com
+          git worktree add --detach "$RUNNER_TEMP/pr120894-candidate" "$OLD"
+          cd "$RUNNER_TEMP/pr120894-candidate"
+          git log --reverse --format='%H %an <%ae>%n%B' "$COMMON..$OLD" > "$OUT/lineage-before.txt"
+          git diff --name-status "$COMMON" "$OLD" > "$OUT/original-paths.txt"
+          git diff --stat "$COMMON" "$BASE" > "$OUT/upstream-stat.txt"
+          set +e
+          GIT_EDITOR=: git rebase --reapply-cherry-picks --empty=keep --onto "$BASE" "$COMMON" 2>&1 | tee "$OUT/rebase.log"
+          status=${PIPESTATUS[0]}
+          set -e
+          git status --short
+          git diff --name-only --diff-filter=U | tee "$OUT/conflict-paths.txt"
+          git diff --cc > "$OUT/conflicts.diff"
+          cat "$OUT/conflicts.diff"
+          if [ "$status" -ne 0 ]; then
+            mkdir -p "$OUT/conflicts"
+            while IFS= read -r file; do
+              mkdir -p "$OUT/conflicts/$(dirname "$file")"
+              cp "$file" "$OUT/conflicts/$file"
+            done < "$OUT/conflict-paths.txt"
+          else
+            git range-diff "$COMMON..$OLD" "$BASE..HEAD" | tee "$OUT/rebase-range.diff"
+            git rev-parse HEAD > "$OUT/rebased-head.txt"
+          fi
+          for path in AGENTS.md CONTRIBUTING.md agent/AGENTS.md tests/AGENTS.md tui_gateway/AGENTS.md; do
+            mkdir -p "$OUT/guidance/$(dirname "$path")"
+            git show "$BASE:$path" > "$OUT/guidance/$path" 2>/dev/null || true
+          done
+          exit "$status"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: pr120894-nonstream-evidence
+          path: ${{ runner.temp }}/pr120894-evidence/
+          retention-days: 14
