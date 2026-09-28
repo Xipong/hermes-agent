@@ -1,0 +1,97 @@
+name: Messages below performance verification
+on:
+  push:
+    branches: [workbench/messages-below-perf]
+    paths: [.github/workflows/messages-below-perf.yml]
+permissions:
+  contents: read
+concurrency:
+  group: messages-below-perf
+  cancel-in-progress: true
+jobs:
+  verify:
+    if: github.repository == 'Xipong/hermes-agent'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PRODUCT_SHA: ea83b44790d381391533af69bb4f26ebc0f28134
+      BASE_SHA: 801a9022a742562a3c4578c0d8dd12cfd393fc47
+      NODE_OPTIONS: --max-old-space-size=8192
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Select immutable product
+        run: |
+          git fetch --depth=1 origin "$PRODUCT_SHA" "$BASE_SHA"
+          git checkout --detach "$PRODUCT_SHA"
+      - uses: ./.github/actions/setup-pm
+        with:
+          toolchain: all
+          extras: '["all", "anthropic"]'
+          test-environment: 'true'
+          cache-suffix: issue125766-messages-below
+      - name: Validate product
+        run: |
+          "$HERMES_PYTHON" - <<'PY'
+          from pathlib import Path
+          import json, os, shutil, subprocess
+          root = Path.cwd()
+          desktop = root / 'apps/desktop'
+          out = Path(os.environ['RUNNER_TEMP']) / 'messages-below-evidence'
+          out.mkdir(parents=True, exist_ok=True)
+          sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          assert sha == os.environ['PRODUCT_SHA']
+          base = os.environ['BASE_SHA']
+          env = dict(os.environ, HERMES_DESKTOP_PYTHON=os.environ['HERMES_PYTHON'])
+          (out / 'product-sha.txt').write_text(sha + '\n')
+          (out / 'product.patch').write_bytes(subprocess.check_output(['git', 'diff', base, sha]))
+          status = {}
+          def run(name, args, cwd=desktop, timeout=600, expected=0):
+              print('::group::' + name, flush=True)
+              with (out / (name + '.log')).open('w') as log:
+                  log.write('$ ' + ' '.join(args) + '\n'); log.flush()
+                  try:
+                      code = subprocess.run(args, cwd=cwd, env=env, stdout=log, stderr=subprocess.STDOUT, timeout=timeout).returncode
+                  except subprocess.TimeoutExpired:
+                      code = 124
+              status[name] = {'exit': code, 'expected': expected, 'passed': code == expected}
+              (out / 'status.json').write_text(json.dumps(status, indent=2))
+              print((out / (name + '.log')).read_text(errors='replace')[-16000:], flush=True)
+              print(f'Exit: {code} (expected {expected})\n::endgroup::', flush=True)
+              return code
+          if run('npm-ci', ['npm', 'ci', '--no-audit', '--no-fund'], root):
+              raise SystemExit(1)
+          source = desktop / 'src/components/assistant-ui/thread/use-messages-below.ts'
+          original = source.read_bytes()
+          try:
+              source.write_bytes(subprocess.check_output(['git', 'show', base + ':apps/desktop/src/components/assistant-ui/thread/use-messages-below.ts']))
+              run('red-original-sweep', ['npx', 'vitest', 'run', '--project', 'ui', 'src/components/assistant-ui/thread/use-messages-below-perf.test.ts'], expected=1)
+          finally:
+              source.write_bytes(original)
+          suites = [
+              'src/components/assistant-ui/thread/use-messages-below-perf.test.ts',
+              'src/components/assistant-ui/thread/use-messages-below.test.tsx',
+              'src/app/chat/scroll-to-bottom-button.test.tsx',
+              'src/components/assistant-ui/thread/list-session-scroll.test.tsx',
+              'src/components/assistant-ui/thread/streaming.test.tsx',
+          ]
+          run('ui', ['npx', 'vitest', 'run', '--project', 'ui', '--maxWorkers=2', *suites])
+          run('lint', ['npx', 'eslint', '--max-warnings=0',
+                       'src/components/assistant-ui/thread/use-messages-below.ts',
+                       'src/components/assistant-ui/thread/use-messages-below.test.tsx',
+                       'src/components/assistant-ui/thread/use-messages-below-perf.test.ts'])
+          run('renderer-types', ['npx', 'tsc', '-p', '.', '--noEmit'])
+          run('e2e-types', ['npx', 'tsc', '-p', 'tsconfig.e2e.json', '--noEmit'])
+          run('native', ['xvfb-run', '-a', 'npx', 'playwright', 'test', 'e2e/messages-below-position.spec.ts', '--workers=1', '--retries=0'])
+          run('diff-check', ['git', 'diff', '--check', base, sha], root)
+          run('unchanged-product', ['git', 'diff', '--exit-code', 'HEAD'], root)
+          for name in ('test-results', 'playwright-report'):
+              if (desktop / name).exists():
+                  shutil.copytree(desktop / name, out / name, dirs_exist_ok=True)
+          raise SystemExit(0 if all(item['passed'] for item in status.values()) else 1)
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: messages-below-perf-evidence
+          path: ${{ runner.temp }}/messages-below-evidence/
+          retention-days: 7
