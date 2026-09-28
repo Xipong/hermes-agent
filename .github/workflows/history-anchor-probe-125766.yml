@@ -1,0 +1,116 @@
+name: History eviction anchor probe
+on:
+  push:
+    branches: [workbench/history-anchor-probe-125766]
+    paths: [.github/workflows/history-anchor-probe-125766.yml]
+permissions:
+  contents: read
+jobs:
+  probe:
+    if: github.repository == 'Xipong/hermes-agent'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PRODUCT_SHA: e7176142b0da4c31ab7b5583bd18fcbc66a47038
+      NODE_OPTIONS: --max-old-space-size=8192
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - run: |
+          git fetch --depth=1 origin "$PRODUCT_SHA"
+          git checkout --detach "$PRODUCT_SHA"
+      - uses: ./.github/actions/setup-pm
+        with:
+          toolchain: all
+          extras: '["all", "anthropic"]'
+          test-environment: 'true'
+          cache-suffix: issue125766-history
+      - name: Probe eviction ownership on a disposable tree
+        run: |
+          "$HERMES_PYTHON" - <<'PY'
+          from pathlib import Path
+          import json, os, shutil, subprocess
+          root = Path.cwd()
+          desktop = root / 'apps/desktop'
+          out = Path(os.environ['RUNNER_TEMP']) / 'anchor-probe'
+          out.mkdir(parents=True, exist_ok=True)
+          env = dict(os.environ, HERMES_DESKTOP_PYTHON=os.environ['HERMES_PYTHON'])
+          path = desktop / 'src/components/assistant-ui/thread/list.tsx'
+          text = path.read_text()
+          pairs = [
+              ('    cancelAnimationFrame(historyFrameRef.current)\n    restoreHistoryScroll(el, historyAnchorRef.current)', '    cancelAnimationFrame(historyFrameRef.current)\n    stopScroll()\n    restoreHistoryScroll(el, historyAnchorRef.current)'),
+              ('    historyFrameRef.current = requestAnimationFrame(() => {\n      restoreHistoryScroll(el, historyAnchorRef.current)', '    historyFrameRef.current = requestAnimationFrame(() => {\n      stopScroll()\n      restoreHistoryScroll(el, historyAnchorRef.current)'),
+              ('      historyFrameRef.current = requestAnimationFrame(() => {\n        restoreHistoryScroll(el, historyAnchorRef.current)', '      historyFrameRef.current = requestAnimationFrame(() => {\n        stopScroll()\n        restoreHistoryScroll(el, historyAnchorRef.current)'),
+              ('  }, [currentMessages, structuralSignature, weightSignature, scrollRef])', '  }, [currentMessages, structuralSignature, weightSignature, scrollRef, stopScroll])')
+          ]
+          for old, new in pairs:
+              assert text.count(old) == 1, old
+              text = text.replace(old, new, 1)
+          path.write_text(text)
+          (out / 'candidate-list.tsx').write_text(text)
+          (out / 'candidate.patch').write_bytes(subprocess.check_output(['git', 'diff']))
+          # Diagnostics read no extra layout boxes: log identities and explicit
+          # scrollTop writes. These diagnostic lines are not a proposed patch.
+          helper = desktop / 'src/components/assistant-ui/thread/history-scroll.ts'
+          text = helper.read_text().replace('  return candidates\n', '  const saved = candidates\n')
+          needle = '    .map(({ key, offset, occurrence }) => ({ key, offset, occurrence }))'
+          assert text.count(needle) == 1
+          text = text.replace(needle, needle + '\n  console.info("HISTORY_CAPTURE", JSON.stringify(saved.slice(0, 5)), viewport.scrollTop)\n  return saved')
+          needle = '    viewport.scrollTop += node.getBoundingClientRect().top - viewport.getBoundingClientRect().top - anchor.offset'
+          assert text.count(needle) == 1
+          text = text.replace(needle, '    console.info("HISTORY_RESTORE", anchor.key, anchor.occurrence, anchor.offset, viewport.scrollTop)\n' + needle + '\n    console.info("HISTORY_RESTORED", viewport.scrollTop)')
+          helper.write_text(text)
+          test = desktop / 'e2e/history-navigation.spec.ts'
+          text = test.read_text()
+          needle = '    const page = launched.page'
+          assert text.count(needle) == 1
+          text = text.replace(needle, needle + '''
+              page.on('console', message => {
+                if (message.text().startsWith('HISTORY_')) console.log(message.text())
+              })
+              await page.evaluate(() => {
+                const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop')!
+                let writes = 0
+                Object.defineProperty(Element.prototype, 'scrollTop', {
+                  ...descriptor,
+                  set(value: number) {
+                    if ((this as Element).matches('[data-slot="aui_thread-viewport"]') && writes++ < 180) {
+                      console.info('HISTORY_WRITE', descriptor.get!.call(this), value, (this as HTMLElement).dataset.following, new Error().stack?.split('\\n').slice(2, 4).join(' | '))
+                    }
+                    descriptor.set!.call(this, value)
+                  }
+                })
+              })''')
+          test.write_text(text)
+          status = {}
+          def run(name, args, cwd=desktop, timeout=600):
+              print('::group::' + name, flush=True)
+              with (out / (name + '.log')).open('w') as log:
+                  log.write('$ ' + ' '.join(args) + '\n'); log.flush()
+                  try:
+                      code = subprocess.run(args, cwd=cwd, env=env, stdout=log, stderr=subprocess.STDOUT, timeout=timeout).returncode
+                  except subprocess.TimeoutExpired:
+                      code = 124
+              status[name] = code
+              (out / 'status.json').write_text(json.dumps(status))
+              data = (out / (name + '.log')).read_text(errors='replace')
+              if name == 'native':
+                  print(data[-30000:], flush=True)
+              else:
+                  print(data[-2000:], flush=True)
+              print(f'Exit: {code}\n::endgroup::', flush=True)
+              return code
+          if run('npm-ci', ['npm', 'ci', '--no-audit', '--no-fund'], root) == 0:
+              if run('build', ['npm', 'run', 'build', '--workspace=apps/desktop'], root, 900) == 0:
+                  run('native', ['xvfb-run', '-a', 'npx', 'playwright', 'test', 'e2e/history-navigation.spec.ts', '--workers=1', '--retries=0'], timeout=300)
+          (out / 'diagnostic.patch').write_bytes(subprocess.check_output(['git', 'diff']))
+          for name in ('test-results', 'playwright-report'):
+              if (desktop / name).exists():
+                  shutil.copytree(desktop / name, out / name, dirs_exist_ok=True)
+          raise SystemExit(0 if status.get('native') == 0 else 1)
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: history-anchor-probe
+          path: ${{ runner.temp }}/anchor-probe/
+          retention-days: 7
