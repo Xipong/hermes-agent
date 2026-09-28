@@ -481,6 +481,8 @@ const ThreadMessageListInner: FC<ThreadMessageListProps> = ({
     s.thread.messages.map((message, index) => `${index}:${message.id}:${responseMessageRole(message)}`).join('\n')
   )
 
+  const runtimeMessageIds = useAuiState(s => s.thread.messages.map(message => message.id).join('\n'))
+
   const weightSignature = useAuiState(s =>
     s.thread.messages.map(message => messagePaintWeight(message.content)).join(',')
   )
@@ -1360,7 +1362,14 @@ const ThreadMessageListInner: FC<ThreadMessageListProps> = ({
   useLayoutEffect(() => {
     const el = scrollRef.current
 
-    if (!el || !historyAnchorRef.current.length) {
+    // The selected source arrives before assistant-ui publishes its new rows.
+    // Do not spend the anchor on the old DOM: eviction may commit after the
+    // two follow-up frames have already elapsed. Wait for that publication.
+    if (
+      !el ||
+      !historyAnchorRef.current.length ||
+      runtimeMessageIds !== currentMessages.map(message => message.id).join('\n')
+    ) {
       return
     }
 
@@ -1375,7 +1384,7 @@ const ThreadMessageListInner: FC<ThreadMessageListProps> = ({
         historyAnchorRef.current = []
       })
     })
-  }, [currentMessages, structuralSignature, weightSignature, scrollRef])
+  }, [currentMessages, runtimeMessageIds, structuralSignature, weightSignature, scrollRef])
 
   useEffect(() => {
     const el = scrollRef.current
