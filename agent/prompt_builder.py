@@ -258,7 +258,13 @@ SESSION_SEARCH_GUIDANCE = (
 # to save as a skill" and "fix it with skill_manage(action='patch')") and skill_manage's own schema. The
 # [SKILL_PRUNED] reload rule that followed moved to the compaction summary, the only place markers exist
 # (agent/context_compressor_tail.py::with_skill_safety_rule): fresh sessions no longer pay for it.
-SKILLS_GUIDANCE = "When you work out a non-trivial workflow, record it with skill_manage for future reuse."
+SKILLS_GUIDANCE = (
+    "When you work out a non-trivial workflow, record it with skill_manage for future reuse.\n\n"
+    "Record only a durable, reusable lesson: keep a conditional workaround's real trigger and "
+    "boundary, and do not turn task-local state or a one-off choice into a general rule. Preserve "
+    "a user preference or prohibition at its stated scope. If the workflow is already covered or "
+    "does not apply beyond this run, leave the skill unchanged.\n\n"
+)
 
 KANBAN_GUIDANCE = (
     "# Kanban task execution protocol\n"
