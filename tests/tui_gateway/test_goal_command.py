@@ -337,6 +337,25 @@ def test_iteration_limit_fallback_is_judged_and_can_continue(
     assert [p["status"] for p in completes] == ["complete", "complete"]
 
 
+def test_goal_judge_feedback_is_returned_for_the_next_tui_turn(server, monkeypatch):
+    """Regression for #137546: Desktop/TUI chains the actionable judge reason."""
+    from hermes_cli.goals import GoalManager
+
+    session_key = "goal-judge-feedback-chain"
+    GoalManager(session_key).set("finish the current task")
+    feedback = "Include the exact test command and its passing result."
+    session = _turn_session(types.SimpleNamespace(session_id=session_key), session_key)
+    monkeypatch.setattr(
+        "hermes_cli.goals.judge_goal", lambda *_args, **_kwargs: ("continue", feedback, False, None, False),
+    )
+
+    followup = server._goal_followup_after_turn(
+        "sid", session, {"completed": True, "failed": False}, "complete", "The task is complete.",
+    )
+
+    assert feedback in followup
+
+
 # ── active-goal recovery after compression exhaustion ───────────────
 
 

@@ -55,6 +55,7 @@ DEFAULT_GATE_MAX_RETRIES = 3
 _MAX_BARRIER_WAIT_S = 30 * 60
 # Bounded tail of a failed gate's combined stdout/stderr fed back to the agent.
 _GATE_OUTPUT_TAIL_CHARS = 3000
+_JUDGE_FEEDBACK_MAX_CHARS = 2000
 
 
 CONTINUATION_PROMPT_TEMPLATE = (
@@ -1571,15 +1572,47 @@ class GoalManager:
         s = self._state
         if not s or s.status != "active":
             return None
+        feedback = self._continuation_feedback(s)
         # Contract first (it carries the verification surface); subgoals fold in as extra criteria.
         if s.has_contract():
             contract_block = s.contract.render_block()
             if s.subgoals:
                 contract_block = f"{contract_block}\n{_render_extra_criteria(s.subgoals)}"
-            return CONTINUATION_PROMPT_WITH_CONTRACT_TEMPLATE.format(goal=s.goal, contract_block=contract_block)
+            prompt = CONTINUATION_PROMPT_WITH_CONTRACT_TEMPLATE.format(goal=s.goal, contract_block=contract_block)
+            return prompt + feedback
         if s.subgoals:
-            return CONTINUATION_PROMPT_WITH_SUBGOALS_TEMPLATE.format(goal=s.goal, subgoals_block=s.render_subgoals_block())
-        return CONTINUATION_PROMPT_TEMPLATE.format(goal=s.goal)
+            prompt = CONTINUATION_PROMPT_WITH_SUBGOALS_TEMPLATE.format(
+                goal=s.goal, subgoals_block=s.render_subgoals_block())
+            return prompt + feedback
+        return CONTINUATION_PROMPT_TEMPLATE.format(goal=s.goal) + feedback
+
+    @staticmethod
+    def _continuation_feedback(state: GoalState) -> str:
+        """Return the current actionable judge rejection, never failure diagnostics."""
+        reason = (state.last_reason or "").strip()
+        is_placeholder = (
+            not reason
+            or reason == "no reason provided"
+            or reason.startswith((
+                "empty response (", "auxiliary client unavailable",
+                "goal_judge auxiliary client unavailable:", "judge error:",
+                "judge returned empty response", "judge reply was not JSON:",
+            ))
+            or reason.endswith("(wait verdict had no target — continuing)")
+        )
+        if (
+            state.last_verdict != "continue"
+            or state.consecutive_parse_failures
+            or state.consecutive_transport_failures
+            or is_placeholder
+        ):
+            return ""
+        return (
+            "\n\nThe previous completion claim was rejected by the goal judge. "
+            "Address this feedback in your next response and include the requested concrete evidence "
+            "instead of referring to earlier turns:\n"
+            f"{_truncate(reason, _JUDGE_FEEDBACK_MAX_CHARS)}"
+        )
 
     def render_contract(self) -> str:
         """Public helper for the /goal show + /goal draft slash commands."""
