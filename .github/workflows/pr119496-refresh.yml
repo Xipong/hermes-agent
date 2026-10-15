@@ -6,105 +6,134 @@ on:
       - workbench/pr119496-refresh
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: pr119496-refresh-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  validate:
+  export:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: 26
-          cache: npm
+          fetch-depth: 0
 
-      - run: npm i -g npm@12
-      - uses: ./.github/actions/retry
-        with:
-          command: npm ci
-
-      - name: Focused Desktop tests and typecheck
-        working-directory: apps/desktop
+      - name: Export base, main, and head snapshots
+        shell: bash
         run: |
-          npx vitest run --project ui             src/app/session/hooks/use-session-actions/paged-tail-order.test.ts             src/app/session/hooks/use-session-actions/utils.test.ts             src/app/session/hooks/resume-occurrences.test.tsx
-          npm run typecheck
-          npx prettier --write             src/app/session/hooks/use-session-actions/utils.ts             src/app/session/hooks/use-session-actions/index.ts             src/app/session/hooks/use-session-actions/paged-tail-order.test.ts             e2e/core/transcript-integrity.spec.ts
+          set -euo pipefail
+          git remote add upstream https://github.com/NousResearch/hermes-agent.git
+          git fetch --no-tags upstream main
+          branches=(
+            '110363:fix/update-provider-model-cache-refresh'
+            '110364:fix/kanban-stop-owned-run'
+            '110395:feat/mcp-profile-discovery'
+            '110447:fix/desktop-memory-recall'
+            '112476:fix/bundled-skill-write-approval'
+            '112494:fix/bundled-local-references'
+            '114565:fix/wsl-computer-use-host-target'
+            '115087:fix/desktop-stale-subagent-roster'
+          )
+          for spec in "${branches[@]}"; do
+            branch="${spec#*:}"
+            git fetch --no-tags origin "+refs/heads/${branch}:refs/remotes/origin/${branch}"
+          done
 
-      - name: Install system dependencies for Electron
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq             xvfb             libgtk-3-0 libnotify4 libnss3 libxss1 libxtst6             xdg-utils libatspi2.0-0 libdrm2 libgbm1 libasound2t64
+          python - <<'PY'
+          import json
+          import pathlib
+          import subprocess
 
-      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39
-        with:
-          version: '0.9.28'
-          enable-cache: true
-          cache-dependency-glob: |
-            pyproject.toml
-            uv.lock
+          specs = [
+              ("110363", "fix/update-provider-model-cache-refresh"),
+              ("110364", "fix/kanban-stop-owned-run"),
+              ("110395", "feat/mcp-profile-discovery"),
+              ("110447", "fix/desktop-memory-recall"),
+              ("112476", "fix/bundled-skill-write-approval"),
+              ("112494", "fix/bundled-local-references"),
+              ("114565", "fix/wsl-computer-use-host-target"),
+              ("115087", "fix/desktop-stale-subagent-roster"),
+          ]
+          root = pathlib.Path("rebase-inputs")
+          root.mkdir()
 
-      - uses: ./.github/actions/retry
-        with:
-          command: uv python install 3.11
+          def run(*args: str, text: bool = True):
+              return subprocess.run(args, check=True, capture_output=True, text=text).stdout
 
-      - uses: ./.github/actions/retry
-        with:
-          command: uv sync --locked --python 3.11 --extra all --extra dev
+          for number, branch in specs:
+              head = run("git", "rev-parse", f"origin/{branch}").strip()
+              main = run("git", "rev-parse", "upstream/main").strip()
+              base = run("git", "merge-base", main, head).strip()
+              raw = run("git", "diff", "--name-status", "-z", base, head, text=False)
+              tokens = raw.split(b"\0")
+              paths = []
+              changes = []
+              i = 0
+              while i < len(tokens) and tokens[i]:
+                  status = tokens[i].decode("utf-8", "surrogateescape")
+                  i += 1
+                  if status.startswith(("R", "C")):
+                      old = tokens[i].decode("utf-8", "surrogateescape")
+                      new = tokens[i + 1].decode("utf-8", "surrogateescape")
+                      i += 2
+                      changes.append([status, old, new])
+                      paths.extend([old, new])
+                  else:
+                      path = tokens[i].decode("utf-8", "surrogateescape")
+                      i += 1
+                      changes.append([status, path])
+                      paths.append(path)
+              paths = list(dict.fromkeys(paths))
 
-      - name: Build Desktop
-        working-directory: apps/desktop
-        run: npm run build
+              out = root / number
+              out.mkdir()
+              (out / "metadata.json").write_text(
+                  json.dumps(
+                      {"number": number, "branch": branch, "base": base, "main": main, "head": head, "changes": changes},
+                      indent=2,
+                  ) + "\n",
+                  encoding="utf-8",
+              )
+              patch = subprocess.run(
+                  ["git", "diff", "--binary", "--full-index", base, head],
+                  check=True,
+                  capture_output=True,
+              ).stdout
+              (out / "original.patch").write_bytes(patch)
 
-      - name: Run transcript integrity E2E
-        working-directory: apps/desktop
-        run: |
-          xvfb-run -a --server-args="-screen 0 1280x1024x24"             npx playwright test -c e2e/core/playwright.config.ts e2e/core/transcript-integrity.spec.ts
-        env:
-          CI: 'true'
-          OPENROUTER_API_KEY: ''
-          OPENAI_API_KEY: ''
-          NOUS_API_KEY: ''
-          ANTHROPIC_API_KEY: ''
+              for side, commit in (("base", base), ("main", main), ("head", head)):
+                  side_root = out / side
+                  side_root.mkdir()
+                  missing = []
+                  for path in paths:
+                      probe = subprocess.run(
+                          ["git", "cat-file", "-e", f"{commit}:{path}"],
+                          stdout=subprocess.DEVNULL,
+                          stderr=subprocess.DEVNULL,
+                      )
+                      if probe.returncode:
+                          missing.append(path)
+                          continue
+                      data = subprocess.run(
+                          ["git", "show", f"{commit}:{path}"],
+                          check=True,
+                          capture_output=True,
+                      ).stdout
+                      target = side_root / path
+                      target.parent.mkdir(parents=True, exist_ok=True)
+                      target.write_bytes(data)
+                  (out / f"{side}-missing.json").write_text(
+                      json.dumps(missing, indent=2) + "\n", encoding="utf-8"
+                  )
+          PY
 
-      - name: Publish formatted product head
-        if: success()
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add \
-            apps/desktop/src/app/session/hooks/use-session-actions/utils.ts \
-            apps/desktop/src/app/session/hooks/use-session-actions/index.ts \
-            apps/desktop/src/app/session/hooks/use-session-actions/paged-tail-order.test.ts \
-            apps/desktop/e2e/core/transcript-integrity.spec.ts
-          git commit -m "chore(workbench): materialize formatted paged-tail patch"
-          git push origin HEAD:refs/heads/workbench/pr119496-formatted --force
-
-      - name: Upload formatted product sources
-        if: always()
+      - name: Upload rebase inputs
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: pr119496-formatted-${{ github.sha }}
-          path: |
-            apps/desktop/src/app/session/hooks/use-session-actions/utils.ts
-            apps/desktop/src/app/session/hooks/use-session-actions/index.ts
-            apps/desktop/src/app/session/hooks/use-session-actions/paged-tail-order.test.ts
-            apps/desktop/e2e/core/transcript-integrity.spec.ts
-          retention-days: 7
+          name: rebase-inputs-${{ github.sha }}
+          path: rebase-inputs
+          retention-days: 3
           if-no-files-found: error
-
-      - name: Upload E2E failure artifacts
-        if: failure() || cancelled()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: pr119496-refresh-${{ github.sha }}
-          path: |
-            apps/desktop/test-results/core
-            apps/desktop/playwright-report/core
-          retention-days: 7
-          if-no-files-found: ignore
