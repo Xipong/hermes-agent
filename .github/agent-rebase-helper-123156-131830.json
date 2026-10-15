@@ -1,0 +1,9 @@
+{
+  "action": "prepare",
+  "pr_number": 92485,
+  "original_branch": "pr/nim-reasoning",
+  "expected_head": "284c4e79ba44e358aff52dfe2c5c93ef7739d0e9",
+  "upstream_sha": "ca069e12239a2c8d13887ac9f983557d00bdcfd2",
+  "commit_title": "feat(nvidia): family-gated reasoning envelopes for NIM thinking models",
+  "work_branch": "agent-rebase-work-92485-xipong-20261015"
+}
