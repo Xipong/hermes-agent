@@ -1,29 +1,16 @@
 name: Rebase selected PR branches 2026-10-15
 
 on:
+  workflow_dispatch:
   schedule:
     - cron: '*/5 * * * *'
   issue_comment:
     types:
       - created
-  push:
-    branches:
-      - main
-    paths:
-      - .github/workflows/rebase-selected-prs-20261015.yml
-      - .github/rebase-selected-prs-20261015.trigger
-  pull_request:
-    branches:
-      - main
-    types:
-      - opened
-      - synchronize
-      - reopened
-    paths:
-      - .github/rebase-selected-prs-20261015.pr-trigger
 
 permissions:
   contents: write
+  pull-requests: read
 
 jobs:
   rebase:
@@ -35,14 +22,13 @@ jobs:
       fail-fast: false
       matrix:
         pr:
-          - 106142
-          - 106252
-          - 106905
-          - 106917
-          - 107299
-          - 107350
-          - 107711
-          - 107713
+          - 107739
+          - 107842
+          - 108661
+          - 109330
+          - 109351
+          - 109402
+          - 109474
 
     steps:
       - uses: actions/checkout@v4
@@ -50,7 +36,8 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Rebase and update branch
+      - name: Merge PR delta onto current upstream main
+        id: merge
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ matrix.pr }}
@@ -60,14 +47,14 @@ jobs:
 
           git config user.name "Xipong"
           git config user.email "217837358+Xipong@users.noreply.github.com"
-          git config rerere.enabled true
-          git remote add upstream https://github.com/NousResearch/hermes-agent.git
+          git remote add upstream https://github.com/NousResearch/hermes-agent.git 2>/dev/null || true
           git fetch --no-tags upstream main
 
           pr_json="$(gh api "repos/NousResearch/hermes-agent/pulls/${PR_NUMBER}")"
           target_branch="$(jq -r '.head.ref' <<<"${pr_json}")"
           head_repo="$(jq -r '.head.repo.full_name' <<<"${pr_json}")"
           expected_head="$(jq -r '.head.sha' <<<"${pr_json}")"
+          title="$(jq -r '.title' <<<"${pr_json}")"
           is_draft="$(jq -r '.draft' <<<"${pr_json}")"
           state="$(jq -r '.state' <<<"${pr_json}")"
 
@@ -87,52 +74,73 @@ jobs:
             exit 42
           fi
 
-          git checkout --detach "${actual_head}"
+          upstream_main="$(git rev-parse refs/remotes/upstream/main)"
+          merge_base="$(git merge-base "${upstream_main}" "${actual_head}")"
+          mapfile -d '' changed_paths < <(git diff --name-only -z "${merge_base}" "${actual_head}")
 
-          if ! git rebase --rebase-merges refs/remotes/upstream/main; then
-            diag_root="$(mktemp -d)"
-            mkdir -p "${diag_root}/rebase-conflicts"
-            git status --porcelain=v2 > "${diag_root}/rebase-conflicts/status.txt" || true
-            git ls-files -u > "${diag_root}/rebase-conflicts/index-stages.txt" || true
-            git diff --cc > "${diag_root}/rebase-conflicts/combined.diff" || true
-            git log --oneline --decorate -30 > "${diag_root}/rebase-conflicts/recent-commits.txt" || true
-            printf '%s\n' \
-              "pr=${PR_NUMBER}" \
-              "source_branch=${target_branch}" \
-              "expected_head=${expected_head}" \
-              "upstream_main=$(git rev-parse refs/remotes/upstream/main)" \
-              "run_id=${GITHUB_RUN_ID}" \
-              > "${diag_root}/rebase-conflicts/metadata.txt"
+          git checkout --detach "${upstream_main}"
+          set +e
+          git merge --no-commit --no-ff "${actual_head}"
+          merge_rc=$?
+          set -e
 
-            while IFS= read -r -d '' path; do
-              for side in base ours theirs; do
-                case "${side}" in
-                  base) stage=1 ;;
-                  ours) stage=2 ;;
-                  theirs) stage=3 ;;
-                esac
-                mkdir -p "${diag_root}/rebase-conflicts/${side}/$(dirname "${path}")"
-                git show ":${stage}:${path}" > "${diag_root}/rebase-conflicts/${side}/${path}" 2>/dev/null || true
-              done
-              if [[ -f "${path}" ]]; then
-                mkdir -p "${diag_root}/rebase-conflicts/worktree/$(dirname "${path}")"
-                cp "${path}" "${diag_root}/rebase-conflicts/worktree/${path}"
-              fi
-            done < <(git diff --name-only --diff-filter=U -z)
-
-            git rebase --abort || true
-            diag_branch="diagnostics/rebase-${PR_NUMBER}-${GITHUB_RUN_ID}"
-            git switch --orphan "${diag_branch}"
-            git rm -rf . >/dev/null 2>&1 || true
-            git clean -fdx >/dev/null 2>&1 || true
-            cp -a "${diag_root}/rebase-conflicts" .
-            git add rebase-conflicts
-            git commit -m "chore: capture PR ${PR_NUMBER} rebase conflicts"
-            git push --force origin "HEAD:refs/heads/${diag_branch}"
-            echo "Rebase conflict diagnostics: ${diag_branch}" >&2
-            exit 43
+          if [[ ${merge_rc} -eq 0 ]]; then
+            tree="$(git write-tree)"
+            new_head="$(printf '%s\n' "${title}" | git commit-tree "${tree}" -p "${upstream_main}")"
+            echo "PR ${PR_NUMBER}: ${target_branch}: ${expected_head} -> ${new_head}"
+            git push --force-with-lease="refs/heads/${target_branch}:${expected_head}" origin "${new_head}:refs/heads/${target_branch}"
+            echo "conflict=false" >> "${GITHUB_OUTPUT}"
+            exit 0
           fi
 
-          new_head="$(git rev-parse HEAD)"
-          echo "PR ${PR_NUMBER}: ${target_branch}: ${expected_head} -> ${new_head}"
-          git push --force-with-lease="refs/heads/${target_branch}:${expected_head}" origin "HEAD:refs/heads/${target_branch}"
+          bundle="conflict-bundle"
+          mkdir -p "${bundle}/result" "${bundle}/stages/base" "${bundle}/stages/ours" "${bundle}/stages/theirs" "${bundle}/worktree"
+          printf '%s\n' \
+            "pr=${PR_NUMBER}" \
+            "source_branch=${target_branch}" \
+            "expected_head=${expected_head}" \
+            "upstream_main=${upstream_main}" \
+            "merge_base=${merge_base}" \
+            "run_id=${GITHUB_RUN_ID}" \
+            > "${bundle}/metadata.txt"
+          git status --porcelain=v2 > "${bundle}/status.txt" || true
+          git ls-files -u > "${bundle}/index-stages.txt" || true
+          git diff --cc > "${bundle}/combined.diff" || true
+          git diff --name-only --diff-filter=U > "${bundle}/conflicted-paths.txt" || true
+          git diff --name-status "${merge_base}" "${actual_head}" > "${bundle}/pr-paths.txt" || true
+
+          for path in "${changed_paths[@]}"; do
+            if [[ -e "${path}" || -L "${path}" ]]; then
+              mkdir -p "${bundle}/result/$(dirname "${path}")"
+              cp -a "${path}" "${bundle}/result/${path}"
+            else
+              printf '%s\n' "${path}" >> "${bundle}/deleted-paths.txt"
+            fi
+          done
+
+          while IFS= read -r -d '' path; do
+            for side in base ours theirs; do
+              case "${side}" in
+                base) stage=1 ;;
+                ours) stage=2 ;;
+                theirs) stage=3 ;;
+              esac
+              mkdir -p "${bundle}/stages/${side}/$(dirname "${path}")"
+              git show ":${stage}:${path}" > "${bundle}/stages/${side}/${path}" 2>/dev/null || true
+            done
+            if [[ -e "${path}" || -L "${path}" ]]; then
+              mkdir -p "${bundle}/worktree/$(dirname "${path}")"
+              cp -a "${path}" "${bundle}/worktree/${path}"
+            fi
+          done < <(git diff --name-only --diff-filter=U -z)
+
+          echo "conflict=true" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload conflict bundle
+        if: steps.merge.outputs.conflict == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: rebase-${{ matrix.pr }}-${{ github.run_id }}
+          path: conflict-bundle
+          if-no-files-found: error
+          retention-days: 1
