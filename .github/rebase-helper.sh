@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# trigger: 106142
 TARGET_BRANCH="fix/wsl12-server-global-fanout"
 EXPECTED_HEAD="b6bdd300a1df285fb6be1e90accc85ddfb2e8825"
 
