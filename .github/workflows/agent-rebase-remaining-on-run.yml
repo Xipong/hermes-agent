@@ -4,6 +4,7 @@ on:
   workflow_run:
     workflows:
       - Skills Index Freshness Check
+      - Build Skills Index
     types:
       - completed
   pull_request_target:
