@@ -387,7 +387,7 @@ export function ChatRuntimeBoundary({
             const current = view.$messages.get()
 
             if (mergeOlderTranscriptPage(current, olderPage) === current) {
-              return
+              return false
             }
 
             beforePrepend?.()
@@ -398,6 +398,8 @@ export function ChatRuntimeBoundary({
 
               return grew ? { ...state, messages: merged } : state
             })
+
+            return grew
           }
         })
 
