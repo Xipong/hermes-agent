@@ -1,18 +1,18 @@
 name: Skills Index Freshness Check
 
 on:
-  workflow_run:
-    workflows:
-      - Codex phase follow-up workbench
-    types:
-      - completed
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/skills-index-freshness.yml
   workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: agent-rebase-selected-prs-120286-122179
+  group: agent-rebase-selected-prs-106252-123218
   cancel-in-progress: false
 
 jobs:
@@ -25,13 +25,12 @@ jobs:
       fail-fast: false
       matrix:
         pr:
-          - 120286
-          - 120373
-          - 120894
-          - 121990
-          - 122141
-          - 122176
-          - 122179
+          - 106252
+          - 106917
+          - 107299
+          - 107350
+          - 107713
+          - 123218
 
     steps:
       - uses: actions/checkout@v4
@@ -40,7 +39,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Rebase PR branch onto current upstream main
+      - name: Rebase PR branch onto its current upstream base
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ matrix.pr }}
@@ -59,32 +58,37 @@ jobs:
           source_branch="$(jq -r '.head.ref' <<<"${pr_json}")"
           head_repo="$(jq -r '.head.repo.full_name' <<<"${pr_json}")"
           expected_head="$(jq -r '.head.sha' <<<"${pr_json}")"
+          base_branch="$(jq -r '.base.ref' <<<"${pr_json}")"
+          base_repo="$(jq -r '.base.repo.full_name' <<<"${pr_json}")"
           state="$(jq -r '.state' <<<"${pr_json}")"
           draft="$(jq -r '.draft' <<<"${pr_json}")"
 
           test "$head_repo" = "Xipong/hermes-agent"
+          test "$base_repo" = "NousResearch/hermes-agent"
           test "$state" = "open"
           test "$draft" = "false"
 
-          git fetch --no-tags upstream main
-          upstream_head="$(git rev-parse refs/remotes/upstream/main)"
+          git fetch --no-tags upstream "+refs/heads/${base_branch}:refs/remotes/upstream/${base_branch}"
+          base_ref="refs/remotes/upstream/${base_branch}"
+          base_head="$(git rev-parse "$base_ref")"
           git fetch --no-tags origin "+refs/heads/${source_branch}:refs/remotes/origin/${source_branch}"
           test "$(git rev-parse "refs/remotes/origin/${source_branch}")" = "$expected_head"
 
           git checkout -B "$source_branch" "refs/remotes/origin/${source_branch}"
-          if git merge-base --is-ancestor refs/remotes/upstream/main HEAD; then
-            printf 'PR %s already contains upstream %s\n' "$PR_NUMBER" "$upstream_head"
+          if git merge-base --is-ancestor "$base_ref" HEAD; then
+            printf 'PR %s already contains %s at %s\n' "$PR_NUMBER" "$base_branch" "$base_head"
             exit 0
           fi
 
-          fork_point="$(git merge-base HEAD refs/remotes/upstream/main)"
-          git rebase --rebase-merges -X theirs --onto refs/remotes/upstream/main "$fork_point"
+          fork_point="$(git merge-base HEAD "$base_ref")"
+          git rebase --rebase-merges -X theirs --onto "$base_ref" "$fork_point"
 
-          git diff --check refs/remotes/upstream/main...HEAD
+          git diff --check "$base_ref"...HEAD
+          test -z "$(git status --porcelain)"
           new_head="$(git rev-parse HEAD)"
           if test "$new_head" = "$expected_head"; then
-            printf 'PR %s unchanged at %s on upstream %s\n' "$PR_NUMBER" "$new_head" "$upstream_head"
+            printf 'PR %s unchanged at %s on %s %s\n' "$PR_NUMBER" "$new_head" "$base_branch" "$base_head"
             exit 0
           fi
           git push --force-with-lease="refs/heads/${source_branch}:${expected_head}" origin "HEAD:refs/heads/${source_branch}"
-          printf 'PR %s: %s -> %s on upstream %s\n' "$PR_NUMBER" "$expected_head" "$new_head" "$upstream_head"
+          printf 'PR %s: %s -> %s on %s %s\n' "$PR_NUMBER" "$expected_head" "$new_head" "$base_branch" "$base_head"
