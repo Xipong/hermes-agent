@@ -87,7 +87,7 @@ import {
   mergeOlderTranscriptPage,
   transcriptBackfillAvailable
 } from './transcript-backfill'
-import { advanceSessionTranscriptWindow, type SessionWindowMemo } from './transcript-window'
+import { advanceSessionTranscriptWindow, nextTranscriptWindowPages, type SessionWindowMemo } from './transcript-window'
 import { useChatBarState } from './use-chat-bar-state'
 import { useTranscriptRetention } from './use-transcript-retention'
 
@@ -406,8 +406,21 @@ export function ChatRuntimeBoundary({
         return grew
       }
 
+      // A heavy active turn can keep the 30-message minimum even when one
+      // additional weight page is requested. Calculate the first page count
+      // that actually exposes an older row before capturing the scroll anchor:
+      // an unchanged window must never leave list.tsx's commit guard parked.
+      const windowState = windowStateRef.current.get(runtimeIdRef.current ?? '')?.state
+      const nextPages = windowState
+        ? nextTranscriptWindowPages(view.$messages.get(), windowState.window, windowState.pages)
+        : null
+
+      if (nextPages === null) {
+        return false
+      }
+
       beforePrepend?.()
-      setWindowPages(pages => pages + 1)
+      setWindowPages(pages => Math.max(pages + 1, nextPages))
 
       return true
     },
