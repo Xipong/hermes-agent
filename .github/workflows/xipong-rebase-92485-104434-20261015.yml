@@ -1,6 +1,9 @@
 name: Xipong prepare rebases 92485 and 104434
 
 on:
+  issue_comment:
+    types:
+      - created
   push:
     branches:
       - main
@@ -12,6 +15,7 @@ permissions:
 
 jobs:
   prepare:
+    if: github.event_name == 'push' || (github.event.issue.pull_request && github.event.comment.body == '/xipong-prepare-92485-104434')
     name: Prepare PR ${{ matrix.pr }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
