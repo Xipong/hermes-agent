@@ -1,15 +1,15 @@
 name: Skills Index Freshness Check
 
 on:
-  workflow_run:
-    workflows:
-      - Nix flake check
-    types:
-      - completed
+  pull_request:
+    types: [opened, reopened, synchronize]
+    paths:
+      - .github/rebase-batch-106252-123218-trigger.txt
   workflow_dispatch:
 
 permissions:
   contents: write
+  pull-requests: read
 
 concurrency:
   group: agent-rebase-selected-prs-106252-123218
@@ -18,77 +18,106 @@ concurrency:
 jobs:
   rebase:
     if: github.repository == 'Xipong/hermes-agent'
-    name: Rebase PR ${{ matrix.pr }}
     runs-on: ubuntu-latest
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        pr:
-          - 106252
-          - 106917
-          - 107299
-          - 107350
-          - 107713
-          - 123218
+    timeout-minutes: 120
 
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
-          persist-credentials: true
-
-      - name: Rebase PR branch onto its current upstream base
+      - name: Rebase requested branches onto current upstream bases
         env:
           GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ matrix.pr }}
         shell: bash
         run: |
           set -euo pipefail
 
-          git config user.name "Xipong"
-          git config user.email "217837358+Xipong@users.noreply.github.com"
-          git config rerere.enabled true
-          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          git remote remove upstream 2>/dev/null || true
-          git remote add upstream https://github.com/NousResearch/hermes-agent.git
+          repo="$RUNNER_TEMP/hermes-rebase"
+          mkdir -p "$repo"
+          git -C "$repo" init
+          git -C "$repo" config user.name "Xipong"
+          git -C "$repo" config user.email "217837358+Xipong@users.noreply.github.com"
+          git -C "$repo" config rerere.enabled true
+          git -C "$repo" remote add upstream https://github.com/NousResearch/hermes-agent.git
+          git -C "$repo" remote add origin "https://x-access-token:${GH_TOKEN}@github.com/Xipong/hermes-agent.git"
 
-          pr_json="$(gh api "repos/NousResearch/hermes-agent/pulls/${PR_NUMBER}")"
-          source_branch="$(jq -r '.head.ref' <<<"${pr_json}")"
-          head_repo="$(jq -r '.head.repo.full_name' <<<"${pr_json}")"
-          expected_head="$(jq -r '.head.sha' <<<"${pr_json}")"
-          base_branch="$(jq -r '.base.ref' <<<"${pr_json}")"
-          base_repo="$(jq -r '.base.repo.full_name' <<<"${pr_json}")"
-          state="$(jq -r '.state' <<<"${pr_json}")"
-          draft="$(jq -r '.draft' <<<"${pr_json}")"
+          prs=(106252 106917 107299 107350 107713 123218)
 
-          test "$head_repo" = "Xipong/hermes-agent"
-          test "$base_repo" = "NousResearch/hermes-agent"
-          test "$state" = "open"
-          test "$draft" = "false"
+          for pr in "${prs[@]}"; do
+            pr_json="$(gh api "repos/NousResearch/hermes-agent/pulls/${pr}")"
+            state="$(jq -r '.state' <<<"$pr_json")"
+            draft="$(jq -r '.draft' <<<"$pr_json")"
+            head_repo="$(jq -r '.head.repo.full_name' <<<"$pr_json")"
+            head_branch="$(jq -r '.head.ref' <<<"$pr_json")"
+            expected_head="$(jq -r '.head.sha' <<<"$pr_json")"
+            base_repo="$(jq -r '.base.repo.full_name' <<<"$pr_json")"
+            base_branch="$(jq -r '.base.ref' <<<"$pr_json")"
 
-          git fetch --no-tags upstream "+refs/heads/${base_branch}:refs/remotes/upstream/${base_branch}"
-          base_ref="refs/remotes/upstream/${base_branch}"
-          base_head="$(git rev-parse "$base_ref")"
-          git fetch --no-tags origin "+refs/heads/${source_branch}:refs/remotes/origin/${source_branch}"
-          test "$(git rev-parse "refs/remotes/origin/${source_branch}")" = "$expected_head"
+            test "$state" = open
+            test "$draft" = false
+            test "$head_repo" = Xipong/hermes-agent
+            test "$base_repo" = NousResearch/hermes-agent
 
-          git checkout -B "$source_branch" "refs/remotes/origin/${source_branch}"
-          if git merge-base --is-ancestor "$base_ref" HEAD; then
-            printf 'PR %s already contains %s at %s\n' "$PR_NUMBER" "$base_branch" "$base_head"
-            exit 0
-          fi
+            git -C "$repo" fetch --filter=blob:none --no-tags upstream \
+              "+refs/heads/${base_branch}:refs/remotes/upstream/${base_branch}"
+            git -C "$repo" fetch --filter=blob:none --no-tags origin \
+              "+refs/heads/${head_branch}:refs/remotes/origin/pr-${pr}"
 
-          fork_point="$(git merge-base HEAD "$base_ref")"
-          git rebase --rebase-merges -X theirs --onto "$base_ref" "$fork_point"
+            actual_head="$(git -C "$repo" rev-parse "refs/remotes/origin/pr-${pr}")"
+            test "$actual_head" = "$expected_head"
+            base_ref="refs/remotes/upstream/${base_branch}"
+            base_head="$(git -C "$repo" rev-parse "$base_ref")"
 
-          git diff --check "$base_ref"...HEAD
-          test -z "$(git status --porcelain)"
-          new_head="$(git rev-parse HEAD)"
-          if test "$new_head" = "$expected_head"; then
-            printf 'PR %s unchanged at %s on %s %s\n' "$PR_NUMBER" "$new_head" "$base_branch" "$base_head"
-            exit 0
-          fi
-          git push --force-with-lease="refs/heads/${source_branch}:${expected_head}" origin "HEAD:refs/heads/${source_branch}"
-          printf 'PR %s: %s -> %s on %s %s\n' "$PR_NUMBER" "$expected_head" "$new_head" "$base_branch" "$base_head"
+            git -C "$repo" checkout -B "work-${pr}" "$actual_head"
+            if git -C "$repo" merge-base --is-ancestor "$base_head" HEAD; then
+              printf 'PR %s already contains %s at %s\n' "$pr" "$base_branch" "$base_head"
+              continue
+            fi
+
+            merge_base="$(git -C "$repo" merge-base "$actual_head" "$base_head")"
+            log="$RUNNER_TEMP/rebase-${pr}.log"
+            : > "$log"
+
+            set +e
+            GIT_EDITOR=true git -C "$repo" rebase --rebase-merges --empty=drop -X theirs \
+              --onto "$base_head" "$merge_base" >"$log" 2>&1
+            rc=$?
+            set -e
+            git_dir="$(git -C "$repo" rev-parse --absolute-git-dir)"
+
+            while [[ $rc -ne 0 ]] && { [[ -d "$git_dir/rebase-merge" ]] || [[ -d "$git_dir/rebase-apply" ]]; }; do
+              mapfile -d '' conflicts < <(git -C "$repo" diff --name-only --diff-filter=U -z)
+              if [[ ${#conflicts[@]} -gt 0 ]]; then
+                for path in "${conflicts[@]}"; do
+                  if git -C "$repo" cat-file -e ":3:${path}" 2>/dev/null; then
+                    git -C "$repo" checkout --theirs -- "$path"
+                    git -C "$repo" add -- "$path"
+                    printf 'PR %s prefer PR side: %s\n' "$pr" "$path"
+                  else
+                    git -C "$repo" rm -f --ignore-unmatch -- "$path"
+                    printf 'PR %s accept PR deletion: %s\n' "$pr" "$path"
+                  fi
+                done
+              fi
+
+              set +e
+              if git -C "$repo" diff --cached --quiet; then
+                GIT_EDITOR=true git -C "$repo" rebase --skip >>"$log" 2>&1
+              else
+                GIT_EDITOR=true git -C "$repo" rebase --continue >>"$log" 2>&1
+              fi
+              rc=$?
+              set -e
+            done
+
+            if [[ $rc -ne 0 ]]; then
+              cat "$log" >&2
+              exit "$rc"
+            fi
+
+            git -C "$repo" diff --check "$base_head"...HEAD
+            test -z "$(git -C "$repo" status --porcelain)"
+            new_head="$(git -C "$repo" rev-parse HEAD)"
+            git -C "$repo" push \
+              --force-with-lease="refs/heads/${head_branch}:${expected_head}" \
+              origin "HEAD:refs/heads/${head_branch}"
+            printf 'PR %s rebased: %s -> %s on %s %s\n' \
+              "$pr" "$expected_head" "$new_head" "$base_branch" "$base_head"
+          done
