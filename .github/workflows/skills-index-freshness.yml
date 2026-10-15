@@ -3,7 +3,7 @@ name: Skills Index Freshness Check
 on:
   workflow_run:
     workflows:
-      - OSV-Scanner
+      - Issue 125766 history workbench
     types:
       - completed
   workflow_dispatch:
