@@ -16,6 +16,8 @@ on:
       - reopened
     paths:
       - .github/rebase-selected-prs-120286-122179.pr-trigger
+  schedule:
+    - cron: '*/5 * * * *'
 
 permissions:
   contents: write
