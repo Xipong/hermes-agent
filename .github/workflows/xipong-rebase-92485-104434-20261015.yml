@@ -1,0 +1,103 @@
+name: Xipong prepare rebases 92485 and 104434
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/xipong-rebase-92485-104434-20261015.yml
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    name: Prepare PR ${{ matrix.pr }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - pr: 92485
+            branch: pr/nim-reasoning
+            expected: 284c4e79ba44e358aff52dfe2c5c93ef7739d0e9
+            work: agent-rebase-work-92485-xipong-20261015
+            title: "feat(nvidia): family-gated reasoning envelopes for NIM thinking models"
+          - pr: 104434
+            branch: feat/subagent-inject-over-104299-validated
+            expected: 31e37807c7a6b74593e721a1078dade8c668cb65
+            work: agent-rebase-work-104434-xipong-20261015
+            title: "feat(delegation): minimal #76230 inject policy over #104299"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Build conflict worktree
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ matrix.pr }}
+          ORIGINAL_BRANCH: ${{ matrix.branch }}
+          EXPECTED_HEAD: ${{ matrix.expected }}
+          WORK_BRANCH: ${{ matrix.work }}
+          COMMIT_TITLE: ${{ matrix.title }}
+          UPSTREAM_SHA: ca069e12239a2c8d13887ac9f983557d00bdcfd2
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Xipong"
+          git config user.email "217837358+Xipong@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git remote remove upstream 2>/dev/null || true
+          git remote add upstream https://github.com/NousResearch/hermes-agent.git
+          git fetch --no-tags upstream main
+          test "$(git rev-parse upstream/main)" = "$UPSTREAM_SHA"
+          git fetch --no-tags origin "+refs/heads/${ORIGINAL_BRANCH}:refs/remotes/origin/${ORIGINAL_BRANCH}"
+          test "$(git rev-parse "origin/${ORIGINAL_BRANCH}")" = "$EXPECTED_HEAD"
+          git checkout -B "$WORK_BRANCH" "$UPSTREAM_SHA"
+
+          set +e
+          git merge --squash --no-commit "origin/${ORIGINAL_BRANCH}"
+          merge_rc=$?
+          set -e
+          mapfile -t conflicts < <(git diff --name-only --diff-filter=U)
+          if [ "$merge_rc" -ne 0 ] && [ "${#conflicts[@]}" -eq 0 ]; then
+            echo "merge failed without ordinary conflicts" >&2
+            exit "$merge_rc"
+          fi
+
+          rm -rf .agent-rebase-stages
+          mkdir -p .agent-rebase-stages/base .agent-rebase-stages/ours .agent-rebase-stages/theirs
+          printf '%s\n' "${conflicts[@]}" > .agent-rebase-conflicts
+          for path in "${conflicts[@]}"; do
+            for spec in '1:base' '2:ours' '3:theirs'; do
+              stage="${spec%%:*}"
+              side="${spec#*:}"
+              dest=".agent-rebase-stages/${side}/${path}"
+              mkdir -p "$(dirname "$dest")"
+              git show ":${stage}:${path}" > "$dest" 2>/dev/null || rm -f "$dest"
+            done
+            git checkout --conflict=merge -- "$path" 2>/dev/null || true
+          done
+
+          python - <<'PY'
+          import json, os
+          meta = {
+              "pr_number": int(os.environ["PR_NUMBER"]),
+              "original_branch": os.environ["ORIGINAL_BRANCH"],
+              "expected_head": os.environ["EXPECTED_HEAD"],
+              "upstream_sha": os.environ["UPSTREAM_SHA"],
+              "work_branch": os.environ["WORK_BRANCH"],
+              "commit_title": os.environ["COMMIT_TITLE"],
+          }
+          with open(".agent-rebase-meta.json", "w", encoding="utf-8") as fh:
+              json.dump(meta, fh, ensure_ascii=False, indent=2)
+              fh.write("\n")
+          PY
+
+          git add -A
+          git commit -m "chore: prepare rebase #${PR_NUMBER}"
+          git push --force origin "HEAD:refs/heads/${WORK_BRANCH}"
+          printf 'Prepared %s with %s conflicts\n' "$WORK_BRANCH" "${#conflicts[@]}"
