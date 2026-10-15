@@ -1,0 +1,143 @@
+name: Rebase PRs 107739-109474
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/rebase-prs-107739-109474.trigger
+
+permissions:
+  contents: write
+
+jobs:
+  rebase:
+    if: github.repository == 'Xipong/hermes-agent'
+    name: Rebase PR ${{ matrix.pr }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        pr:
+          - 107739
+          - 107842
+          - 108240
+          - 108661
+          - 109291
+          - 109330
+          - 109332
+          - 109351
+          - 109402
+          - 109474
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Rebase or prepare conflict branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ matrix.pr }}
+          UPSTREAM_SHA: 30463589eb54fa0f48724594cc0e98e6b995729b
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "Xipong"
+          git config user.email "217837358+Xipong@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git remote remove upstream 2>/dev/null || true
+          git remote add upstream https://github.com/NousResearch/hermes-agent.git
+          git fetch --no-tags upstream main
+          test "$(git rev-parse upstream/main)" = "$UPSTREAM_SHA"
+
+          pr_json="$(gh api "repos/NousResearch/hermes-agent/pulls/${PR_NUMBER}")"
+          source_branch="$(jq -r '.head.ref' <<<"${pr_json}")"
+          head_repo="$(jq -r '.head.repo.full_name' <<<"${pr_json}")"
+          expected_head="$(jq -r '.head.sha' <<<"${pr_json}")"
+          title="$(jq -r '.title' <<<"${pr_json}")"
+          state="$(jq -r '.state' <<<"${pr_json}")"
+          draft="$(jq -r '.draft' <<<"${pr_json}")"
+
+          test "$head_repo" = "Xipong/hermes-agent"
+          test "$state" = "open"
+          test "$draft" = "false"
+
+          git fetch --no-tags origin "+refs/heads/${source_branch}:refs/remotes/origin/${source_branch}"
+          test "$(git rev-parse "refs/remotes/origin/${source_branch}")" = "$expected_head"
+
+          merge_base="$(git merge-base "$UPSTREAM_SHA" "$expected_head")"
+          local_branch="agent-rebase-${PR_NUMBER}-20261015"
+          git checkout -B "$local_branch" "$expected_head"
+
+          set +e
+          GIT_EDITOR=true git rebase --onto "$UPSTREAM_SHA" "$merge_base"
+          rebase_rc=$?
+          set -e
+
+          if [[ $rebase_rc -eq 0 ]]; then
+            new_head="$(git rev-parse HEAD)"
+            git push --force-with-lease="refs/heads/${source_branch}:${expected_head}" origin "HEAD:refs/heads/${source_branch}"
+            echo "PR ${PR_NUMBER}: ${expected_head} -> ${new_head}"
+            exit 0
+          fi
+
+          git rebase --abort || true
+          work_branch="agent-rebase-work-${PR_NUMBER}-20261015b"
+          git checkout -B "$work_branch" "$UPSTREAM_SHA"
+
+          set +e
+          git merge --squash --no-commit "$expected_head"
+          merge_rc=$?
+          set -e
+
+          mapfile -t conflicts < <(git diff --name-only --diff-filter=U)
+          if [[ $merge_rc -ne 0 && ${#conflicts[@]} -eq 0 ]]; then
+            echo "merge failed without ordinary file conflicts" >&2
+            exit "$merge_rc"
+          fi
+
+          if [[ ${#conflicts[@]} -eq 0 ]]; then
+            git commit -m "$title"
+            new_head="$(git rev-parse HEAD)"
+            git push --force-with-lease="refs/heads/${source_branch}:${expected_head}" origin "HEAD:refs/heads/${source_branch}"
+            echo "PR ${PR_NUMBER}: rebased via clean squash ${expected_head} -> ${new_head}"
+            exit 0
+          fi
+
+          rm -rf .agent-rebase-stages
+          mkdir -p .agent-rebase-stages/base .agent-rebase-stages/ours .agent-rebase-stages/theirs
+          printf '%s\n' "${conflicts[@]}" > .agent-rebase-conflicts
+
+          for path in "${conflicts[@]}"; do
+            for spec in '1:base' '2:ours' '3:theirs'; do
+              stage="${spec%%:*}"
+              side="${spec#*:}"
+              dest=".agent-rebase-stages/${side}/${path}"
+              mkdir -p "$(dirname "$dest")"
+              git show ":${stage}:${path}" > "$dest" 2>/dev/null || rm -f "$dest"
+            done
+            git checkout --conflict=merge -- "$path" 2>/dev/null || true
+          done
+
+          python - "$PR_NUMBER" "$source_branch" "$expected_head" "$UPSTREAM_SHA" "$title" <<'PY'
+          import json, sys
+          _, pr, source, expected, upstream, title = sys.argv
+          with open('.agent-rebase-meta.json', 'w', encoding='utf-8') as fh:
+              json.dump({
+                  'pr_number': int(pr),
+                  'source_branch': source,
+                  'expected_head': expected,
+                  'upstream_sha': upstream,
+                  'title': title,
+              }, fh, ensure_ascii=False, indent=2)
+              fh.write('\n')
+          PY
+
+          git add -A
+          git commit -m "chore: prepare rebase #${PR_NUMBER}"
+          git push --force origin "HEAD:refs/heads/${work_branch}"
+          echo "Prepared ${work_branch}; conflicts=${#conflicts[@]}"
