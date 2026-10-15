@@ -3,39 +3,39 @@
   "upstream_sha": "ca069e12239a2c8d13887ac9f983557d00bdcfd2",
   "prs": [
     {
-      "pr_number": 123156,
-      "original_branch": "fix/compose-personality-standing-prompt",
-      "expected_head": "8ad80ddfde34d97343ab44d5029f219e3cc1361b",
-      "commit_title": "fix(personality): compose standing prompt with selected style",
-      "work_branch": "agent-rebase-work-123156-20261015"
+      "pr_number": 110395,
+      "original_branch": "feat/mcp-profile-discovery",
+      "expected_head": "00b0f1f6a3e73e5b35a8c8fc379274ed90a2dbba",
+      "commit_title": "feat(desktop): discover local MCP servers and enable per profile",
+      "work_branch": "agent-rebase-work-110395-20261015-2"
     },
     {
-      "pr_number": 123218,
-      "original_branch": "fix/peer-inbox-consume-after-acceptance",
-      "expected_head": "27dbf4d9581b57053fac9362dc831bbf72930888",
-      "commit_title": "feat(peer-messaging): project discovery, tool-data inbox, replies and ACKs",
-      "work_branch": "agent-rebase-work-123218-20261015"
+      "pr_number": 110447,
+      "original_branch": "fix/desktop-memory-recall",
+      "expected_head": "a793b8ed5f85cc7fbb54b75c3f4b3a546a844c9f",
+      "commit_title": "fix(desktop): show automatic memory recall in chat",
+      "work_branch": "agent-rebase-work-110447-20261015-2"
     },
     {
-      "pr_number": 123391,
-      "original_branch": "i18n/ru-polish-20260926",
-      "expected_head": "ec62375a49116f91367512e791916191fd8be23e",
-      "commit_title": "feat(i18n): consolidate and polish Russian Desktop, dashboard and gateway copy",
-      "work_branch": "agent-rebase-work-123391-20261015"
+      "pr_number": 112476,
+      "original_branch": "fix/bundled-skill-write-approval",
+      "expected_head": "01037fc4e9e4e3fdeb0ef8dafb1796646991172d",
+      "commit_title": "fix(skills): gate atomic managed writes and make approvals reviewable",
+      "work_branch": "agent-rebase-work-112476-20261015-2"
     },
     {
-      "pr_number": 125828,
-      "original_branch": "fix/desktop-goal-pasted-text",
-      "expected_head": "a70bb7d0ea42f2bd1e797b56b16adc66befe34af",
-      "commit_title": "fix(desktop): restore pasted attachments to editable command text",
-      "work_branch": "agent-rebase-work-125828-20261015"
+      "pr_number": 114565,
+      "original_branch": "fix/wsl-computer-use-host-target",
+      "expected_head": "484b5d73bd3f023faf9ea4cbb2a43aa6268cb538",
+      "commit_title": "fix(computer-use): persist and execute WSL Windows-host target",
+      "work_branch": "agent-rebase-work-114565-20261015-2"
     },
     {
-      "pr_number": 126704,
-      "original_branch": "fix/literal-preserving-memory-review",
-      "expected_head": "d419e2c7f8c86f6057686396c20dc3f8ec723d2e",
-      "commit_title": "fix(memory): save independent additions from staged background reviews",
-      "work_branch": "agent-rebase-work-126704-20261015"
+      "pr_number": 115087,
+      "original_branch": "fix/desktop-stale-subagent-roster",
+      "expected_head": "f8287d2c0461d8bd2470b76d27b8d20f7a251e4e",
+      "commit_title": "fix(desktop): reconcile stale subagent roster",
+      "work_branch": "agent-rebase-work-115087-20261015-2"
     }
   ]
 }
