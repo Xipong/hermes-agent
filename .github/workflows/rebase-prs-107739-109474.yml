@@ -3,9 +3,9 @@ name: Rebase PRs 107739-109474
 on:
   schedule:
     - cron: '*/5 * * * *'
-  issues:
+  issue_comment:
     types:
-      - opened
+      - created
   push:
     branches:
       - main
@@ -26,7 +26,7 @@ permissions:
 
 jobs:
   rebase:
-    if: github.repository == 'Xipong/hermes-agent' && (github.event_name != 'issues' || github.event.issue.title == 'automation: rebase PRs 107739-109474')
+    if: github.repository == 'Xipong/hermes-agent' && (github.event_name != 'issue_comment' || github.event.comment.body == '/run-rebase-107739-109474')
     name: Rebase PR ${{ matrix.pr }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
