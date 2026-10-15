@@ -1,6 +1,9 @@
 name: Agent rebase batch 123156-131830
 
 on:
+  issue_comment:
+    types:
+      - created
   schedule:
     - cron: '*/5 * * * *'
   push:
@@ -28,6 +31,7 @@ concurrency:
 
 jobs:
   rebase-helper:
+    if: github.event_name != 'issue_comment' || (github.event.issue.pull_request && github.event.comment.body == '/xipong-rebase-123156-131830')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
