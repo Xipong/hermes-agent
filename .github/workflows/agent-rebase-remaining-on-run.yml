@@ -1,8 +1,9 @@
-name: Agent rebase remaining selected PRs
+name: Agent rebase selected PRs
 
 on:
   workflow_run:
     workflows:
+      - Codex phase follow-up workbench
       - Skills Index Freshness Check
       - Build Skills Index
     types:
@@ -19,7 +20,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: agent-rebase-remaining-selected-prs
+  group: agent-rebase-selected-prs-120286-122179
   cancel-in-progress: false
 
 jobs:
@@ -31,11 +32,13 @@ jobs:
       fail-fast: false
       matrix:
         pr:
-          - 123156
-          - 123218
-          - 123391
-          - 125828
-          - 126704
+          - 120286
+          - 120373
+          - 120894
+          - 121990
+          - 122141
+          - 122176
+          - 122179
 
     steps:
       - uses: actions/checkout@v4
@@ -54,6 +57,7 @@ jobs:
 
           git config user.name "Xipong"
           git config user.email "217837358+Xipong@users.noreply.github.com"
+          git config rerere.enabled true
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git remote remove upstream 2>/dev/null || true
           git remote add upstream https://github.com/NousResearch/hermes-agent.git
@@ -75,15 +79,23 @@ jobs:
           test "$(git rev-parse "refs/remotes/origin/${source_branch}")" = "$expected_head"
 
           git checkout -B "$source_branch" "refs/remotes/origin/${source_branch}"
+          if git merge-base --is-ancestor refs/remotes/upstream/main HEAD; then
+            printf 'PR %s already contains upstream %s\n' "$PR_NUMBER" "$upstream_head"
+            exit 0
+          fi
+
           fork_point="$(git merge-base HEAD refs/remotes/upstream/main)"
 
-          # Preserve every branch-only commit, including the stacked peer-messaging base in #123218.
-          # On a genuinely overlapping hunk the PR side is authoritative; non-conflicting main edits
-          # are retained by the normal ort merge machinery.
-          git rebase --onto refs/remotes/upstream/main "$fork_point" -X theirs
+          # During rebase, "theirs" is the PR commit being replayed. Keep the PR's
+          # intent for directly overlapping hunks while ort retains every
+          # non-conflicting change from current main.
+          git rebase --rebase-merges -X theirs --onto refs/remotes/upstream/main "$fork_point"
 
           git diff --check refs/remotes/upstream/main...HEAD
           new_head="$(git rev-parse HEAD)"
-          test "$new_head" != "$expected_head"
+          if test "$new_head" = "$expected_head"; then
+            printf 'PR %s unchanged at %s on upstream %s\n' "$PR_NUMBER" "$new_head" "$upstream_head"
+            exit 0
+          fi
           git push --force-with-lease="refs/heads/${source_branch}:${expected_head}" origin "HEAD:refs/heads/${source_branch}"
           printf 'PR %s: %s -> %s on upstream %s\n' "$PR_NUMBER" "$expected_head" "$new_head" "$upstream_head"
