@@ -1,0 +1,81 @@
+name: Agent rebase remaining selected PRs
+
+on:
+  workflow_run:
+    workflows:
+      - Skills Index Freshness Check
+    types:
+      - completed
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent-rebase-remaining-selected-prs
+  cancel-in-progress: false
+
+jobs:
+  rebase:
+    if: github.repository == 'Xipong/hermes-agent'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        pr:
+          - 123156
+          - 123218
+          - 123391
+          - 125828
+          - 126704
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Rebase PR branch onto current upstream main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ matrix.pr }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "Xipong"
+          git config user.email "217837358+Xipong@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git remote remove upstream 2>/dev/null || true
+          git remote add upstream https://github.com/NousResearch/hermes-agent.git
+
+          pr_json="$(gh api "repos/NousResearch/hermes-agent/pulls/${PR_NUMBER}")"
+          source_branch="$(jq -r '.head.ref' <<<"${pr_json}")"
+          head_repo="$(jq -r '.head.repo.full_name' <<<"${pr_json}")"
+          expected_head="$(jq -r '.head.sha' <<<"${pr_json}")"
+          state="$(jq -r '.state' <<<"${pr_json}")"
+          draft="$(jq -r '.draft' <<<"${pr_json}")"
+
+          test "$head_repo" = "Xipong/hermes-agent"
+          test "$state" = "open"
+          test "$draft" = "false"
+
+          git fetch --no-tags upstream main
+          upstream_head="$(git rev-parse refs/remotes/upstream/main)"
+          git fetch --no-tags origin "+refs/heads/${source_branch}:refs/remotes/origin/${source_branch}"
+          test "$(git rev-parse "refs/remotes/origin/${source_branch}")" = "$expected_head"
+
+          git checkout -B "$source_branch" "refs/remotes/origin/${source_branch}"
+          fork_point="$(git merge-base HEAD refs/remotes/upstream/main)"
+
+          # Preserve every branch-only commit, including the stacked peer-messaging base in #123218.
+          # On a genuinely overlapping hunk the PR side is authoritative; non-conflicting main edits
+          # are retained by the normal ort merge machinery.
+          git rebase --onto refs/remotes/upstream/main "$fork_point" -X theirs
+
+          git diff --check refs/remotes/upstream/main...HEAD
+          new_head="$(git rev-parse HEAD)"
+          test "$new_head" != "$expected_head"
+          git push --force-with-lease="refs/heads/${source_branch}:${expected_head}" origin "HEAD:refs/heads/${source_branch}"
+          printf 'PR %s: %s -> %s on upstream %s\n' "$PR_NUMBER" "$expected_head" "$new_head" "$upstream_head"
