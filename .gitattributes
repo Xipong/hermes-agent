@@ -35,3 +35,8 @@ docker/entrypoint.sh text eol=lf
 *.html  text eol=lf
 *.svg   text eol=lf
 *.ps1   text eol=crlf
+
+# Temporary isolated rebase scratch policy for PR #121990.
+apps/desktop/src/app/session/hooks/use-session-actions/utils.ts merge=union
+apps/desktop/src/app/session/hooks/use-session-actions/utils.test.ts merge=union
+apps/desktop/src/lib/chat-messages/hydration.ts merge=union
