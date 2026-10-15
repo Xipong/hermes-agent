@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - workbench/pr119496-refresh
+  pull_request:
+    branches:
+      - workbench/pr119496-refresh
 
 permissions:
   contents: read
