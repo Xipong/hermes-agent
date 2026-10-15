@@ -58,7 +58,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ matrix.pr }}
-          UPSTREAM_SHA: ca069e12239a2c8d13887ac9f983557d00bdcfd2
+          UPSTREAM_SHA: 3dd9e4edfd389d931e9ea439a3ea09316cb73ae0
         shell: bash
         run: |
           set -euo pipefail
