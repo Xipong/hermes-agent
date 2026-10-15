@@ -6,6 +6,15 @@ on:
       - main
     paths:
       - .github/rebase-prs-107739-109474.trigger
+  pull_request_target:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+    paths:
+      - .github/rebase-prs-107739-109474.pr-trigger
 
 permissions:
   contents: write
