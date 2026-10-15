@@ -6,6 +6,13 @@ on:
       - Skills Index Freshness Check
     types:
       - completed
+  pull_request_target:
+    types:
+      - ready_for_review
+      - review_requested
+  pull_request_review:
+    types:
+      - submitted
 
 permissions:
   contents: write
