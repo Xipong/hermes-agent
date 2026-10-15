@@ -1,0 +1,25 @@
+name: Isolated PR rebase runner
+on:
+  pull_request:
+    branches: [workbench/rebase-runner-base]
+permissions:
+  contents: write
+jobs:
+  probe:
+    if: github.repository == 'Xipong/hermes-agent'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 1
+      - name: Probe selected rebases
+        run: python workbench/rebase_runner.py
+      - name: Preserve conflict and range-diff receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: rebase-runner-results
+          path: ${{ runner.temp }}/rebase-runner-results/
+          if-no-files-found: error
+          retention-days: 7
