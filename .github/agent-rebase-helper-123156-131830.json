@@ -5,5 +5,6 @@
   "expected_head": "8ad80ddfde34d97343ab44d5029f219e3cc1361b",
   "upstream_sha": "ca069e12239a2c8d13887ac9f983557d00bdcfd2",
   "commit_title": "fix(personality): compose standing prompt with selected style",
-  "work_branch": "agent-rebase-work-123156-20261015"
+  "work_branch": "agent-rebase-work-123156-20261015",
+  "trigger_nonce": 1
 }
