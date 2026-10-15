@@ -9,6 +9,15 @@ on:
       - main
     paths:
       - .github/rebase-selected-prs-active.trigger
+  pull_request_target:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+    paths:
+      - .github/rebase-selected-prs-active.pr-trigger
 
 permissions:
   contents: write
