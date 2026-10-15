@@ -1,0 +1,123 @@
+name: Agent rebase helper
+
+on:
+  push:
+    branches:
+      - tmp/rebase-upstream-main-20261015
+    paths:
+      - .github/workflows/agent-rebase.yml
+      - .agent-rebase.json
+
+permissions:
+  contents: write
+
+jobs:
+  rebase:
+    if: ${{ hashFiles('.agent-rebase.json') != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prepare or finalize rebase
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          eval "$(python - <<'PY'
+          import json, os, shlex
+          with open('.agent-rebase.json', encoding='utf-8') as fh:
+              cfg = json.load(fh)
+          required = ('action', 'pr_number', 'original_branch', 'expected_head', 'upstream_sha', 'commit_title')
+          missing = [key for key in required if not cfg.get(key)]
+          if missing:
+              raise SystemExit(f"missing config keys: {', '.join(missing)}")
+          cfg.setdefault('work_branch', f"agent-rebase-work-{cfg['pr_number']}")
+          for key, value in cfg.items():
+              name = key.upper()
+              if isinstance(value, bool):
+                  value = 'true' if value else 'false'
+              print(f"export {name}={shlex.quote(str(value))}")
+          PY
+          )"
+
+          git config user.name "Xipong rebase helper"
+          git config user.email "217837358+Xipong@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git remote remove upstream 2>/dev/null || true
+          git remote add upstream https://github.com/NousResearch/hermes-agent.git
+          git fetch --no-tags upstream main
+          test "$(git rev-parse upstream/main)" = "$UPSTREAM_SHA"
+          git fetch --no-tags origin "+refs/heads/${ORIGINAL_BRANCH}:refs/remotes/origin/${ORIGINAL_BRANCH}"
+
+          if [ "$ACTION" = prepare ]; then
+            test "$(git rev-parse "origin/${ORIGINAL_BRANCH}")" = "$EXPECTED_HEAD"
+            git checkout -B "$WORK_BRANCH" "$UPSTREAM_SHA"
+
+            set +e
+            git merge --squash --no-commit "origin/${ORIGINAL_BRANCH}"
+            merge_rc=$?
+            set -e
+
+            mapfile -t conflicts < <(git diff --name-only --diff-filter=U)
+            if [ "$merge_rc" -ne 0 ] && [ "${#conflicts[@]}" -eq 0 ]; then
+              echo "merge failed without ordinary file conflicts" >&2
+              exit "$merge_rc"
+            fi
+
+            printf '%s\n' "${conflicts[@]}" > .agent-rebase-conflicts
+            python - <<'PY'
+          import json, os
+          meta = {
+              'pr_number': int(os.environ['PR_NUMBER']),
+              'original_branch': os.environ['ORIGINAL_BRANCH'],
+              'expected_head': os.environ['EXPECTED_HEAD'],
+              'upstream_sha': os.environ['UPSTREAM_SHA'],
+              'commit_title': os.environ['COMMIT_TITLE'],
+              'work_branch': os.environ['WORK_BRANCH'],
+          }
+          with open('.agent-rebase-meta.json', 'w', encoding='utf-8') as fh:
+              json.dump(meta, fh, ensure_ascii=False, indent=2)
+              fh.write('\n')
+          PY
+
+            for path in "${conflicts[@]}"; do
+              git checkout --conflict=merge -- "$path" 2>/dev/null || true
+            done
+
+            git add -A
+            git commit -m "chore: prepare rebase #${PR_NUMBER}"
+            git push --force origin "HEAD:refs/heads/${WORK_BRANCH}"
+            printf 'Prepared %s with %s conflict(s).\n' "$WORK_BRANCH" "${#conflicts[@]}"
+            exit 0
+          fi
+
+          if [ "$ACTION" = finalize ]; then
+            git fetch --no-tags origin "+refs/heads/${WORK_BRANCH}:refs/remotes/origin/${WORK_BRANCH}"
+            git checkout -B "$WORK_BRANCH" "origin/${WORK_BRANCH}"
+
+            if [ -s .agent-rebase-conflicts ]; then
+              while IFS= read -r path; do
+                [ -z "$path" ] && continue
+                if grep -nE '^(<<<<<<<|>>>>>>>)( |$)' -- "$path"; then
+                  echo "unresolved conflict markers remain in $path" >&2
+                  exit 1
+                fi
+              done < .agent-rebase-conflicts
+            fi
+
+            test "$(git rev-parse "origin/${ORIGINAL_BRANCH}")" = "$EXPECTED_HEAD"
+            rm -f .agent-rebase-conflicts .agent-rebase-meta.json
+            git add -A
+            git reset --soft "$UPSTREAM_SHA"
+            git commit -m "$COMMIT_TITLE"
+            git push --force-with-lease="refs/heads/${ORIGINAL_BRANCH}:${EXPECTED_HEAD}" origin "HEAD:refs/heads/${ORIGINAL_BRANCH}"
+            git push origin --delete "$WORK_BRANCH" || true
+            exit 0
+          fi
+
+          echo "unknown action: $ACTION" >&2
+          exit 2
