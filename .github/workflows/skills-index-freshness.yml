@@ -1,11 +1,11 @@
 name: Skills Index Freshness Check
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - .github/workflows/skills-index-freshness.yml
+  workflow_run:
+    workflows:
+      - OSV-Scanner
+    types:
+      - completed
   workflow_dispatch:
 
 permissions:
