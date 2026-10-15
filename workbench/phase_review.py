@@ -1,151 +1,107 @@
-"""Fork-only second-pass validation for the stream lane; excluded from product branches."""
-from pathlib import Path
+"""Fork-only rebase probe for selected upstream PR branches.
+
+This file lives only on the workbench branch.  It never mutates the source PR
+branches: successful rebases are pushed to rebase-candidate/* and conflicts are
+captured as stage 1/2/3 files for review.
+"""
+from __future__ import annotations
+
+import json
 import os
+from pathlib import Path
+import subprocess
 
-import phase_followups as p
+MAIN = "ca069e12239a2c8d13887ac9f983557d00bdcfd2"
+BRANCHES = {
+    "120373": "fix/wsl-windows-host-core-35337285136",
+    "120894": "fix/codex-output-continuity",
+    "121990": "fix/desktop-old-user-tail-reconciliation",
+    "122179": "fix/codex-stream-message-phase-state",
+}
 
-LEGACY = "tests/agent/test_run_agent_codex_responses.py"
-_original_patch = p.patch_stream
-_original_command = p.command
-
-
-def reviewed_patch(text):
-    text = _original_patch(text)
-    text = p.replace(text, '''        if isinstance(terminal_output, list):
-            for index, item in enumerate(terminal_output):
-                if _event_field(item, "type") == "message" and isinstance(_event_field(item, "content"), list):
-                    self._on_item_done({"item": item, "output_index": index}, "response.output_item.done")''', '''        if isinstance(terminal_output, list):
-            # With neither an item ID nor an index on earlier messages, a terminal
-            # snapshot cannot prove which message is new. Never dedupe by matching prose.
-            ambiguous_messages = any(
-                _event_field(item, "type") == "message"
-                and not (isinstance(_event_field(item, "id"), str) and _event_field(item, "id"))
-                and index is None
-                for item, index in zip(self.output_items, self.output_indexes)
-            )
-            for index, item in enumerate(terminal_output):
-                if (
-                    _event_field(item, "type") != "message"
-                    or _event_field(item, "role", "assistant") not in {None, "assistant"}
-                    or not isinstance(_event_field(item, "content"), list)
-                ):
-                    continue
-                frame = {"item": item, "output_index": index}
-                key = self._message_key(frame, item, use_active=False)
-                if ambiguous_messages and key not in self.message_done_positions:
-                    continue
-                self._on_item_done(frame, "response.output_item.done")''')
-
-    candidate = Path(os.environ["RUNNER_TEMP"]) / "phase-candidate-stream"
-    legacy = candidate / LEGACY
-    original = legacy.read_text()
-    start = original.index("def test_run_codex_stream_returns_collected_items_when_stream_ends_without_terminal(")
-    end = original.index("\ndef test_", start + 5)
-    block = original[start:end]
-    doc_start = block.index('    """')
-    doc_end = block.index('    """', doc_start + 7) + len('    """')
-    block = block[:doc_start] + '''    """Retain collected text on silent EOF without inventing response completion.
-
-    Stream collection still makes one request and returns usable partial data. The
-    normalizer must signal incomplete so the conversation loop can continue it.
-    """''' + block[doc_end:]
-    block = p.replace(block, '    assert response.status == "completed"', '    assert response.status == "in_progress"')
-    block = p.replace(block, '    assert response.output == [output_item]', '''    assert response.output == [output_item]
-    from agent.codex_responses_adapter import _normalize_codex_response
-    normalized, finish_reason = _normalize_codex_response(response, issuer_kind="codex_backend")
-    assert normalized.content == "no terminal frame"
-    assert finish_reason == "incomplete"''')
-    legacy.write_text(original[:start] + block + original[end:])
-    return text
+OUT = Path(os.environ.get("RUNNER_TEMP", "/tmp")) / "phase-followup-results"
+OUT.mkdir(parents=True, exist_ok=True)
 
 
-def reviewed_command(args, cwd, log=None, check=True):
-    args = list(args)
-    if args[:2] == ["git", "add"]:
-        args.append(LEGACY)
-    if "py_compile" in args or ("ruff" in args and "check" in args):
-        args.append(LEGACY)
-    return _original_command(args, cwd, log=log, check=check)
+def run(*args: str, check: bool = True, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+    proc = subprocess.run(
+        args,
+        cwd=cwd,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    if check and proc.returncode:
+        raise RuntimeError(f"command failed ({proc.returncode}): {' '.join(args)}\n{proc.stdout}")
+    return proc
 
 
-def main():
-    payload = p.ROOT / "workbench/phase_stream_test.py"
-    tests = payload.read_text()
-    tests = p.replace(tests,
-        'terminal(kind="completed", output=None)',
-        'terminal(kind="completed", output=None, status="incomplete")')
-    tests += '''
+def write(name: str, text: str) -> None:
+    (OUT / name).write_text(text, encoding="utf-8", errors="replace")
 
 
-def test_legacy_unidentified_done_is_not_duplicated_by_terminal_snapshot():
-    item = msg(text="Complete answer", phase="final_answer")
-    item.pop("id")
-    response, _, _, _ = consume([
-        {"type": "response.output_item.done", "item": item}, terminal([item]),
-    ])
-    result, finish = _normalize_codex_response(response)
-    assert finish == "stop"
-    assert result.content == "Complete answer"
-    assert len(result.codex_message_items) == 1
+run("git", "config", "user.name", "Xipong rebase workbench")
+run("git", "config", "user.email", "xipong@users.noreply.github.com")
+if run("git", "remote", "get-url", "upstream", check=False).returncode:
+    run("git", "remote", "add", "upstream", "https://github.com/NousResearch/hermes-agent.git")
+else:
+    run("git", "remote", "set-url", "upstream", "https://github.com/NousResearch/hermes-agent.git")
 
+# The repository advances very quickly.  Twenty thousand commits covers every
+# selected branch's merge base while avoiding an unnecessary full-history fetch.
+run("git", "fetch", "--no-tags", "--depth=20000", "upstream", f"+{MAIN}:refs/remotes/upstream/rebase-main")
+for branch in BRANCHES.values():
+    run("git", "fetch", "--no-tags", "--depth=20000", "origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}")
 
-def test_index_only_message_identity_merges_terminal_snapshot_once():
-    item = msg()
-    item.pop("id")
-    response, _, commentary, _ = consume([added(item), done(item), terminal([item])])
-    result, finish = _normalize_codex_response(response, issuer_kind="codex_backend")
-    assert finish == "incomplete"
-    assert len(result.codex_message_items) == 1
-    assert commentary == ["Checking."]
+summary: dict[str, object] = {"main": MAIN, "results": {}}
 
+for pr, branch in BRANCHES.items():
+    local = f"probe-pr{pr}"
+    run("git", "switch", "--discard-changes", "--force-create", local, f"refs/remotes/origin/{branch}")
+    old = run("git", "rev-parse", "HEAD").stdout.strip()
+    merge_base = run("git", "merge-base", "HEAD", MAIN, check=False).stdout.strip()
+    proc = run("git", "rebase", "--onto", MAIN, merge_base, check=False)
 
-def test_terminal_only_unidentified_final_can_be_recovered():
-    item = msg(text="42", phase="final_answer")
-    item.pop("id")
-    response, _, _, _ = consume([terminal([item])])
-    result, finish = _normalize_codex_response(response)
-    assert finish == "stop"
-    assert result.content == "42"
-    assert len(result.codex_message_items) == 1
+    result: dict[str, object] = {
+        "branch": branch,
+        "old": old,
+        "merge_base": merge_base,
+        "returncode": proc.returncode,
+    }
+    write(f"pr{pr}-rebase.log", proc.stdout)
 
+    if proc.returncode == 0:
+        new = run("git", "rev-parse", "HEAD").stdout.strip()
+        candidate = f"rebase-candidate/pr{pr}-ca069e12"
+        push = run("git", "push", "--force", "origin", f"HEAD:refs/heads/{candidate}", check=False)
+        result.update({"status": "rebased", "new": new, "candidate": candidate, "push_returncode": push.returncode})
+        write(f"pr{pr}-push.log", push.stdout)
+        write(f"pr{pr}-log.txt", run("git", "log", "--format=%H%x09%an%x09%ae%x09%s", f"{MAIN}..HEAD").stdout)
+        write(f"pr{pr}-stat.txt", run("git", "diff", "--stat", f"{MAIN}...HEAD").stdout)
+        write(f"pr{pr}-range-diff.txt", run("git", "range-diff", f"{merge_base}..{old}", f"{MAIN}..{new}", check=False).stdout)
+    else:
+        unmerged = [line for line in run("git", "diff", "--name-only", "--diff-filter=U", check=False).stdout.splitlines() if line]
+        result.update({"status": "conflict", "unmerged": unmerged})
+        write(f"pr{pr}-status.txt", run("git", "status", "--short", check=False).stdout)
+        write(f"pr{pr}-diff-cc.patch", run("git", "diff", "--cc", check=False).stdout)
+        write(f"pr{pr}-ls-files-u.txt", run("git", "ls-files", "-u", check=False).stdout)
+        stage_dir = OUT / f"pr{pr}-stages"
+        stage_dir.mkdir(parents=True, exist_ok=True)
+        for path in unmerged:
+            safe = path.replace("/", "__")
+            for stage in (1, 2, 3):
+                data = subprocess.run(
+                    ["git", "show", f":{stage}:{path}"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=False,
+                )
+                if data.returncode == 0:
+                    (stage_dir / f"{safe}.stage{stage}").write_bytes(data.stdout)
+        run("git", "rebase", "--abort", check=False)
 
-def test_terminal_backfill_does_not_promote_a_user_message():
-    answer = msg(text="42", phase="final_answer")
-    alien = msg("msg_user", "Not an assistant answer", "final_answer")
-    alien["role"] = "user"
-    response, _, _, _ = consume([done(answer), terminal([answer, alien])])
-    result, finish = _normalize_codex_response(response)
-    assert finish == "stop"
-    assert result.content == "42"
-    assert len(result.codex_message_items) == 1
+    summary["results"][pr] = result
 
-
-def test_real_sdk_message_objects_keep_phase_without_mutation():
-    from openai.types.responses import ResponseOutputMessage, ResponseOutputText
-
-    part = ResponseOutputText.model_construct(type="output_text", text="Checking.", annotations=[])
-    announced = ResponseOutputMessage.model_construct(type="message", role="assistant", id="msg_sdk", status="in_progress", content=[], phase="commentary")
-    completed = ResponseOutputMessage.model_construct(type="message", role="assistant", id="msg_sdk", status="completed", content=[part])
-    before = completed.model_dump()
-    commentary = []
-    response = _consume_codex_event_stream(iter([
-        NS(type="response.output_item.added", output_index=0, item=announced),
-        NS(type="response.output_text.delta", item_id="msg_sdk", output_index=0, delta="Checking."),
-        NS(type="response.output_item.done", output_index=0, item=completed),
-        NS(type="response.completed", response=NS(status="completed")),
-    ]), model="test-model", on_commentary_message=commentary.append)
-    result, finish = _normalize_codex_response(response, issuer_kind="codex_backend")
-    assert finish == "incomplete"
-    assert result.codex_message_items[0]["phase"] == "commentary"
-    assert commentary == ["Checking."]
-    assert completed.model_dump() == before
-'''
-    payload.write_text(tests)
-    path, _, branch, title = p.SPECS["stream"]
-    p.SPECS["stream"] = (path, reviewed_patch, branch, title)
-    p.command = reviewed_command
-    p.run_lane("stream")
-
-
-if __name__ == "__main__":
-    main()
+write("summary.json", json.dumps(summary, indent=2, sort_keys=True) + "\n")
+print(json.dumps(summary, indent=2, sort_keys=True))
