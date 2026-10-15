@@ -3,7 +3,7 @@ name: Skills Index Freshness Check
 on:
   workflow_run:
     workflows:
-      - Issue 125766 history workbench
+      - Nix flake check
     types:
       - completed
   workflow_dispatch:
