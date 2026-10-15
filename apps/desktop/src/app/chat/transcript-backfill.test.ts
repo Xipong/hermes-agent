@@ -520,14 +520,18 @@ describe('backfillOlderTranscriptPage', () => {
     let resolveFirst!: (value: unknown) => void
 
     vi.mocked(getOlderSessionMessages)
-      .mockReturnValueOnce(new Promise(resolve => { resolveFirst = resolve }) as never)
+      .mockReturnValueOnce(
+        new Promise(resolve => {
+          resolveFirst = resolve
+        }) as never
+      )
       .mockResolvedValueOnce({
         messages: [row(5, 'actual older page')],
         pagination: { limit: 120, offset: 113, order: 'latest', returned: 1 },
         session_id: 'stored-1'
       } as never)
 
-    const applyOlderPage = vi.fn(() => true)
+    const applyOlderPage = vi.fn((_messages: ChatMessage[]) => true)
     const pending = backfillOlderTranscriptPage({
       storedSessionId: 'stored-1',
       isCurrent: () => true,
