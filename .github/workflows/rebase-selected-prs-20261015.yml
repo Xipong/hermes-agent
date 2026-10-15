@@ -7,6 +7,15 @@ on:
     paths:
       - .github/workflows/rebase-selected-prs-20261015.yml
       - .github/rebase-selected-prs-20261015.trigger
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+    paths:
+      - .github/rebase-selected-prs-20261015.pr-trigger
 
 permissions:
   contents: write
