@@ -1,30 +1,16 @@
 name: Skills Index Freshness Check
 
 on:
-  schedule:
-    - cron: '*/5 * * * *'
-  workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - .github/rebase-selected-prs-active.trigger
-  pull_request_target:
-    branches:
-      - main
+  issue_comment:
     types:
-      - opened
-      - synchronize
-      - reopened
-    paths:
-      - .github/rebase-selected-prs-active.pr-trigger
+      - created
 
 permissions:
   contents: write
 
 jobs:
   prepare-rebases:
-    if: github.repository == 'Xipong/hermes-agent'
+    if: github.repository == 'Xipong/hermes-agent' && github.event.comment.body == '/run-rebase-107739-109474-v2'
     name: Prepare PR ${{ matrix.pr }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -32,14 +18,6 @@ jobs:
       fail-fast: false
       matrix:
         pr:
-          - 106142
-          - 106252
-          - 106905
-          - 106917
-          - 107299
-          - 107350
-          - 107711
-          - 107713
           - 107739
           - 107842
           - 108661
@@ -54,11 +32,11 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Prepare clean forward-port or conflict worktree
+      - name: Prepare conflict worktree
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ matrix.pr }}
-          UPSTREAM_SHA: ca069e12239a2c8d13887ac9f983557d00bdcfd2
+          UPSTREAM_SHA: 3dd9e4edfd389d931e9ea439a3ea09316cb73ae0
         shell: bash
         run: |
           set -euo pipefail
@@ -86,11 +64,27 @@ jobs:
           git fetch --no-tags origin "+refs/heads/${source_branch}:refs/remotes/origin/${source_branch}"
           test "$(git rev-parse "refs/remotes/origin/${source_branch}")" = "$expected_head"
 
-          work_branch="agent-rebase-work-${PR_NUMBER}-20261015"
+          merge_base="$(git merge-base "$UPSTREAM_SHA" "$expected_head")"
+          git checkout -B "agent-rebase-${PR_NUMBER}" "$expected_head"
+
+          set +e
+          GIT_EDITOR=true git rebase --onto "$UPSTREAM_SHA" "$merge_base"
+          rebase_rc=$?
+          set -e
+
+          if [[ $rebase_rc -eq 0 ]]; then
+            new_head="$(git rev-parse HEAD)"
+            git push --force-with-lease="refs/heads/${source_branch}:${expected_head}" origin "HEAD:refs/heads/${source_branch}"
+            echo "PR ${PR_NUMBER}: ${expected_head} -> ${new_head}"
+            exit 0
+          fi
+
+          git rebase --abort || true
+          work_branch="agent-rebase-work-${PR_NUMBER}-20261015c"
           git checkout -B "$work_branch" "$UPSTREAM_SHA"
 
           set +e
-          git merge --squash --no-commit "refs/remotes/origin/${source_branch}"
+          git merge --squash --no-commit "$expected_head"
           merge_rc=$?
           set -e
 
