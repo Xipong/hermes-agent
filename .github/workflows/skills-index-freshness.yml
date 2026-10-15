@@ -2,7 +2,7 @@ name: Skills Index Freshness Check
 
 on:
   schedule:
-    - cron: '20 2 15 10 *'
+    - cron: '25 2 15 10 *'
   workflow_dispatch:
 
 permissions:
@@ -101,20 +101,6 @@ jobs:
             done
             git checkout --conflict=merge -- "$path" 2>/dev/null || true
           done
-
-          python - <<'PY'
-          import json, os
-          meta = {
-              "pr_number": int(os.environ["PR_NUMBER"]),
-              "source_branch": os.environ["source_branch"] if "source_branch" in os.environ else None,
-              "expected_head": os.environ["expected_head"] if "expected_head" in os.environ else None,
-              "upstream_sha": os.environ["UPSTREAM_SHA"],
-              "title": os.environ["title"] if "title" in os.environ else None,
-          }
-          with open(".agent-rebase-meta.json", "w", encoding="utf-8") as fh:
-              json.dump(meta, fh, ensure_ascii=False, indent=2)
-              fh.write("\n")
-          PY
 
           python - "$PR_NUMBER" "$source_branch" "$expected_head" "$UPSTREAM_SHA" "$title" <<'PY'
           import json, sys
