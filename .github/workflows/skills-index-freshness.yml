@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: '*/5 * * * *'
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/rebase-selected-prs-active.trigger
 
 permissions:
   contents: write
@@ -26,6 +31,13 @@ jobs:
           - 107350
           - 107711
           - 107713
+          - 107739
+          - 107842
+          - 108661
+          - 109330
+          - 109351
+          - 109402
+          - 109474
 
     steps:
       - uses: actions/checkout@v4
