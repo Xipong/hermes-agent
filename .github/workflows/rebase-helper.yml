@@ -1,0 +1,35 @@
+name: Branch rebase helper
+
+on:
+  push:
+    branches:
+      - automation/rebase-helper
+
+permissions:
+  contents: write
+
+env:
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  rebase:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Rebase target branch
+        id: rebase
+        continue-on-error: true
+        run: bash .github/rebase-helper.sh
+      - name: Upload conflict state
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rebase-conflicts
+          path: /tmp/rebase-conflicts
+          if-no-files-found: ignore
+          retention-days: 1
+      - name: Propagate failure
+        if: steps.rebase.outcome == 'failure'
+        run: exit 1
