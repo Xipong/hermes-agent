@@ -1,0 +1,21 @@
+name: Rebase 120286 batch runner v2
+
+on:
+  push:
+    branches:
+      - ops/rebase-120286-batch-runner-base-v2
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    if: github.repository == 'Xipong/hermes-agent'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Record runner activation
+        run: |
+          echo "runner activated at ${GITHUB_SHA}"
