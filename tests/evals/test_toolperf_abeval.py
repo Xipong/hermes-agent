@@ -26,13 +26,14 @@ def test_guidance_arm_uses_isolated_home_and_only_changes_guidance(tmp_path, mon
     )
     monkeypatch.setattr(harness, "HOME", source_home)
 
-    arm_home = harness._home_for_guidance_arm(tmp_path / "run", "execution_off")
+    arm_home = harness._home_for_guidance_arm(tmp_path / "run", "completion_off")
 
     config = (arm_home / "config.yaml").read_text(encoding="utf-8")
     assert "model:\n  provider: openrouter\n" in config
     assert "agent:\n  max_turns: 30\n" in config
     assert "  tool_use_enforcement: true\n" in config
-    assert "  execution_guidance: false\n" in config
+    assert "  execution_guidance: true\n" in config
+    assert "  task_completion_guidance: false\n" in config
     assert (arm_home / ".env").read_text(encoding="utf-8") == "OPENROUTER_API_KEY=test\n"
     assert (source_home / "config.yaml").read_text(encoding="utf-8") == (
         "model:\n  provider: openrouter\nagent:\n  max_turns: 30\n"
@@ -63,14 +64,14 @@ def test_guidance_arm_preserves_valid_yaml_settings(tmp_path, monkeypatch, agent
     original = "# preserve this comment\nmodel: custom/model\n" + agent
     (home / "config.yaml").write_text(original)
     monkeypatch.setattr(harness, "HOME", home)
-    output = harness._home_for_guidance_arm(tmp_path / "run", "execution_off")
+    output = harness._home_for_guidance_arm(tmp_path / "run", "completion_off")
     config = yaml.safe_load((output / "config.yaml").read_text())
     assert config["model"] == "custom/model"
     assert config["agent"] == {
         "max_turns": 20,
         "tool_use_enforcement": True,
-        "execution_guidance": False,
-        "task_completion_guidance": True,
+        "execution_guidance": True,
+        "task_completion_guidance": False,
         "parallel_tool_call_guidance": True,
     }
     assert "# preserve this comment" in (output / "config.yaml").read_text()

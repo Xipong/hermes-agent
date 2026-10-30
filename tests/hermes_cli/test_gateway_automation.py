@@ -67,6 +67,43 @@ def test_judge_decision_comes_from_the_gateway(cli, monkeypatch):
     assert mgr.state.status == 'done'
 
 
+@pytest.mark.parametrize("with_feedback", [False, True])
+def test_parked_gateway_goal_queues_continuation_after_barrier_lifts(cli, monkeypatch, with_feedback):
+    import queue
+    import time
+    from hermes_cli import goals
+
+    mgr = cli.cli._get_goal_manager()
+    mgr.set('ship the verified report')
+    reason = 'Include the concrete regression result.'
+    if with_feedback:
+        monkeypatch.setattr(goals, 'judge_goal', lambda *a, **k: ('continue', reason, False, None, False))
+        mgr.evaluate_after_turn('done')
+    mgr.wait_for_seconds(60, reason='cooldown')
+    cli.cli._pending_input = queue.Queue()
+    monkeypatch.setattr('cli._cprint', lambda *a, **k: None)
+    cli.cli._maybe_resume_parked_goal()
+    assert cli.cli._pending_input.empty()
+
+    # The gateway owns the timer; the CLI must adopt its cleared state over RPC.
+    owner = goals.GoalManager(session_id=cli.cli.session_id)
+    assert owner.state is not None
+    owner.state.waiting_until = time.time() - 1
+    owner._save()
+    cli.cli._last_goal_barrier_check = 0.0
+    cli.cli._maybe_resume_parked_goal()
+
+    assert not cli.cli._pending_input.empty()
+    prompt = cli.cli._pending_input.get_nowait()
+    assert 'ship the verified report' in prompt
+    assert (reason in prompt) is with_feedback
+    assert mgr.state.waiting_until == 0.0
+    assert ('goal', 'is_waiting') in cli.conn.calls
+    cli.cli._last_goal_barrier_check = 0.0
+    cli.cli._maybe_resume_parked_goal()
+    assert cli.cli._pending_input.empty()
+
+
 def test_idle_polls_cost_no_round_trip(cli):
     hb = cli.cli._get_heartbeat_manager()
     loop = cli.cli._get_loop_manager()

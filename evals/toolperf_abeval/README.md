@@ -7,13 +7,26 @@ experiment addresses #134640 and supplies local acceptance probes for #146236.
 or fewer skill calls are not success criteria.** Runtime model defaults are not
 changed here; no live model result follows from the offline tests.
 
+## Status: not ready for model campaigns
+
+Only offline mechanics have been exercised; no live model campaign was run.
+The audit found an incompatible Relay observability config, false-positive
+correctness/workflow scoring, incomplete-span usage accounting, and gaps in
+environment/effective-effort pairing. These remain unresolved. Do not use this
+harness to claim quality, savings, or calibrated defaults, or spend model tokens
+on it before repairing those defects. The commands below document the intended
+interface, not a validated live experiment.
+
 ## Arms and pairing
 
 `all_on` explicitly enables `agent.tool_use_enforcement`, `execution_guidance`,
 `task_completion_guidance`, and `parallel_tool_call_guidance`. Each of
-`tool_use_off`, `execution_off`, `completion_off`, and `parallel_off` changes
-exactly one of those switches. `all_off` disables all four together. It does not
-strip safety, skill, async handoff or other non-configurable instructions.
+`tool_use_off`, `completion_off`, and `parallel_off` changes exactly one switch.
+All supported arms keep `execution_guidance` enabled, preserving mandatory
+tool-backed arithmetic. `execution_off` and `all_off` are not supported: disabling
+their whole block would remove that accuracy safeguard. Calculations belong in
+an execution tool for every model tier; apparent savings from mental arithmetic
+are not an acceptable outcome. Runtime defaults are unchanged.
 The optional final-gate-only experiment is not implemented: it needs a separate
 policy candidate and evidence, not a new implicit runtime default.
 
@@ -69,16 +82,16 @@ export ABEVAL_HOME=/owned/eval-home
 TREE=/path/to/committed/hermes-agent
 MODEL=provider/pinned-model-release
 TASKS=guidance_tool_action,guidance_write_readback,guidance_trivial_edit,guidance_arithmetic,accept_bug_fix,accept_shared_schema,accept_changed_after_pass,accept_required_workflow,accept_committed_write,accept_async_write,accept_learning_noop,accept_learning_update
-for ARM in all_on tool_use_off execution_off completion_off parallel_off all_off; do
+for ARM in all_on tool_use_off completion_off parallel_off; do
   python -m evals.toolperf_abeval.ab_eval run --arm "$ARM" \
     --guidance-arm "$ARM" --model "$MODEL" --reps 3 --pythonpath "$TREE" --only "$TASKS"
 done
 python -m evals.toolperf_abeval.ab_eval report --models "$MODEL" \
-  --arms all_on,tool_use_off,execution_off,completion_off,parallel_off,all_off
+  --arms all_on,tool_use_off,completion_off,parallel_off
 ```
 
 The legacy `run_all.sh BASE_TREE FIXES_TREE REPS MODEL...` also runs the guidance
-matrix for each code tree. `ABEVAL_GUIDANCE_ARMS=all_on,execution_off` narrows it.
+matrix for each code tree. `ABEVAL_GUIDANCE_ARMS=all_on,completion_off` narrows it.
 Report each tree's guidance arms separately for a same-code comparison.
 All completed attempts, including nonzero exits, empty-output crashes and
 timeouts, stay in the denominator. Resume does not silently retry away failures.

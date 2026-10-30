@@ -26,7 +26,7 @@ fi
 PY=${PYTHON:-python3}
 EVAL="$(cd "$(dirname "$0")" && pwd)/ab_eval.py"
 export ABEVAL_ROOT=${ABEVAL_ROOT:-$PWD/abeval-workspace}
-GUIDANCE_ARMS=${ABEVAL_GUIDANCE_ARMS:-all_on,tool_use_off,execution_off,completion_off,parallel_off,all_off}
+GUIDANCE_ARMS=${ABEVAL_GUIDANCE_ARMS:-all_on,tool_use_off,completion_off,parallel_off}
 IFS=, read -r -a GUIDANCE_ARM_LIST <<< "$GUIDANCE_ARMS"
 
 for model in "${MODELS[@]}"; do

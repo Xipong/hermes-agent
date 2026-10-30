@@ -67,10 +67,9 @@ def test_arms_change_one_block_and_preserve_skill_workflow(tmp_path, monkeypatch
         target = ab_eval._home_for_guidance_arm(tmp_path / arm, arm)
         config = yaml.safe_load((target / "config.yaml").read_text())
         changed = [key for key in baseline if switches[key] != baseline[key]]
-        if arm not in {"all_on", "all_off"}:
+        assert config["agent"]["execution_guidance"] is True
+        if arm != "all_on":
             assert len(changed) == 1
-        if arm == "all_off":
-            assert all(not value for value in switches.values())
         assert config["agent"] == {"reasoning_effort": "high", **switches}
         assert (target / "skills/required/SKILL.md").read_bytes() == skill.read_bytes()
 
@@ -115,13 +114,14 @@ def test_runner_retains_failed_attempt_and_refuses_arm_reuse(tmp_path, monkeypat
             return original(argv, **kwargs)
         launches.append(argv)
         config = yaml.safe_load((Path(kwargs["env"]["HERMES_HOME"]) / "config.yaml").read_text())
-        assert config["agent"]["execution_guidance"] is False
+        assert config["agent"]["execution_guidance"] is True
+        assert config["agent"]["task_completion_guidance"] is False
         assert config["agent"]["reasoning_effort"] == "high"
         return original([sys.executable, "-c", "raise SystemExit(7)"], **kwargs)
 
     monkeypatch.setattr(subprocess, "run", local_child)
     source = str(Path(__file__).parents[2])
-    ab_eval.run("candidate", "fixed-model", 1, source, ["guidance_trivial_edit"], "execution_off")
+    ab_eval.run("candidate", "fixed-model", 1, source, ["guidance_trivial_edit"], "completion_off")
     meta = ab_eval.ROOT / "results/fixed-model/candidate/meta.jsonl"
     assert json.loads(meta.read_text())["exit"] == 7
     ab_eval.report(["fixed-model"], ["candidate"])

@@ -1607,7 +1607,7 @@ class GoalManager:
         s = self._state
         if not s or s.status != "active":
             return None
-        feedback = self._continuation_feedback(s)
+        feedback = GoalManager._continuation_feedback(s)
         # Contract first (it carries the verification surface); subgoals fold in as extra criteria.
         if s.has_contract():
             contract_block = s.contract.render_block()

@@ -49,18 +49,16 @@ from evals.toolperf_abeval import guidance_cases, measurement
 ROOT = Path(os.environ.get("ABEVAL_ROOT", "abeval-workspace")).resolve()
 HOME = Path(os.environ.get("ABEVAL_HOME", str(ROOT / "home"))).resolve()
 
-# Keep configurable guidance independently measurable. Every arm explicitly
-# sets all four controls in a per-run copy of the configured home, rather than
-# inheriting a possibly customized default.
+# Every arm pins execution guidance on: it contains mandatory tool-backed
+# arithmetic, which is outside the ablation scope (#146236).
 GUIDANCE_BLOCKS = ("tool_use_enforcement", "execution_guidance",
                    "task_completion_guidance", "parallel_tool_call_guidance")
 GUIDANCE_ARMS = {"all_on": dict.fromkeys(GUIDANCE_BLOCKS, True)}
 for _arm, _block in (("tool_use_off", "tool_use_enforcement"),
-                     ("execution_off", "execution_guidance"),
                      ("completion_off", "task_completion_guidance"),
                      ("parallel_off", "parallel_tool_call_guidance")):
     GUIDANCE_ARMS[_arm] = {key: key != _block for key in GUIDANCE_BLOCKS}
-GUIDANCE_ARMS["all_off"] = dict.fromkeys(GUIDANCE_BLOCKS, False)
+
 
 TASKS = {
     # P: python-not-found + venv module confusion (terminal failure hints)
