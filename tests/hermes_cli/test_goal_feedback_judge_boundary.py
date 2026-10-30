@@ -20,6 +20,9 @@ from hermes_cli.goals import GoalManager
     ('{"verdict":"blocked","reason":"Need credentials."}', False),
     ('{"verdict":"unknown","reason":"Not a valid judgment."}', False),
     ('{"reason":"Missing verdict is not a judgment."}', False),
+    ('{"done":null,"reason":"Not a valid legacy judgment."}', False),
+    ('{"done":"maybe","reason":"Not a valid legacy judgment."}', False),
+    ('{"verdict":"continue","reason":["not a reason string"]}', False),
     ('not JSON', False),
     ('', False),
 ])

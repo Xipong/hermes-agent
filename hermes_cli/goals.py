@@ -832,16 +832,16 @@ def _parse_judge_response(raw: str) -> tuple[str, str, bool, Optional[dict[str, 
     if data is None:
         return "continue", f"judge reply was not JSON: {_truncate(raw, 200)!r}", True, None
 
-    reason = str(data.get("reason") or "").strip() or "no reason provided"
+    reason_raw = data.get("reason")
+    reason = (reason_raw.strip() if isinstance(reason_raw, str) else "") or "no reason provided"
     verdict_raw = data.get("verdict")
+    legacy_done = str(data.get("done")).strip().lower()
     if isinstance(verdict_raw, str):
         verdict = verdict_raw.strip().lower()
-    elif "done" in data:
-        done_val = data.get("done")
-        done = done_val.strip().lower() in {"true", "yes", "1", "done"} if isinstance(done_val, str) else bool(done_val)
-        verdict = "done" if done else "continue"
+    elif legacy_done in {"true", "yes", "1", "done", "false", "no", "0"}:
+        verdict = "done" if legacy_done in {"true", "yes", "1", "done"} else "continue"
     else:
-        return "continue", "judge reply has no verdict", True, None
+        return "continue", "judge reply has no valid verdict", True, None
     if verdict not in {"done", "blocked", "continue", "wait"}:
         return "continue", f"judge reply has invalid verdict: {verdict!r}", True, None
     if verdict != "wait":
