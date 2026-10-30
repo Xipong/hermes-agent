@@ -18,6 +18,7 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from agent.i18n import t
 from agent.prompt_cache_scope import resolve_prompt_cache_scope_safe
+from agent.prompt_builder import SKILLS_GUIDANCE
 from agent.thread_scoped_output import thread_scoped_silence
 
 logger = logging.getLogger(__name__)
@@ -391,16 +392,9 @@ _MEMORY_REVIEW_PROMPT = (
 # hoarding library: one references/ file per session, incident narration instead of rules, PR numbers
 # and quotes as content, and duplicating what the repo's AGENTS.md / the tool schemas already teach.
 _LESSON_LAYER_BLOCK = (
-    "What a skill IS: the instructions for doing a class of task the most efficient and correct "
-    "way, to THIS user's specifications — the procedure, the tools and commands that work, the "
-    "order, the user's preferences for how the result should look, and the pitfalls that cost time. "
-    "A future session should be able to follow it and produce what the user wants on the first "
-    "try. Everything below is about writing that well:\n"
-    "  • Procedure first: the steps in the order they are done, with the concrete commands, tool "
-    "calls, and decision points. Lessons and pitfalls attach to the step they affect.\n"
-    "  • A pitfall is a generalizable rule + one clause of WHY (the mechanism), imperative. 'Grep the "
-    "test tree for the SYMBOL before widening a helper signature — hand-rolled mocks reimplement the "
-    "old shape and fail on a shard you did not run.' Not a narrative of what happened this session.\n"
+    "A skill is a working aid for the next execution, not a correction log or an explanation "
+    "to an imagined reader. Give concrete commands and decision points where useful; explain "
+    "non-obvious pitfalls by their mechanism. Match specificity to the operation's fragility.\n"
     "  • No PR/issue numbers, dates, ticket IDs, or quoted user text as content — the rule must stand "
     "without the incident behind it. Keep a short quote ONLY when the quote itself is the clearest "
     "statement of the rule.\n"
@@ -416,21 +410,7 @@ _LESSON_LAYER_BLOCK = (
     "'<date>-<incident>.md'. Prefer extending an existing references/ file over creating one; "
     "a skill with dozens of one-off references is the failure shape, not the goal.\n"
     "  • Fix the skill in place when it is wrong: edit the sentence that misled, do not append "
-    "'UPDATE: actually...' underneath it.\n"
-    "  • Preserve every condition that makes an instruction true. Remove incident identifiers, "
-    "not the hardware, provider, authorization scope, project, or lifecycle boundary that limits "
-    "a reusable conditional rule.\n\n"
-)
-
-_DURABLE_LESSON_CHECK_BLOCK = (
-    "Before an autonomous skill edit, make a lightweight candidate check: what evidence says this "
-    "lesson applies beyond this run; under exactly which conditions; would it contradict an existing "
-    "rule or reduce capability; and would the unchanged skill already handle the next case? This is "
-    "reasoning, not a required reviewer, tool call, approval, checkpoint, or file.\n\n"
-    "Persist a durable mechanism or reproducibly correct workflow. Persist a conditional workaround "
-    "only when it is broadly reusable and retains its real trigger and boundary. Keep current state "
-    "and one-off project choices in task or project state, or do not save them. Preserve a standing "
-    "user preference or prohibition at its stated scope; never silently broaden it.\n\n"
+    "'UPDATE: actually...' underneath it.\n\n"
 )
 
 # Shared tail of the skill and combined prompts: what NOT to persist as a skill.
@@ -460,31 +440,13 @@ _DO_NOT_CAPTURE_BLOCK = (
 )
 
 _SKILL_REVIEW_PROMPT = (
-    "Review the conversation above and update the skill library only when it contains a genuinely "
-    "new, durable, reusable lesson. 'Nothing to save.' is a successful review when a candidate is "
-    "temporary, unverified, redundant, task-local, or already correctly covered.\n\n"
-    "Target shape of the library: CLASS-LEVEL skills, each with a SKILL.md of always-on rules and a "
-    "small `references/` set of topical depth. Not a flat list of narrow one-session skills, and "
-    "not an umbrella hoarding a references/ file per session. This shapes HOW you update, not "
-    "WHETHER you update.\n\n" + _LESSON_LAYER_BLOCK +
-    "Signals to evaluate for a durable lesson:\n"
-    "  • User corrected your style, tone, format, legibility, or verbosity. Frustration signals "
-    "like 'stop doing X', 'this is too verbose', 'don't format like this', 'why are you "
-    "explaining', 'just give me the answer', 'you always do Y and I hate it', or an explicit "
-    "'remember this' are FIRST-CLASS skill signals, not just memory signals. Update the relevant "
-    "skill(s) to embed the preference so the next session starts already knowing.\n"
-    "  • User corrected your workflow, approach, or sequence of steps. Encode the correction as a "
-    "pitfall or explicit step in the skill that governs that class of task.\n"
-    "  • A non-trivial technique, fix, workaround, debugging path, or tool-usage pattern emerged "
-    "that a future session would benefit from beyond this run.\n"
-    "  • A skill that got loaded or consulted this session is demonstrably wrong, missing a step, "
-    "or outdated.\n\n" + _DURABLE_LESSON_CHECK_BLOCK +
-    "Preference order — prefer the earliest action that fits, but do pick one when a signal above "
-    "fired:\n"
+    "Review the conversation for useful skill learning.\n\n" + SKILLS_GUIDANCE + "\n\n" +
+    _LESSON_LAYER_BLOCK +
+    "For a useful candidate, prefer an existing skill whose description fits the lesson:\n"
     "  1. UPDATE A CURRENTLY-LOADED SKILL. Look back through the conversation for skills the user "
     "loaded via /skill-name or you read via skill_view. If any of them covers the territory of the "
     "new learning, PATCH that one first (re-load it with skill_view during this review — see "
-    "Read-before-write below). It is the skill that was in play, so it's the right one to extend — "
+    "Read-before-write below). Being loaded alone does not make it the right target; "
     "whoever wrote it: hand-written, installed, bundled, and pinned skills are all yours to "
     "improve.\n"
     "  2. UPDATE AN EXISTING UMBRELLA (via skills_list + skill_view). If no loaded skill fits but "
@@ -517,11 +479,8 @@ _SKILL_REVIEW_PROMPT = (
     "skill_view just returned. Creating a brand-new skill or adding a NEW supporting file needs no "
     "prior read. If a write is refused with a read-before-write error, call skill_view for the "
     "named target once and retry the write once; do not loop.\n\n"
-    "User-preference embedding (important): when the user expressed a style/format/workflow "
-    "preference, the update belongs in the SKILL.md body, not just in memory. Memory captures 'who "
-    "the user is and what the current situation and state of your operations are'; skills capture "
-    "'how to do this class of task for this user'. When they complain about how you handled a "
-    "task, the skill that governs that task needs to carry the lesson.\n\n"
+    "A useful standing task preference belongs in the governing skill; a task-local correction "
+    "does not automatically warrant an edit.\n\n"
     "If you notice two existing skills that overlap, note it in your reply — the background "
     "curator handles consolidation at scale. Never delete a skill here.\n\n"
     "Do NOT capture" + _DO_NOT_CAPTURE_BLOCK +
@@ -531,26 +490,12 @@ _SKILL_REVIEW_PROMPT = (
 _COMBINED_REVIEW_PROMPT = (
     "Review the conversation above and update two things:\n\n"
     "**Memory**: " + _MEMORY_ROUTING_BLOCK +
-    "**Skills**: how to do this class of task. Update them only for genuinely new, durable, "
-    "reusable lessons. 'Nothing to save.' is a successful review when a candidate is temporary, "
-    "unverified, redundant, task-local, or already correctly covered.\n\n"
-    "Target shape of the skill library: CLASS-LEVEL skills with a SKILL.md of always-on rules and a "
-    "small `references/` set of topical depth — not narrow one-session skills, and not an umbrella "
-    "hoarding a references/ file per session.\n\n" + _LESSON_LAYER_BLOCK +
-    "Signals to evaluate for a durable skill update:\n"
-    "  • User corrected your style, tone, format, legibility, verbosity, or approach. Frustration "
-    "is a FIRST-CLASS skill signal, not just a memory signal. 'stop doing X', 'don't format like "
-    "this', 'I hate when you Y' — embed the lesson in the skill that governs that task so the next "
-    "session starts fixed.\n"
-    "  • A non-trivial technique, fix, workaround, or debugging path emerged that applies beyond "
-    "this run.\n"
-    "  • A skill that was loaded or consulted is demonstrably wrong, missing, or outdated.\n\n" +
-    _DURABLE_LESSON_CHECK_BLOCK +
-    "Preference order for skills — pick the earliest that fits:\n"
+    "**Skills**: " + SKILLS_GUIDANCE + "\n\n" + _LESSON_LAYER_BLOCK +
+    "For a useful candidate, prefer an existing skill whose description fits the lesson:\n"
     "  1. UPDATE A CURRENTLY-LOADED SKILL. Check what skills were loaded via /skill-name or "
     "skill_view in the conversation. If one of them covers the learning, PATCH it first (re-load "
-    "it with skill_view during this review — see Read-before-write below). It was in play; it's "
-    "the right place, whoever wrote it.\n"
+    "it with skill_view during this review — see Read-before-write below), whoever wrote it. "
+    "Being loaded alone does not make it the right target.\n"
     "  2. UPDATE AN EXISTING UMBRELLA (skills_list + skill_view to find the right one). Patch it.\n"
     "  3. ADD A SUPPORT FILE under an existing umbrella via skill_manage action=write_file. Three "
     "kinds: `references/<topic>.md` for topical depth (decision tables, recipes, quirks, condensed "
@@ -567,8 +512,8 @@ _COMBINED_REVIEW_PROMPT = (
     "file. Content quoted earlier in the transcript does NOT count — base the write on what "
     "skill_view just returned. New skills and NEW supporting files need no prior read. On a "
     "read-before-write refusal: view the named target once, retry the write once, do not loop.\n\n"
-    "User-preference embedding: when the user complains about how you handled a task, update the "
-    "skill that governs that task rather than memory. Memory says 'who the user is and "
+    "User-preference placement, when worth saving: use the governing skill for a standing task "
+    "preference, not an automatic edit for every complaint. Memory says 'who the user is and "
     "what the current situation and state of your operations are'; skills say 'how to do this "
     "class of task for this user'. A user-preference lesson lives in exactly ONE place: the skill "
     "that governs the task when one exists, USER.md only for cross-cutting preferences no skill "
@@ -577,8 +522,8 @@ _COMBINED_REVIEW_PROMPT = (
     "If you notice overlapping existing skills, mention it — the background curator handles "
     "consolidation. Never delete a skill here.\n\n"
     "Do NOT capture as skills" + _DO_NOT_CAPTURE_BLOCK +
-    "Act on whichever dimension has a candidate that clears the durable-lesson bar. If neither "
-    "does, say 'Nothing to save.' and stop."
+    "Save useful memory under its routing rules and useful skill learning under the bar above. "
+    "If neither has anything to save, say 'Nothing to save.' and stop."
 )
 
 

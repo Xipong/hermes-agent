@@ -302,6 +302,28 @@ Long files are truncated before injection.
 
 The skills system contributes a compact skills index to the prompt when skills tooling is available.
 
+## Completion and autonomous learning policy
+
+Completion guidance uses acceptance criteria, risk and required project/user/skill gates
+as the stopping boundary. Passing evidence remains useful for unchanged current-revision
+inputs; a change, failure or concrete uncovered risk justifies further verification.
+An authoritative synchronous committed write result can establish its postconditions;
+an acknowledgement or accepted asynchronous job cannot.
+
+`SKILLS_GUIDANCE` is shared by the foreground and both skill-review modes. Learning remains
+autonomous, but an edit needs new evidenced usefulness, not merely a durable-sounding rule.
+It preserves conditional workarounds, exact decision constants and permission scope;
+removing redundant instructions or saving nothing can be the right result. Fresh-read
+write guards and ownership rules are unchanged.
+
+For example, a temporary low-resource rendering fallback is not a new global engine
+preference; a permission clarification is not an instruction to invent a permission file;
+a proven wrong command still merits an autonomous fix. Correcting a redundant checkpoint
+procedure may mean deleting it rather than writing its opposite.
+
+Prompt delivery tests establish wiring, not model compliance or cost savings. Model/effort
+defaults require paired outcome evidence; these policies do not change the model gates.
+
 ## Supported prompt customization surfaces
 
 Most users should treat `agent/prompt_builder.py` as implementation code, not a configuration surface. The supported customization path is to change the prompt inputs Hermes already loads, rather than editing Python templates in place.

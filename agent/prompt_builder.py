@@ -254,16 +254,28 @@ SESSION_SEARCH_GUIDANCE = (
 # clears it; size and the system[0] identity gate were both ruled out. The reword is empirically validated,
 # not understood — if you rewrite this sentence, re-verify against a subscription OAuth token, not an
 # sk-ant-api… key, which does not hit the filter. Dieted (#95681, maintainer-directed): the record-it /
-# patch-it coaching that used to open this block duplicated the ## Skills section (which teaches both "offer
-# to save as a skill" and "fix it with skill_manage(action='patch')") and skill_manage's own schema. The
+# patch-it coaching duplicated the ## Skills section and skill_manage's own schema. #136931 now keeps
+# autonomous-learning policy here for foreground and background, without changing skill loading. The
 # [SKILL_PRUNED] reload rule that followed moved to the compaction summary, the only place markers exist
 # (agent/context_compressor_tail.py::with_skill_safety_rule): fresh sessions no longer pay for it.
 SKILLS_GUIDANCE = (
-    "When you work out a non-trivial workflow, record it with skill_manage for future reuse.\n\n"
-    "Record only a durable, reusable lesson: keep a conditional workaround's real trigger and "
-    "boundary, and do not turn task-local state or a one-off choice into a general rule. Preserve "
-    "a user preference or prohibition at its stated scope. If the workflow is already covered or "
-    "does not apply beyond this run, leave the skill unchanged.\n\n"
+    "When you work out a non-trivial workflow, record it with skill_manage for future reuse.\n"
+    "For autonomous updates, save only novel, evidenced, reusable knowledge that fits the target "
+    "skill: working commands, operator preferences, environment/domain facts, or non-obvious "
+    "constraints and their mechanisms. Durability alone does not make an instruction useful; "
+    "ask whether the unchanged skill already handles the next case. A correction is a signal "
+    "to evaluate, not an obligation to add a rule. 'Nothing to save.' is a successful outcome.\n"
+    "Keep a conditional workaround's real trigger and boundary; keep current state and one-off "
+    "choices in task/project state. Preserve permissions and prohibitions at their stated scope, "
+    "and exact decision labels, values and thresholds verbatim. Do not strip conditions needed "
+    "for a rule to remain true or turn temporary constraints into defaults.\n"
+    "Patch demonstrated errors autonomously. Prefer deleting or simplifying redundant instructions "
+    "to adding a prohibition or exception catalog. Prefer missing knowledge over redundant agent-control "
+    "scaffolding (extra reviews, status/reasoning directions, checkpoint rituals or arbitrary context "
+    "caps). Check for contradictions or lost capability; retain real user constraints, fragile technical "
+    "contracts and safety boundaries. "
+    "This is an in-turn judgment, not a new reviewer, approval, paid test or receipt. User-requested "
+    "edits retain their requested scope; existing write guards and ownership rules still apply."
 )
 
 KANBAN_GUIDANCE = (
@@ -359,6 +371,10 @@ TOOL_USE_ENFORCEMENT_GUIDANCE = (
     "user. Responses that only describe intentions without acting are not acceptable."
 )
 
+# Corrective-block provenance: historical traces/ablations are noted below, not evidence for every
+# future model matching a family substring. Re-evaluate at model/effort releases (#134640, #146236);
+# retire or narrow a correction when paired task-quality evidence no longer supports it. Keep defaults
+# until measured: prompt-contract tests do not establish model efficacy or token/cost savings.
 # "muse" = Meta Muse Spark: on defaults it answers in prose with 0 tool calls and the turn closes on
 # finish_reason=stop (#96550).
 # "nemotron" is deliberately absent from this list and EXECUTION_GUIDANCE_MODELS. We ran Nemotron 3.5 Super VL 5 times
@@ -391,7 +407,10 @@ TASK_COMPLETION_GUIDANCE = (
     "When the user asks you to build, run, or verify something, the deliverable is a working artifact backed by real "
     "tool output — not a description of one. Do not stop after writing a stub, a plan, or a single command. Keep "
     "working until you have actually exercised the code or produced the requested result, then report what real "
-    "execution returned.\n"
+    "execution returned. Stop when the acceptance criteria and required project/user/skill gates are satisfied "
+    "with evidence proportionate to the risk. Reuse fresh passing checks for unchanged current-revision inputs. "
+    "Repeat or broaden verification only for a new change, failure, concrete uncovered risk, or required gate; "
+    "do not add reviewer rounds without an independent unresolved question.\n"
     "If a tool, install, or network call fails and blocks the real path, say so directly and try an alternative "
     "(different package manager, different approach, ask the user). NEVER substitute plausible-looking fabricated "
     "output (made-up data, invented file contents, synthesised API responses) for results you couldn't actually "
@@ -443,7 +462,8 @@ OPENAI_MODEL_EXECUTION_GUIDANCE = (
     "- Do not stop early when another tool call would materially improve the result.\n"
     "- If a tool returns empty, partial, or suspiciously narrow results, retry with a broader or different query or "
     "strategy before concluding.\n"
-    "- Keep calling tools until: (1) the task is complete, AND (2) you have verified the result.\n"
+    "- Finish once the task is complete and sufficiently verified; another call needs an unresolved requirement "
+    "or concrete risk, not just another opportunity to check.\n"
     "</tool_persistence>\n\n"
     "<mandatory_tool_use>\n"
     "NEVER answer these from memory or mental computation — ALWAYS use a tool:\n"
@@ -480,9 +500,11 @@ OPENAI_MODEL_EXECUTION_GUIDANCE = (
     "your plan is not itself the answer; the requested output must appear in your response.\n"
     "</verification>\n\n"
     "<external_state_verification>\n"
-    "- After any state-changing write to an external system (API call, message post, record update), verify the effect "
-    "by reading back the exact target before claiming success — a successful tool call is not a successful task. Do "
-    "NOT re-verify internal file edits a tool already confirmed.\n"
+    "- Verify an external write's relevant postconditions before claiming success. A synchronous response is "
+    "sufficient if it authoritatively returns the committed target, requested values, and revision/identifier "
+    "establishing those postconditions. Otherwise read back the exact target: a generic success, acknowledgement, "
+    "async acceptance, ambiguous result, or missing relevant fields does not prove completion. Await async completion "
+    "and verify its result. Do NOT re-verify internal file edits a tool already confirmed.\n"
     "- Declared totals in responses (total, reply_count, has_more, '...N more') are hard assertions. If your "
     "enumerated count disagrees, re-fetch or parse programmatically — never finalize on 'go with what I have'.\n"
     "- When building write payloads, set fields explicitly rather than relying on provider defaults that could "
@@ -1353,9 +1375,6 @@ def _render_skills_index(
         "Skills also encode the user's preferred approach, conventions, and quality standards for tasks like "
         "code review, planning, and testing — load them even for tasks you already know how to do, because "
         "the skill defines how it should be done here.\n"
-        "If a skill has issues, fix it with skill_manage(action='patch').\n"
-        "After difficult/iterative tasks, offer to save as a skill. If a skill you loaded was missing steps, "
-        "had wrong commands, or needed pitfalls you discovered, update it before finishing.\n"
         "\n"
         "<available_skills>\n"
         + "\n".join(index_lines) + "\n"
