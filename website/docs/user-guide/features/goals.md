@@ -188,6 +188,27 @@ After every turn, Hermes calls an auxiliary model with:
 
 The judge is deliberately conservative: it marks a goal `done` only when the response **explicitly** confirms the goal is complete, when the final deliverable is clearly produced. A goal the agent explains is **unachievable** (impossible, out of scope, needs user input) gets a `blocked` verdict instead — never `done`: the goal **pauses** with the judge's reason (`🚫 Goal judged unachievable — paused`), so you can re-scope it with `/goal <text>` or override with `/goal resume` rather than burning budget or having an impossible task waved through as complete.
 
+### Feedback on the next turn
+
+A successful `continue` judgment appends its objection to the next worker prompt, not
+just the status shown to you. This applies to plain goals, subgoals, and completion
+contracts. The worker is told that its completion claim was rejected and to include
+concrete evidence in its **next answer**, rather than point to earlier turns. The
+existing continuation prefix and criteria stay intact; prior messages and the system
+prompt are not rewritten.
+
+The appended block is bounded to 2,250 characters including guidance and the truncation
+marker: it retains up to 2,000 characters of the judge's reason, preserving line breaks,
+and marks an omitted tail with `… [truncated]`. An unchanged pause/reload/resume retains
+applicable feedback. Changing the goal, contract, subgoals, or quality-gate definitions
+invalidates it; a later judgment or gate result supersedes it. Older saved goals without
+feedback provenance retain their diagnostic reason but do not replay it as instructions.
+
+Judge transport/import/parse failures and missing reasons are diagnostics, not task
+objections. They do not acquire a rejection block, nor do `done`, `blocked`, or `wait`
+verdicts. The judge remains a lightweight check of the worker's report: the worker still
+owns verifying the actual work and accurately reporting remaining work.
+
 ### Fail-open semantics
 
 If the judge errors (network blip, malformed response, unavailable aux client), Hermes treats the verdict as `continue` — a broken judge never wedges progress. The **turn budget** is the real backstop.

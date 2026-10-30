@@ -337,23 +337,54 @@ def test_iteration_limit_fallback_is_judged_and_can_continue(
     assert [p["status"] for p in completes] == ["complete", "complete"]
 
 
-def test_goal_judge_feedback_is_returned_for_the_next_tui_turn(server, monkeypatch):
-    """Regression for #137546: Desktop/TUI chains the actionable judge reason."""
-    from hermes_cli.goals import GoalManager
+@pytest.mark.parametrize("shape", ["plain", "subgoals", "contract"])
+def test_goal_judge_feedback_reaches_next_dispatch(server, turn_env, monkeypatch, shape):
+    """Real producer -> follow-up -> run_conversation, not just the status event."""
+    from copy import deepcopy
 
-    session_key = "goal-judge-feedback-chain"
-    GoalManager(session_key).set("finish the current task")
-    feedback = "Include the exact test command and its passing result."
-    session = _turn_session(types.SimpleNamespace(session_id=session_key), session_key)
-    monkeypatch.setattr(
-        "hermes_cli.goals.judge_goal", lambda *_args, **_kwargs: ("continue", feedback, False, None, False),
+    from hermes_cli.goals import GoalContract, GoalManager
+
+    session_key = f"goal-judge-feedback-chain-{shape}"
+    mgr = GoalManager(session_key)
+    mgr.set("finish the current task", contract=(
+        GoalContract(verification="quote the test output") if shape == "contract" else None))
+    if shape == "subgoals":
+        mgr.add_subgoal("include the migration result")
+    prefix = mgr.next_continuation_prompt()
+    feedback = "Include the exact test command.\nQuote its passing result."
+    replies = iter(["The task is complete.", "Tests passed: concrete evidence."])
+    verdicts = iter([("continue", feedback, False, None, False), ("done", "verified", False, None, False)])
+    monkeypatch.setattr("hermes_cli.goals.judge_goal", lambda *a, **k: next(verdicts))
+    seen = []
+
+    def run_conversation(message, **kwargs):
+        seen.append((message, deepcopy(kwargs["conversation_history"])))
+        return {"final_response": next(replies), "completed": True, "failed": False}
+
+    cached_system = "Stable cached system prompt"
+    agent = types.SimpleNamespace(
+        session_id=session_key, run_conversation=run_conversation, clear_interrupt=lambda: None,
+        _cached_system_prompt=cached_system,
     )
+    session = _turn_session(agent, session_key)
+    history = [{"role": "user", "content": "Earlier request"},
+               {"role": "assistant", "content": "Earlier work"}]
+    session["history"] = deepcopy(history)
+    server._run_prompt_submit("rid", "sid", session, "initial work")
 
-    followup = server._goal_followup_after_turn(
-        "sid", session, {"completed": True, "failed": False}, "complete", "The task is complete.",
-    )
-
-    assert feedback in followup
+    assert len(seen) == 2
+    prompt, next_history = seen[1]
+    assert prompt.startswith(prefix)
+    assert feedback in prompt
+    assert "previous completion claim was rejected" in prompt
+    assert "next response" in prompt and "concrete evidence" in prompt
+    assert "instead of referring to earlier turns" in prompt
+    assert next_history[:len(history)] == history
+    assert session["history"][:len(history)] == history
+    assert agent._cached_system_prompt == cached_system
+    statuses = [p["text"] for event, _, p in turn_env if event == "status.update" and p.get("kind") == "goal"]
+    assert any(feedback in text for text in statuses)
+    assert GoalManager(session_key).state.status == "done"
 
 
 # ── active-goal recovery after compression exhaustion ───────────────

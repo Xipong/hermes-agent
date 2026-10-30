@@ -820,7 +820,8 @@ def _extract_json_object(raw: str) -> Optional[dict[str, Any]]:
 def _parse_judge_response(raw: str) -> tuple[str, str, bool, Optional[dict[str, Any]]]:
     """Parse the judge's reply, fail-open. Returns ``(verdict, reason, parse_failed, wait_directive)``.
 
-    ``parse_failed`` flags non-JSON output so callers can auto-pause after N in a row.
+    ``parse_failed`` flags unusable output (including missing/unknown verdicts) so callers
+    can auto-pause after N in a row and avoid treating fail-open diagnostics as objections.
     ``wait_directive`` is ``{"session_id"}`` / ``{"pid"}`` / ``{"seconds"}`` for a ``wait``
     verdict; a wait with no target is downgraded to ``continue``. Accepts ``{"verdict": ...}`` and
     the legacy ``{"done": <bool>}`` shape.
@@ -835,12 +836,14 @@ def _parse_judge_response(raw: str) -> tuple[str, str, bool, Optional[dict[str, 
     verdict_raw = data.get("verdict")
     if isinstance(verdict_raw, str):
         verdict = verdict_raw.strip().lower()
-    else:
+    elif "done" in data:
         done_val = data.get("done")
         done = done_val.strip().lower() in {"true", "yes", "1", "done"} if isinstance(done_val, str) else bool(done_val)
         verdict = "done" if done else "continue"
+    else:
+        return "continue", "judge reply has no verdict", True, None
     if verdict not in {"done", "blocked", "continue", "wait"}:
-        verdict = "continue"
+        return "continue", f"judge reply has invalid verdict: {verdict!r}", True, None
     if verdict != "wait":
         return verdict, reason, False, None
 

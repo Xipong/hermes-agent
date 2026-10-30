@@ -31,18 +31,15 @@ def test_criteria_mutation_drops_feedback_after_reload_resume(monkeypatch, mutat
     mgr.add_subgoal("old criterion")
     assert FEEDBACK in judge(monkeypatch, mgr)["continuation_prompt"]
 
-    if mutation == "contract":
-        mgr.set_contract(GoalContract(verification="replacement verification"))
-    elif mutation == "remove":
-        mgr.remove_subgoal(1)
-    elif mutation == "clear":
-        mgr.clear_subgoals()
-    elif mutation == "add":
-        mgr.add_subgoal("new criterion")
-    elif mutation == "goal":
-        mgr.set("ship a different fix")
-    else:
-        mgr.add_gate("verify")
+    mutations = {
+        "contract": lambda: mgr.set_contract(GoalContract(verification="replacement verification")),
+        "remove": lambda: mgr.remove_subgoal(1),
+        "clear": mgr.clear_subgoals,
+        "add": lambda: mgr.add_subgoal("new criterion"),
+        "goal": lambda: mgr.set("ship a different fix"),
+        "gate": lambda: mgr.add_gate("verify"),
+    }
+    mutations[mutation]()
     if mutation != "goal":
         assert mgr.state.last_reason == FEEDBACK
 
@@ -139,12 +136,19 @@ def test_prompt_checks_live_criteria_even_before_saving(monkeypatch):
     assert FEEDBACK not in prompt
 
 
-def test_multiline_feedback_remains_bounded_after_reload(monkeypatch):
-    mgr = GoalManager("feedback-bound")
-    mgr.set("ship the fix")
+@pytest.mark.parametrize("shape", ["plain", "subgoals", "contract"])
+def test_multiline_feedback_remains_bounded_after_reload(monkeypatch, shape):
+    mgr = GoalManager(f"feedback-bound-{shape}")
+    mgr.set("ship the fix", contract=(
+        GoalContract(verification="quote test output") if shape == "contract" else None))
+    if shape == "subgoals":
+        mgr.add_subgoal("quote migration output")
+    prefix = mgr.next_continuation_prompt()
     reason = "first request\nsecond request\n" + "x" * 2100 + "omitted tail"
     judge(monkeypatch, mgr, reason)
     prompt = resumed_prompt(mgr)
+    assert prompt.startswith(prefix)
+    assert len(prompt.removeprefix(prefix)) <= 2250
     assert "first request\nsecond request" in prompt
     assert "[truncated]" in prompt
     assert "omitted tail" not in prompt
