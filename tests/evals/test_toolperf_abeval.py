@@ -21,7 +21,7 @@ def test_guidance_arm_uses_isolated_home_and_only_changes_guidance(tmp_path, mon
     source_home.mkdir()
     (source_home / ".env").write_text("OPENROUTER_API_KEY=test\n", encoding="utf-8")
     (source_home / "config.yaml").write_text(
-        "model:\n  provider: openrouter\nagent:\n  task_completion_guidance: true\n",
+        "model:\n  provider: openrouter\nagent:\n  max_turns: 30\n",
         encoding="utf-8",
     )
     monkeypatch.setattr(harness, "HOME", source_home)
@@ -30,12 +30,12 @@ def test_guidance_arm_uses_isolated_home_and_only_changes_guidance(tmp_path, mon
 
     config = (arm_home / "config.yaml").read_text(encoding="utf-8")
     assert "model:\n  provider: openrouter\n" in config
-    assert "agent:\n  task_completion_guidance: true\n" in config
+    assert "agent:\n  max_turns: 30\n" in config
     assert "  tool_use_enforcement: true\n" in config
     assert "  execution_guidance: false\n" in config
     assert (arm_home / ".env").read_text(encoding="utf-8") == "OPENROUTER_API_KEY=test\n"
     assert (source_home / "config.yaml").read_text(encoding="utf-8") == (
-        "model:\n  provider: openrouter\nagent:\n  task_completion_guidance: true\n"
+        "model:\n  provider: openrouter\nagent:\n  max_turns: 30\n"
     )
 
 
@@ -53,8 +53,8 @@ def test_guidance_tasks_score_both_required_tool_work_and_trivial_edit(tmp_path)
 
 
 @pytest.mark.parametrize("agent", [
-    "agent:\n    task_completion_guidance: false\n",
-    "agent: {task_completion_guidance: false}\n",
+    "agent:\n    max_turns: 20\n",
+    "agent: {max_turns: 20}\n",
 ])
 def test_guidance_arm_preserves_valid_yaml_settings(tmp_path, monkeypatch, agent):
     harness = _harness_module()
@@ -67,9 +67,11 @@ def test_guidance_arm_preserves_valid_yaml_settings(tmp_path, monkeypatch, agent
     config = yaml.safe_load((output / "config.yaml").read_text())
     assert config["model"] == "custom/model"
     assert config["agent"] == {
-        "task_completion_guidance": False,
+        "max_turns": 20,
         "tool_use_enforcement": True,
         "execution_guidance": False,
+        "task_completion_guidance": True,
+        "parallel_tool_call_guidance": True,
     }
     assert "# preserve this comment" in (output / "config.yaml").read_text()
     assert (home / "config.yaml").read_text() == original

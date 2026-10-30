@@ -40,18 +40,27 @@ import time
 from collections import Counter
 from pathlib import Path
 
+# Permit the documented direct script entry point as well as module imports.
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from evals.toolperf_abeval import guidance_cases, measurement
+
 ROOT = Path(os.environ.get("ABEVAL_ROOT", "abeval-workspace")).resolve()
 HOME = Path(os.environ.get("ABEVAL_HOME", str(ROOT / "home"))).resolve()
 
-# Keep each model-gated block independently measurable.  Every arm explicitly
-# sets both controls in a per-run copy of the configured home, rather than
+# Keep configurable guidance independently measurable. Every arm explicitly
+# sets all four controls in a per-run copy of the configured home, rather than
 # inheriting a possibly customized default.
-GUIDANCE_ARMS = {
-    "all_on": {"tool_use_enforcement": True, "execution_guidance": True},
-    "tool_use_off": {"tool_use_enforcement": False, "execution_guidance": True},
-    "execution_off": {"tool_use_enforcement": True, "execution_guidance": False},
-    "all_off": {"tool_use_enforcement": False, "execution_guidance": False},
-}
+GUIDANCE_BLOCKS = ("tool_use_enforcement", "execution_guidance",
+                   "task_completion_guidance", "parallel_tool_call_guidance")
+GUIDANCE_ARMS = {"all_on": dict.fromkeys(GUIDANCE_BLOCKS, True)}
+for _arm, _block in (("tool_use_off", "tool_use_enforcement"),
+                     ("execution_off", "execution_guidance"),
+                     ("completion_off", "task_completion_guidance"),
+                     ("parallel_off", "parallel_tool_call_guidance")):
+    GUIDANCE_ARMS[_arm] = {key: key != _block for key in GUIDANCE_BLOCKS}
+GUIDANCE_ARMS["all_off"] = dict.fromkeys(GUIDANCE_BLOCKS, False)
 
 TASKS = {
     # P: python-not-found + venv module confusion (terminal failure hints)
@@ -79,6 +88,8 @@ TASKS = {
     "guidance_write_readback": "Set {WORK}/proj/release.txt to exactly `release=ready` using write_file. Then use read_file to read it back and reply with its exact contents.",
     "guidance_trivial_edit": "Create {WORK}/proj/flag.txt containing exactly `enabled`. Reply DONE after the edit; no verification is needed.",
 }
+
+TASKS.update(guidance_cases.TASKS)
 
 
 def make_sandbox(work: Path):
@@ -196,7 +207,15 @@ def _home_for_guidance_arm(work: Path, guidance_arm: str) -> Path:
 def run(arm: str, model: str, reps: int, pythonpath: str, only=None, guidance_arm="all_on"):
     resdir = ROOT / "results" / model.replace("/", "_") / arm
     resdir.mkdir(parents=True, exist_ok=True)
+    selected = {name: task for name, task in TASKS.items() if not only or name in only}
+    if not selected or (only and set(only) - TASKS.keys()):
+        raise ValueError("unknown or empty task selection")
+    receipt = measurement.pairing_receipt(HOME, model, pythonpath, selected, ROOT)
+    manifest = {**receipt, "guidance_arm": guidance_arm, "switches": GUIDANCE_ARMS[guidance_arm]}
     meta_path = resdir / "meta.jsonl"
+    if meta_path.exists() and not (resdir / "pairing.json").exists():
+        raise ValueError("legacy results have no pairing receipt; use a fresh result root")
+    measurement.freeze_receipt(resdir / "pairing.json", manifest)
     done = set()
     if meta_path.exists():
         for line in meta_path.read_text(encoding="utf-8-sig").splitlines():
@@ -214,6 +233,11 @@ def run(arm: str, model: str, reps: int, pythonpath: str, only=None, guidance_ar
             work = ROOT / "runs" / model.replace("/", "_") / arm / run_id
             work.mkdir(parents=True, exist_ok=True)
             make_sandbox(work)
+            if name in guidance_cases.TASKS:
+                guidance_cases.prepare(work, name)
+            current = measurement.pairing_receipt(HOME, model, pythonpath, selected, ROOT)
+            measurement.freeze_receipt(resdir / "pairing.json",
+                {**current, "guidance_arm": guidance_arm, "switches": GUIDANCE_ARMS[guidance_arm]})
             arm_home = _home_for_guidance_arm(work, guidance_arm)
             atof = resdir / f"{run_id}.atof.jsonl"
             relay_config = work / "relay-plugins.toml"
@@ -254,18 +278,16 @@ mode = "overwrite"
                     cwd=work, env=env, capture_output=True, text=True,
                     encoding="utf-8", errors="replace", timeout=600, check=False)
                 out = (p.stdout or "").strip()
+                stderr = p.stderr or ""
                 rc = p.returncode
             except subprocess.TimeoutExpired:
-                out, rc = "", -9
+                out, stderr, rc = "", "timeout", -9
             dt = time.time() - t0
-            if rc != 0 and not out.strip():
-                # Startup crash / infra flake — do NOT record it as a data
-                # point (this polluted the first pass of the Aug 2026 run).
-                print(f"[{arm}/{model}] {run_id} INFRA-CRASH exit={rc} "
-                      f"{dt:.0f}s — not recorded, will retry on resume", flush=True)
-                continue
+            # Every attempt stays in the denominator, including empty-output failures.
+            (resdir / f"{run_id}.stderr.txt").write_text(stderr, encoding="utf-8")
             rec = {"run_id": run_id, "task": name, "rep": rep, "arm": arm,
-                   "guidance_arm": guidance_arm,
+                   "guidance_arm": guidance_arm, "pair_id": receipt["pair_id"],
+                   "reasoning_effort_config": receipt["reasoning_effort_config"],
                    "model": model, "wall_s": round(dt, 1), "exit": rc,
                    "tail": "\n".join(out.splitlines()[-12:])}
             with open(meta_path, "a", encoding="utf-8") as f:
@@ -294,7 +316,7 @@ def score_run(atof: Path):
         elif k == "scope" and c == "tool" and sc == "end":
             d = ev.get("data")
             ds = d if isinstance(d, str) else json.dumps(d or "")
-            result_bytes += len(ds)
+            result_bytes += len(ds.encode("utf-8"))
             is_err = ev.get("metadata", {}).get("status") not in (None, "ok")
             if not is_err:
                 if re.search(r'"error":\s*"(?!null)', ds[:1500]) or \
@@ -306,7 +328,7 @@ def score_run(atof: Path):
             else:
                 last_err_tool = None
     return {"llm": llm, "tools": tools, "errs": errs,
-            "retries": retries, "kb": result_bytes // 1024}
+            "retries": retries, "kb": result_bytes // 1024, **measurement.usage_metrics(atof)}
 
 
 
@@ -390,14 +412,33 @@ def report(models, arms):
                 trace = mdir / arm / f"{m['run_id']}.atof.jsonl"
                 s = score_run(trace) or {}
                 work = ROOT / "runs" / model.replace("/", "_") / arm / m["run_id"]
+                acceptance = {}
                 try:
-                    ok = m.get("exit") == 0 and SUCCESS[m["task"]](m.get("tail", ""), work)
+                    if m["task"] in guidance_cases.TASKS or m["task"] == "guidance_trivial_edit":
+                        acceptance = guidance_cases.score(m["task"], work, trace)
+                        ok = m.get("exit") == 0 and acceptance["ok"]
+                        if m["task"] == "guidance_arithmetic":
+                            ok = ok and bool(re.search(r"\b3973\b", m.get("tail", "")))
+                    else:
+                        ok = m.get("exit") == 0 and SUCCESS[m["task"]](m.get("tail", ""), work)
                     if ok and m["task"] in {"guidance_tool_action", "guidance_write_readback"}:
                         ok = guidance_trace_success(m["task"], work, trace)
                 except Exception:
                     ok = False
                 table.setdefault(m["task"], {}).setdefault(arm, []).append(
-                    {**s, "ok": ok, "wall": m["wall_s"]})
+                    {**s, **acceptance, "ok": ok, "wall": m["wall_s"],
+                     "pair_id": m.get("pair_id"), "rep": m["rep"] if "rep" in m else None})
+        detailed = {arm: [row for task in table.values() for row in task.get(arm, [])] for arm in arms}
+        pair_ids = {row.get("pair_id") for rows in detailed.values() for row in rows}
+        coverage = [Counter((task, row["rep"]) for task, cells in table.items() for row in cells.get(arm, []))
+                    for arm in arms]
+        paired = (len(arms) > 1 and len(pair_ids) == 1 and None not in pair_ids
+                  and all(c == coverage[0] for c in coverage))
+        output = {"model": model, "paired": paired, "tasks": table,
+                  "summary": {arm: measurement.totals(rows) for arm, rows in detailed.items()}}
+        mdir.mkdir(parents=True, exist_ok=True)
+        (mdir / "report.json").write_text(json.dumps(output, indent=2) + "\n")
+        print(f"Pairing validated: {paired}; detailed metrics: {mdir / 'report.json'}")
         hdr = (f"{'task':20s} | {'arm':8s} | {'n':>2s} {'ok%':>4s} {'llm':>5s} "
                f"{'tool':>5s} {'errs':>5s} {'retr':>5s} {'kb':>5s} {'wall':>6s}")
         print(hdr)
