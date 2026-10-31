@@ -47,9 +47,16 @@ def _notif_resolve_event_key(evt_key: str, session: dict | None = None) -> str:
         return evt_key
 
 
+def _notif_foreign_profile(session: dict, evt: dict) -> bool:
+    from hermes_constants import get_hermes_home
+    return bool(evt.get("profile_home")) and str(evt["profile_home"]) != str(session.get("profile_home") or get_hermes_home())
+
+
 def _notification_event_belongs_elsewhere(sid: str, session: dict, evt: dict) -> bool:
     """True if ``evt`` is owned by a *different* live session. Background completions carry the ``session_key`` of the
     session that started the work; async delegation completions also carry ``origin_ui_session_id`` (the live TUI tab)."""
+    if _notif_foreign_profile(session, evt):
+        return True
     evt_ui_sid = str(evt.get("origin_ui_session_id") or "")
     if evt_ui_sid:
         if evt_ui_sid == str(sid or "") and not session.get("_finalized"):
@@ -95,7 +102,7 @@ def _notif_other_profile_session_owns(sid: str, session: dict, evt: dict) -> boo
 def _session_owns_notification_event(sid: str, session: dict, evt: dict) -> bool:
     """True iff *this* session PROVABLY owns ``evt`` (UI origin is this live session, or ``session_key`` raw/compression-
     resolved matches) — the fail-closed gate for addressed notifications, without the orphan-adoption fallback."""
-    if session.get("_finalized"):
+    if session.get("_finalized") or _notif_foreign_profile(session, evt):
         return False
     # A completion replayed at process start has no in-process owner. A matching
     # persisted key alone can belong to a detached runtime whose old lease survived;
@@ -538,7 +545,11 @@ def _notif_poll_kanban_scoped(sid: str, session: dict) -> None:
 def _notif_defer_event(evt, claim, put=None):
     from tools.async_delegation import defer_completion_delivery
     from tools.process_registry import process_registry
-    if claim:
+    if evt.get("type", "completion") == "completion":
+        from tools.process_completion_delivery import release
+        if claim:
+            release(process_registry, evt, claim)
+    elif claim:
         defer_completion_delivery(evt['delegation_id'], claim)
     (put or process_registry.completion_queue.put)(evt)
 
@@ -701,9 +712,40 @@ def _notif_handle_event(sid, session, evt, emitted, registry, fmt, action, compl
     _notif_dispatch_event(sid, session, evt, text, claim)
 
 
+def _notif_restore_completions(registry, notifications, deferred):
+    from tools.process_completion_delivery import delivered, requeue_front
+    retry = [event for event, _ in notifications if not delivered(registry, event)]
+    if deferred is not None:
+        deferred.extend(retry)
+    else:
+        requeue_front(registry, retry)
+
+
+def _notif_process_completion_receipt(registry, claimed):
+    """Settle claims from the receiver's terminal callback, never thread admission."""
+    from tools.async_delegation import complete_event_delivery, release_event_delivery
+    once = threading.Lock()
+    settled = False
+
+    def receipt(payload):
+        nonlocal settled
+        with once:
+            if settled:
+                return
+            settled = True
+        if payload.get("status") == "settled":
+            for event, _text, claim in claimed:
+                complete_event_delivery(event, claim)
+        else:
+            for event, _text, claim in claimed:
+                release_event_delivery(event, claim)
+            _notif_restore_completions(registry, [(event, text) for event, text, _ in claimed], None)
+    return receipt
+
+
 def _notif_dispatch_completions(sid, session, notifications, registry, deferred):
     from tools.process_registry_notifications import PROCESS_COMPLETE_DISPLAY_KIND, ProcessNotificationBatch
-    from tools.async_delegation import claim_event_delivery, complete_event_delivery, release_event_delivery
+    from tools.async_delegation import claim_event_delivery, release_event_delivery
 
     if not notifications:
         return
@@ -729,16 +771,19 @@ def _notif_dispatch_completions(sid, session, notifications, registry, deferred)
         _notif_release_turn(session)
         for event, _text, claim in claimed:
             release_event_delivery(event, claim)
-        for event, _text in notifications:
-            _notif_requeue_if_pending(registry, event)
+        _notif_restore_completions(registry, notifications, deferred)
         return
     if text is None:
         _notif_release_turn(session)
+        for event, _text, claim in claimed:
+            release_event_delivery(event, claim)
+        return
     try:
         if text is not None:
             if not _notif_submit(f"__notif__{int(time.time() * 1000)}", sid, session, text,
                                  "completion batch dispatch failed", display_kind=PROCESS_COMPLETE_DISPLAY_KIND,
                                  report_ownership_refusal=False,
+                                 terminal_callback=_notif_process_completion_receipt(registry, claimed),
                                  display_metadata={"display_text": batch.display_text(registry)}):
                 for event, _text, claim in claimed:
                     _notif_defer_event(event, claim,
@@ -750,10 +795,8 @@ def _notif_dispatch_completions(sid, session, notifications, registry, deferred)
         _notif_release_turn(session)
         for event, _text, claim in claimed:
             release_event_delivery(event, claim)
-            _notif_requeue_if_pending(registry, event)
+        _notif_restore_completions(registry, notifications, deferred)
         return
-    for event, _text, claim in claimed:
-        complete_event_delivery(event, claim)
 
 
 def _notif_handle_ready(sid, session, events, emitted, registry, fmt, deferred, *, owned=False, reservations=None):
@@ -799,6 +842,18 @@ def _notif_drain_ready(sid, session, registry, *, shutdown=False, snapshot=None)
                 ready.append(event)
                 actions.append(action)
     return ready, actions
+
+
+def _notif_process_boundary_allowed(sid, session):
+    with session["history_lock"]:
+        return bool(session.get("running") and not session.get("_turn_cancel_requested")
+                    and not session.get("_finalized") and not session.get("queued_prompt")
+                    and not (sid and _open_requests(sid)))
+
+
+def _notif_bound_process_boundary_allowed(sid):
+    session = _notif_locked_sessions(lambda ss: ss.get(sid), None)
+    return session is not None and _notif_process_boundary_allowed(sid, session)
 
 
 def _notification_poller_loop(stop_event: threading.Event, sid: str, session: dict) -> None:

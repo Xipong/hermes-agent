@@ -1607,6 +1607,8 @@ class ProcessRegistry(ProcessNotificationMixin, ProcessTerminationMixin, Process
         if was_running and session.notify_on_complete:
             notification = {
                 "type": "completion",
+                "profile_home": str(get_hermes_home()),
+                "parent_session_id": session.parent_session_id,
                 "session_id": session.id,
                 "session_key": session.session_key,
                 "task_id": session.task_id,

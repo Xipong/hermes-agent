@@ -19,7 +19,8 @@ def test_cli_completion_drain_uses_visible_session_identity(monkeypatch):
     calls = []
 
     class FakeRegistry:
-        def drain_notifications(self, *, session_key="", owns_event=None):
+        def drain_notifications(self, *, session_key="", owns_event=None, skip_poll_observed=True):
+            assert skip_poll_observed is False
             calls.append((session_key, owns_event(event)))
             return [(event, "completion payload")]
 

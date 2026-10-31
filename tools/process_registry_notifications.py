@@ -99,8 +99,9 @@ class ProcessNotificationBatch:
     notifications: tuple[tuple[dict, str], ...]
 
     def _live(self, registry) -> list:
+        from tools.process_completion_delivery import delivered
         return [(event, text) for event, text in self.notifications
-                if not registry.is_completion_consumed(event.get("session_id", ""))]
+                if not registry.is_completion_consumed(event.get("session_id", "")) and not delivered(registry, event)]
 
     def render(self, registry) -> str | None:
         messages = [text for _event, text in self._live(registry)]

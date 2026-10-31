@@ -655,7 +655,11 @@ def is_interim_delegation_event(evt: dict[str, Any]) -> bool:
 
 
 def claim_event_delivery(evt: dict[str, Any], consumer: str) -> Optional[str]:
-    """Claim a durable delegation event; non-durable events (and interim notices) need no token."""
+    """Claim process completions in RAM or delegation results in their durable ledger."""
+    if evt.get("type", "completion") == "completion":
+        from tools.process_registry import process_registry
+        from tools.process_completion_delivery import claim
+        return claim(process_registry, evt, consumer)
     if is_interim_delegation_event(evt):
         return ""
     delegation_id = str(evt.get("delegation_id") or "") if evt.get("type") == "async_delegation" else ""
@@ -757,6 +761,10 @@ def requeue_admitted_completion(delegation_id: str, target_queue) -> bool:
 
 
 def complete_event_delivery(evt: dict[str, Any], claim_id: str) -> bool:
+    if evt.get("type", "completion") == "completion":
+        from tools.process_registry import process_registry
+        from tools.process_completion_delivery import acknowledge
+        return acknowledge(process_registry, evt, claim_id)
     return (_event_delivery(complete_completion_delivery, evt, claim_id)
             or get_event_delivery_state(evt) == "delivered")
 
@@ -764,6 +772,10 @@ def complete_event_delivery(evt: dict[str, Any], claim_id: str) -> bool:
 def release_event_delivery(evt: dict[str, Any], claim_id: str) -> bool:
     """Release a failed claim for a consumer that discards its copy (the TUI poller): the row is pending
     again, so it must stay eligible for the orphan sweep."""
+    if evt.get("type", "completion") == "completion":
+        from tools.process_registry import process_registry
+        from tools.process_completion_delivery import release
+        return release(process_registry, evt, claim_id)
     released = _event_delivery(release_completion_delivery, evt, claim_id)
     return_completion_offer(evt)
     return released

@@ -206,12 +206,8 @@ def _flush_session_db_after_tool_progress(
     storage_env=None,
     budget_config=None,
 ) -> bool:
-    """Persist tool progress, carrying ready delegation evidence once per batch.
-
-    The last result of a complete tool batch is the only same-turn carrier. It
-    is enriched before the batch's first durable commit, so history remains
-    append-only and every provider sees the ordinary assistant/tool role shape.
-    """
+    """Persist background evidence on the final NEW result of a complete tool batch,
+    before append-only commit; never rewrite a cached or historical result."""
     from agent.conversation_loop import _maybe_inject_run_budget_wrapup
     from agent.turn_iteration_prep import _maybe_inject_iteration_budget_warning
     _maybe_inject_run_budget_wrapup(agent, messages)
@@ -222,8 +218,11 @@ def _flush_session_db_after_tool_progress(
         agent, messages, storage_env=storage_env, budget_config=budget_config)
 
     try:
-        flush_result = agent._flush_messages_to_session_db(messages)
-        persisted = flush_result is not False
+        from agent.process_inject import tool_progress_carrier
+        with tool_progress_carrier(agent, messages, num_tool_msgs=completed_batch_size,
+                                   budget_config=budget_config or _budget_for_agent(agent)):
+            flush_result = agent._flush_messages_to_session_db(messages)
+            persisted = flush_result is not False
         if not persisted:
             agent._incremental_persistence_failed = True
             # The flush caught its own exception and returned False; the
