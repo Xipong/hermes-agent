@@ -34,6 +34,21 @@ class TestBehaviourIsPreserved:
         assert chr(10) in SKILL_SAFETY_RULE
         assert (chr(92) + 'n') not in SKILL_SAFETY_RULE + SKILLS_GUIDANCE
 
+    def test_same_learning_policy_reaches_background_review(self):
+        """Foreground and both review modes share one policy, not diverging copies.
+
+        This verifies delivery, not whether a model follows the policy.
+        """
+        from types import SimpleNamespace
+
+        from agent.background_review import spawn_background_review_thread
+
+        for memory in (False, True):
+            _target, prompt = spawn_background_review_thread(
+                SimpleNamespace(), [], review_memory=memory, review_skills=True
+            )
+            assert SKILLS_GUIDANCE in prompt
+
 
 class TestGuidanceReachesTheSystemPrompt:
     def test_guidance_is_wired_into_tool_guidance(self):

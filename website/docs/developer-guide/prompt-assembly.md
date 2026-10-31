@@ -302,6 +302,44 @@ Long files are truncated before injection.
 
 The skills system contributes a compact skills index to the prompt when skills tooling is available.
 
+## Completion and autonomous learning policy
+
+Completion guidance uses acceptance criteria, affected behavior/contracts, risk and required
+project/user/skill gates as the stopping boundary. A source edit alone does not require tests:
+inspection can suffice for a trivial code change with no meaningful behavioral or contract
+effect. Passing evidence remains useful while its relevant inputs are unchanged; rerun the
+checks invalidated by meaningful changes. Further tests or reviews need an unresolved reason.
+An authoritative synchronous committed write result can establish its postconditions;
+an acknowledgement or accepted asynchronous job cannot.
+
+The execution and coding briefs describe outcomes and boundaries rather than a fixed workflow.
+The GPT-5.4-era prerequisite/final-check checklists and repeated persistence demands have been
+removed; tool-backed arithmetic, live-state grounding and authorization boundaries remain.
+Coding guidance no longer prescribes rewriting a file after two patch failures or asking the
+user after three lint attempts. A stalled approach calls for reconsideration, not a turn quota.
+
+This follows the task/context/done framing in the [GPT-6 guide](https://openai.com/index/practical-guide-building-gpt-6/),
+the retirement of rigid recipes in [OpenAI's skills guidance](https://learn.chatgpt.com/blog/rethinking-skills-and-prompts-for-gpt-6-astra),
+context and purpose in [Anthropic's best practices](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices),
+and re-examining old mitigations in the [Opus 5.5 guide](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5-5).
+Poteto's posts favor [code invariants over prose controls](https://x.com/poteto/status/2111133080526495985)
+and [simplifying instructions as models improve](https://x.com/poteto/status/2114099131845423142).
+These are design inputs, not Hermes benchmark results.
+
+`SKILLS_GUIDANCE` is shared by the foreground and both skill-review modes. Learning remains
+autonomous, but an edit needs new evidenced usefulness, not merely a durable-sounding rule.
+It preserves conditional workarounds, exact decision constants and permission scope;
+removing redundant instructions or saving nothing can be the right result. Fresh-read
+write guards and ownership rules are unchanged.
+
+For example, a temporary low-resource rendering fallback is not a new global engine
+preference; a permission clarification is not an instruction to invent a permission file;
+a proven wrong command still merits an autonomous fix. Correcting a redundant checkpoint
+procedure may mean deleting it rather than writing its opposite.
+
+Prompt delivery tests establish wiring, not model compliance or cost savings. Model/effort
+defaults require paired outcome evidence; these policies do not change the model gates.
+
 ## Supported prompt customization surfaces
 
 Most users should treat `agent/prompt_builder.py` as implementation code, not a configuration surface. The supported customization path is to change the prompt inputs Hermes already loads, rather than editing Python templates in place.

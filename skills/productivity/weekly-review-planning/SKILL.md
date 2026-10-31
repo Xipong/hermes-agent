@@ -29,7 +29,7 @@ Don't use for: daily briefs (see the `google-workspace` daily-brief reference) o
 
 ### 1. Set systems and window
 
-Confirm timezone, review period, planning horizon, authoritative task/project store, calendars, inboxes, and allowed writes. Default to recommendations/drafts, not mutations. Done when source-of-truth conflicts have a declared winner.
+Resolve timezone, review period, planning horizon, authoritative task/project store, calendars, inboxes, and allowed writes from the request and existing policy. If writes were not requested or authorized, return recommendations/drafts. Ask only about material unresolved scope or source-of-truth conflicts.
 
 ### 2. Review calendar evidence
 
@@ -37,7 +37,7 @@ Load `google-workspace` or the relevant calendar connector. Inspect the complete
 
 ### 3. Clear capture inboxes
 
-Review the task inbox, notes (`obsidian`, `notion`), flagged email (`email-inbox-triage` owns thread-level triage), and other declared capture points. Convert each item to next action, project, waiting, scheduled, someday, reference, archive, or delete proposal. Do not mutate until scope is approved. Done when remaining unprocessed items are counted and stated.
+Review the task inbox, notes (`obsidian`, `notion`), flagged email (`email-inbox-triage` owns thread-level triage), and other declared capture points. Convert each item to next action, project, waiting, scheduled, someday, reference, archive, or delete proposal. Apply routine updates within existing authorization; keep deletion, changed commitments, and other effects outside that scope as proposals. Done when remaining unprocessed items are counted and stated.
 
 ### 4. Reconcile active projects
 
@@ -53,7 +53,7 @@ Estimate fixed calendar load and select a small set of weekly outcomes plus near
 
 ### 7. Apply approved updates
 
-Update tasks/projects, create calendar holds, archive processed items, and draft follow-ups only as approved. Read every changed record back from the provider. Done when verified writes match the review summary.
+Update tasks/projects, create calendar holds, archive processed items, and draft follow-ups within the authorized scope. An authoritative response identifying the committed record and requested values is sufficient; otherwise read back the relevant state. Resolve ambiguous writes before retrying. Done when verified writes match the review summary.
 
 ## Output Shape
 
@@ -77,5 +77,5 @@ Update tasks/projects, create calendar holds, archive processed items, and draft
 
 - [ ] Both the completed week and the planning horizon were covered, or gaps are stated.
 - [ ] Every stalled/waiting flag traces to a specific record, event, or thread.
-- [ ] No task, event, or note was mutated without approval; approved writes were read back.
+- [ ] Updates stayed within authorization, and committed results support the reported changes.
 - [ ] The plan names what was deferred, not just what was chosen.

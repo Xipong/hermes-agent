@@ -122,7 +122,7 @@ If the user explicitly requires reusable typed enterprise metadata, explain that
 
 ### File descriptions are not metadata fallback
 
-**Hard rule:** Never use a file description as an automatic substitute for extracted metadata. Treat 255 characters as the safe limit because Box can truncate longer descriptions. Use `box files:update --description` only when the user explicitly requests a description, first verify the complete intended text fits, then read it back and compare it with the intended value.
+**Hard rule:** Never use a file description as an automatic substitute for extracted metadata. Treat 255 characters as the safe limit because Box can truncate longer descriptions. Use `box files:update --description` only when the user explicitly requests a description, first verify the complete intended text fits, then compare the committed value with the intended text; fetch it if the write response does not expose it.
 
 ## Confidentiality and AI units
 

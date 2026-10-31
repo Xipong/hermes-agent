@@ -126,8 +126,8 @@ If a shortcut has **Prompt Notes**, append them to the generated prompt (Step 5)
 ```
 infographic/{topic-slug}/
 ├── source-{slug}.{ext}
-├── analysis.md
-├── structured-content.md
+├── analysis.md                 # When a separate analysis record is useful
+├── structured-content.md       # For substantial content mapping or handoff
 ├── prompts/infographic.md
 └── infographic.png
 ```
@@ -151,14 +151,14 @@ Slug: 2-4 words kebab-case from topic. Conflict: append `-YYYYMMDD-HHMMSS`.
 2. Analyze: topic, data type, complexity, tone, audience
 3. Detect source language and user language
 4. Extract design instructions from user input
-5. Save analysis to `analysis.md`
-   - **Backup rule**: If `analysis.md` exists, rename to `analysis-backup-YYYYMMDD-HHMMSS.md`
+5. Save `analysis.md` when the content needs a separate analysis record; for a simple brief, carry the relevant findings into the prompt
+   - **Backup rule**: If writing `analysis.md` and it exists, rename it to `analysis-backup-YYYYMMDD-HHMMSS.md`
 
 See `references/analysis-framework.md` for detailed format.
 
-### Step 2: Generate Structured Content → `structured-content.md`
+### Step 2: Structure Content
 
-Transform content into infographic structure:
+Map content into the infographic structure. Save `structured-content.md` for substantial content, a reusable handoff or a requested intermediate; otherwise include this mapping directly in the prompt:
 1. Title and learning objectives
 2. Sections with: key concept, content (verbatim), visual element, text labels
 3. Data points (all statistics/quotes copied exactly)
@@ -172,21 +172,15 @@ See `references/structured-content-template.md` for detailed format.
 
 **3.1 Check Keyword Shortcuts first**: If user input matches a keyword from the **Keyword Shortcuts** table, auto-select the associated layout and prioritize associated styles as top recommendations. Skip content-based layout inference.
 
-**3.2 Otherwise**, recommend 3-5 layout×style combinations based on:
+**3.2 Otherwise**, choose a layout×style combination from the brief and the criteria below. Offer alternatives when the user requests exploration or an unresolved design choice benefits from comparison:
 - Data structure → matching layout
 - Content tone → matching style
 - Audience expectations
 - User design instructions
 
-### Step 4: Confirm Options
+### Step 4: Resolve Missing Options
 
-Use the `clarify` tool to confirm options with the user. Put the independent questions below in one `questions` array (up to 5); ask separately any question whose options depend on an earlier answer:
-
-**Q1 — Combination**: Present 3+ layout×style combos with rationale. Ask user to pick one.
-
-**Q2 — Aspect**: Ask for aspect ratio preference (landscape/portrait/square or custom W:H).
-
-**Q3 — Language** (only if source ≠ user language): Ask which language the text content should use.
+Use specified options, keyword shortcuts and documented defaults without an approval round. Ask concise, grouped questions only when a missing choice materially changes the result: layout/style for an unresolved direction, aspect for a required destination, or language when source and user language differ and the intended output is unclear. Respect any explicit user confirmation gate.
 
 ### Step 5: Generate Prompt → `prompts/infographic.md`
 
@@ -199,7 +193,7 @@ Combine:
 2. Style definition from `references/styles/<style>.md`
 3. Base template from `references/base-prompt.md`
 4. Structured content from Step 2
-5. All text in confirmed language
+5. All text in the selected language
 
 **Aspect ratio resolution** for `{{ASPECT_RATIO}}`:
 - Named presets → ratio string: landscape→`16:9`, portrait→`9:16`, square→`1:1`

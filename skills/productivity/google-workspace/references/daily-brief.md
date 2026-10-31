@@ -38,7 +38,7 @@ Rank by consequence and time, not message count. Done when each included item ha
 
 ### 6. Offer bounded actions
 
-Draft replies, create calendar holds, or add tasks only after presenting them — a brief request is not authorization to mutate. Apply approved actions with the main skill's commands, then read them back. Done when every approved mutation has a Google object ID/link and correct time/recipient.
+Draft replies, create calendar holds, or add tasks only after presenting them — a brief request is not authorization to mutate. Apply authorized actions with the main skill's commands. Use an authoritative committed response when it proves the intended values; otherwise retrieve the exact record or await completion. Done when every approved mutation has a Google object ID/link and correct time/recipient.
 
 ## Pitfalls
 
@@ -52,4 +52,4 @@ Draft replies, create calendar holds, or add tasks only after presenting them �
 
 - [ ] The day window and calendars covered are stated, or gaps are named.
 - [ ] Every prep item, deadline, and conflict traces to a specific event or thread.
-- [ ] No mutation happened without presentation and approval; approved writes were read back.
+- [ ] Mutations stayed within the user-authorized scope; committed responses or targeted follow-up verified the relevant postconditions.

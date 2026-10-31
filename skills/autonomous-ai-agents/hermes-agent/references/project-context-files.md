@@ -37,7 +37,7 @@ All context files pass through the threat-pattern scanner before reaching the sy
 Hermes: when working in this repo, follow these rules.
 
 ## Build
-- Always run `make test` before declaring a change done.
+- Check affected behavior with the relevant tests; use `make test` when broader coverage is needed or required.
 - Use `uv run` for Python, not `pip install`.
 
 ## Style

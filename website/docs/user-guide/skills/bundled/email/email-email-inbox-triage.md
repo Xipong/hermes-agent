@@ -70,22 +70,22 @@ Extract sender request, deadline, commitments already made, attachments, and mis
 
 ### 4. Calibrate the user's voice, then draft replies in thread context
 
-Before drafting the first reply of a run, calibrate on evidence instead of guessing tone — study the user's own past replies before writing:
+Calibrate on the user's stated preferences and available past replies rather than guessing tone. Reuse relevant evidence already available; retrieve more when the audience or voice is unclear:
 
-- Sample: pull a bounded set of the user's recent sent replies via the connector skill — 20-50 where available, preferring replies to the same recipients or thread types being drafted. Truncated excerpts (roughly the first 40 lines of each message) carry the style facts; do not load full threads and let calibration crowd out inbox coverage.
+- Sample as needed: pull a bounded set of the user's recent sent replies via the connector skill, preferring the same recipients or thread types. Use enough excerpts to establish the relevant style without crowding out inbox coverage.
 - Extract: greeting and sign-off habits (and per-audience differences), typical reply length, formality and warmth, sentence rhythm, emoji/exclamation use, and how the user says no or pushes back.
 - Record: keep the calibration as working notes for this run.
 - Fallback: if the Sent folder is empty or inaccessible, say so and fall back to matching the incoming thread's register.
 
 Then draft: answer every material question, match the calibrated voice (not a generic-professional one), avoid invented commitments, and state uncertainty. Resolve attachment/link facts before referencing them. Done when each sentence can be checked against the thread or an explicit user preference, and each draft's tone can be traced to the calibration notes.
 
-### 5. Present an approval batch
+### 5. Resolve authorization gaps
 
-For each proposed mutation show account, recipient/thread, action, draft summary, deadline, and risk. Let the user approve individually or as a clearly defined batch. Done when approval maps unambiguously to provider actions.
+Use the request and standing policy to identify authorized actions. When approval is still needed, show account, recipient/thread, action, draft summary, deadline, and risk; accept individual or clearly defined batch approval. Do not ask again for effects already covered. Done when authorization maps unambiguously to provider actions.
 
 ### 6. Apply and verify
 
-Send, label, archive, or create follow-ups only within approval. For ambiguous send errors, inspect Sent before retrying — SMTP may have succeeded while save-to-Sent failed, and a blind retry duplicates the mail. Read back message/draft/label state and provide provider-confirmed results. Done when each approved action is verified or explicitly failed.
+Send, label, archive, or create follow-ups only within authorization. For ambiguous send errors, inspect Sent before retrying — SMTP may have succeeded while save-to-Sent failed, and a blind retry duplicates the mail. Use an authoritative committed provider response as evidence; read back message/draft/label state if that response does not establish the requested effect. Done when each approved action is verified or explicitly failed.
 
 ## Output Shape
 
@@ -109,7 +109,7 @@ Send, label, archive, or create follow-ups only within approval. For ambiguous s
 
 - [ ] The requested folders and time window were fully covered, or gaps are stated.
 - [ ] Every disposition has a reason traceable to thread content.
-- [ ] Drafts were calibrated against the user's sent replies, or the fallback was stated.
-- [ ] No send/delete/archive happened outside the approved batch.
-- [ ] Every approved mutation was read back from the provider.
+- [ ] Drafts match the user's preferences and available sent-reply evidence, or the fallback was stated.
+- [ ] No send/delete/archive happened outside user authorization.
+- [ ] Provider-confirmed committed results support every reported mutation.
 - [ ] The final response separates completed actions, drafts awaiting approval, and blockers.

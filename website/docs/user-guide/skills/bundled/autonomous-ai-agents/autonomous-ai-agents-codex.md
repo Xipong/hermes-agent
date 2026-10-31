@@ -110,9 +110,11 @@ In that context, prefer:
 codex exec --sandbox danger-full-access "<task>"
 ```
 
-Use process boundaries as the safety layer instead: explicit `workdir`, clean git
-status before launch, narrow task prompts, `git diff` review, targeted tests, and
-human/agent confirmation before committing broad changes.
+Without the Codex sandbox, scope access deliberately: explicit `workdir`, inspect
+git status and preserve existing work, narrow task prompts, `git diff` review, and
+checks suited to the change. A workdir is not a security sandbox; use an isolated
+environment when the task requires one. Confirm scope before changes beyond the
+user's authorization, not before every authorized local commit.
 
 ## PR Reviews
 

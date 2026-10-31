@@ -57,7 +57,7 @@ If it prints `AUTHENTICATED`, skip to Usage — setup is already done.
 
 ### Step 1: Triage — ask the user what they need
 
-Before starting OAuth setup, ask the user TWO questions:
+Use the services and account constraints already stated by the user. Ask only for missing choices that affect OAuth scopes or setup; the questions below are prompts for those gaps, not a required interview.
 
 **Question 1: "What Google services do you need? Just email, or also
 Calendar/Drive/Sheets/Docs?"**
@@ -318,7 +318,7 @@ All commands return JSON. Parse with `jq` or read directly. Key fields:
 
 ## Rules
 
-1. **Never send email, create/delete calendar events, delete Drive files, share files, or modify Docs/Sheets without confirming with the user first.** Show what will be done (recipients, file IDs, content, share role) and ask for approval. For `drive delete`, prefer the default trash (reversible) over `--permanent`.
+1. **Act within the user's authorized recipients, targets, content and access scope.** A request to read, summarize or draft is not permission to send, share, delete or edit remote records. When those effects are explicitly authorized and clear, perform them without asking for the same approval again; clarify missing recipients, ambiguous targets or material scope changes. For `drive delete`, prefer the default trash (reversible) over `--permanent` unless permanent deletion was authorized.
 2. **Check auth before first use** — run `setup.py --check`. If it fails, guide the user through setup.
 3. **Use the Gmail search syntax reference** for complex queries — load it with `skill_view("google-workspace", file_path="references/gmail-search-syntax.md")`.
 4. **Calendar times must include timezone** — always use ISO 8601 with offset (e.g., `2026-03-01T10:00:00-06:00`) or UTC (`Z`).

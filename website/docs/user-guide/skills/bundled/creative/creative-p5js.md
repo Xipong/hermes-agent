@@ -43,9 +43,9 @@ Production pipeline for interactive and generative visual art using p5.js. Creat
 
 This is visual art rendered in the browser. The canvas is the medium; the algorithm is the brush.
 
-**Before writing a single line of code**, articulate the creative concept. What does this piece communicate? What makes the viewer stop scrolling? What separates this from a code tutorial example? The user's prompt is a starting point — interpret it with creative ambition.
+Establish what the piece communicates and its visual character. Use the brief and existing sketch as context; develop unresolved choices through a focused prototype or a short concept note.
 
-**First-render excellence is non-negotiable.** The output must be visually striking on first load. If it looks like a p5.js tutorial exercise, a default configuration, or "AI-generated creative coding," it is wrong. Rethink before shipping.
+**The delivered sketch must be visually striking on load.** Inspect the actual browser output and refine generic or unfinished results before shipping; successful code execution alone does not prove visual quality.
 
 **Go beyond the reference vocabulary.** The noise functions, particle systems, color palettes, and shader effects in the references are a starting vocabulary. For every project, combine, layer, and invent. The catalog is a palette of paints — you write the painting.
 
@@ -92,7 +92,7 @@ Single self-contained HTML file per project. No build step required.
 
 ## Pipeline
 
-Every project follows the same 6-stage path:
+For a new sketch, use the following production path as needed; a repair can start from the affected code, and export applies when that format is requested:
 
 ```
 CONCEPT → DESIGN → CODE → PREVIEW → EXPORT → VERIFY
@@ -164,7 +164,7 @@ Every parameter should change how the algorithm *thinks*, not just how it *looks
 
 ### Step 1: Creative Vision
 
-Before any code, articulate:
+Use these questions to resolve the creative direction; reuse choices already established by the brief or existing sketch:
 
 - **Mood / atmosphere**: What should the viewer feel? Contemplative? Energized? Unsettled? Playful?
 - **Visual story**: What happens over time (or on interaction)? Build? Decay? Transform? Oscillate?
@@ -545,7 +545,7 @@ When building p5.js sketches:
 
 ## Creative Divergence (use only when user requests experimental/creative/unique output)
 
-If the user asks for creative, experimental, surprising, or unconventional output, select the strategy that best fits and reason through its steps BEFORE generating code.
+For creative, experimental, surprising, or unconventional output, use a strategy below if it helps resolve the direction; an established concept needs no separate brainstorming exercise.
 
 - **Conceptual Blending** — when the user names two things to combine or wants hybrid aesthetics
 - **SCAMPER** — when the user wants a twist on a known generative art pattern

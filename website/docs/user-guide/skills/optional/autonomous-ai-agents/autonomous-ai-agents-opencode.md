@@ -216,7 +216,7 @@ terminal(command="opencode stats --days 7 --models anthropic/claude-sonnet-4")
 
 ## Verification
 
-Smoke test:
+For a new or failing provider setup, this optional smoke test checks connectivity and consumes a model call. Successful task execution already establishes connectivity:
 
 ```
 terminal(command="opencode run 'Respond with exactly: OPENCODE_SMOKE_OK'")

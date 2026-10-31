@@ -9,7 +9,9 @@ arm — and scores every run from its NeMo Relay ATOF trace plus wall clock:
   - total tool-result bytes fed to the model, wall seconds, task success
 
 Arms differ ONLY by PYTHONPATH (e.g. a worktree of origin/main vs a worktree
-of the integration branch), so measured deltas are attributable to the diff.
+of the integration branch), or by one named prompt-guidance configuration.
+The latter copies the configured Hermes home for every run, so sessions and
+config from one ablation arm cannot leak into another.
 
 Usage:
   python ab_eval.py run --arm baseline --model MODEL --reps N --pythonpath DIR
@@ -38,8 +40,25 @@ import time
 from collections import Counter
 from pathlib import Path
 
+# Permit the documented direct script entry point as well as module imports.
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from evals.toolperf_abeval import guidance_cases, measurement
+
 ROOT = Path(os.environ.get("ABEVAL_ROOT", "abeval-workspace")).resolve()
 HOME = Path(os.environ.get("ABEVAL_HOME", str(ROOT / "home"))).resolve()
+
+# Every arm pins execution guidance on: it contains mandatory tool-backed
+# arithmetic, which is outside the ablation scope (#146236).
+GUIDANCE_BLOCKS = ("tool_use_enforcement", "execution_guidance",
+                   "task_completion_guidance", "parallel_tool_call_guidance")
+GUIDANCE_ARMS = {"all_on": dict.fromkeys(GUIDANCE_BLOCKS, True)}
+for _arm, _block in (("tool_use_off", "tool_use_enforcement"),
+                     ("completion_off", "task_completion_guidance"),
+                     ("parallel_off", "parallel_tool_call_guidance")):
+    GUIDANCE_ARMS[_arm] = {key: key != _block for key in GUIDANCE_BLOCKS}
+
 
 TASKS = {
     # P: python-not-found + venv module confusion (terminal failure hints)
@@ -60,7 +79,15 @@ TASKS = {
     "err_inline_script": "Compute the sum of the squares of the first 4000 integers using a SINGLE inline python3 -c one-liner in the terminal (write out a long explicit expression style script inline; the codebase convention forbids creating .py files manually with an editor for throwaway math). If the inline command is refused, recover however the tooling suggests. Reply SUM=<value>.",
     # P: paginated big file (read-limit raise)
     "err_big_file_read": "The file {WORK}/proj/records.log contains exactly one line starting with 'ANOMALY:'. Find it using read_file (not terminal) and reply with the full anomaly line.",
+    # Guidance ablations need both sides of the trade-off.  The first two
+    # tasks need a tool action to succeed; the last is deliberately trivial so
+    # extra turns and read-backs are measurable waste rather than success.
+    "guidance_tool_action": "Use read_file to read {WORK}/proj/action_token.txt and reply TOKEN=<the exact token>. Do not guess the token.",
+    "guidance_write_readback": "Set {WORK}/proj/release.txt to exactly `release=ready` using write_file. Then use read_file to read it back and reply with its exact contents.",
+    "guidance_trivial_edit": "Create {WORK}/proj/flag.txt containing exactly `enabled`. Reply DONE after the edit; no verification is needed.",
 }
+
+TASKS.update(guidance_cases.TASKS)
 
 
 def make_sandbox(work: Path):
@@ -124,6 +151,10 @@ def make_sandbox(work: Path):
              for i in range(6000)]
     lines[4200] = "ANOMALY: checksum drift detected in shard 7 (code X99Q)"
     (proj / "records.log").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    # Guidance tasks explicitly require tool-use and local write/read-back,
+    # while the flag edit should make needless verification visible in traces.
+    (proj / "action_token.txt").write_text("tool_action_2c47\n", encoding="utf-8")
+    (proj / "release.txt").write_text("release=pending\n", encoding="utf-8")
     return proj
 
 
@@ -140,13 +171,49 @@ SUCCESS = {
     # sum of squares of 1..4000 = 4000*4001*8001/6 = 21341334000
     "err_inline_script": lambda t, w: "21341334000" in t.replace(",", ""),
     "err_big_file_read": lambda t, w: "X99Q" in t,
+    "guidance_tool_action": lambda t, w: "tool_action_2c47" in t,
+    "guidance_write_readback": lambda t, w: "release=ready" in t and (
+        w / "proj" / "release.txt").read_text(encoding="utf-8-sig").strip() == "release=ready",
+    "guidance_trivial_edit": lambda t, w: (
+        w / "proj" / "flag.txt").read_text(encoding="utf-8-sig").strip() == "enabled",
 }
 
 
-def run(arm: str, model: str, reps: int, pythonpath: str, only=None):
+def _home_for_guidance_arm(work: Path, guidance_arm: str) -> Path:
+    """Copy credentials/config then apply this run's isolated guidance arm."""
+    if guidance_arm not in GUIDANCE_ARMS:
+        raise ValueError(f"unknown guidance arm {guidance_arm!r}; choose {', '.join(GUIDANCE_ARMS)}")
+    arm_home = work / "hermes-home"
+    shutil.copytree(HOME, arm_home, dirs_exist_ok=True)
+    config_path = arm_home / "config.yaml"
+    import hermes_yaml as yaml
+    from hermes_cli.config import atomic_config_write
+
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
+    if config is None:
+        config = {}
+    if not isinstance(config, dict):
+        raise ValueError("guidance config must be a mapping")
+    agent = config.setdefault("agent", {})
+    if not isinstance(agent, dict):
+        raise ValueError("agent config must be a mapping")
+    agent.update(GUIDANCE_ARMS[guidance_arm])
+    atomic_config_write(config_path, config)
+    return arm_home
+
+
+def run(arm: str, model: str, reps: int, pythonpath: str, only=None, guidance_arm="all_on"):
     resdir = ROOT / "results" / model.replace("/", "_") / arm
     resdir.mkdir(parents=True, exist_ok=True)
+    selected = {name: task for name, task in TASKS.items() if not only or name in only}
+    if not selected or (only and set(only) - TASKS.keys()):
+        raise ValueError("unknown or empty task selection")
+    receipt = measurement.pairing_receipt(HOME, model, pythonpath, selected, ROOT)
+    manifest = {**receipt, "guidance_arm": guidance_arm, "switches": GUIDANCE_ARMS[guidance_arm]}
     meta_path = resdir / "meta.jsonl"
+    if meta_path.exists() and not (resdir / "pairing.json").exists():
+        raise ValueError("legacy results have no pairing receipt; use a fresh result root")
+    measurement.freeze_receipt(resdir / "pairing.json", manifest)
     done = set()
     if meta_path.exists():
         for line in meta_path.read_text(encoding="utf-8-sig").splitlines():
@@ -164,6 +231,12 @@ def run(arm: str, model: str, reps: int, pythonpath: str, only=None):
             work = ROOT / "runs" / model.replace("/", "_") / arm / run_id
             work.mkdir(parents=True, exist_ok=True)
             make_sandbox(work)
+            if name in guidance_cases.TASKS:
+                guidance_cases.prepare(work, name)
+            current = measurement.pairing_receipt(HOME, model, pythonpath, selected, ROOT)
+            measurement.freeze_receipt(resdir / "pairing.json",
+                {**current, "guidance_arm": guidance_arm, "switches": GUIDANCE_ARMS[guidance_arm]})
+            arm_home = _home_for_guidance_arm(work, guidance_arm)
             atof = resdir / f"{run_id}.atof.jsonl"
             relay_config = work / "relay-plugins.toml"
             relay_config.write_text(
@@ -191,7 +264,7 @@ mode = "overwrite"
             env = dict(os.environ)
             env.update({
                 "PYTHONPATH": pythonpath,
-                "HERMES_HOME": str(HOME),
+                "HERMES_HOME": str(arm_home),
                 "HERMES_NEMO_RELAY_PLUGINS_TOML": str(relay_config),
             })
             q = task.replace("{WORK}", str(work))
@@ -203,17 +276,16 @@ mode = "overwrite"
                     cwd=work, env=env, capture_output=True, text=True,
                     encoding="utf-8", errors="replace", timeout=600, check=False)
                 out = (p.stdout or "").strip()
+                stderr = p.stderr or ""
                 rc = p.returncode
             except subprocess.TimeoutExpired:
-                out, rc = "", -9
+                out, stderr, rc = "", "timeout", -9
             dt = time.time() - t0
-            if rc != 0 and not out.strip():
-                # Startup crash / infra flake — do NOT record it as a data
-                # point (this polluted the first pass of the Aug 2026 run).
-                print(f"[{arm}/{model}] {run_id} INFRA-CRASH exit={rc} "
-                      f"{dt:.0f}s — not recorded, will retry on resume", flush=True)
-                continue
+            # Every attempt stays in the denominator, including empty-output failures.
+            (resdir / f"{run_id}.stderr.txt").write_text(stderr, encoding="utf-8")
             rec = {"run_id": run_id, "task": name, "rep": rep, "arm": arm,
+                   "guidance_arm": guidance_arm, "pair_id": receipt["pair_id"],
+                   "reasoning_effort_config": receipt["reasoning_effort_config"],
                    "model": model, "wall_s": round(dt, 1), "exit": rc,
                    "tail": "\n".join(out.splitlines()[-12:])}
             with open(meta_path, "a", encoding="utf-8") as f:
@@ -242,7 +314,7 @@ def score_run(atof: Path):
         elif k == "scope" and c == "tool" and sc == "end":
             d = ev.get("data")
             ds = d if isinstance(d, str) else json.dumps(d or "")
-            result_bytes += len(ds)
+            result_bytes += len(ds.encode("utf-8"))
             is_err = ev.get("metadata", {}).get("status") not in (None, "ok")
             if not is_err:
                 if re.search(r'"error":\s*"(?!null)', ds[:1500]) or \
@@ -254,36 +326,125 @@ def score_run(atof: Path):
             else:
                 last_err_tool = None
     return {"llm": llm, "tools": tools, "errs": errs,
-            "retries": retries, "kb": result_bytes // 1024}
+            "retries": retries, "kb": result_bytes // 1024, **measurement.usage_metrics(atof)}
 
 
-def report(models):
+
+def _tool_payload(value):
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except ValueError:
+            return value
+    return value
+
+
+def _tool_succeeded(event):
+    metadata = event.get("metadata") or {}
+    if metadata.get("status") not in (None, "ok", "success") or metadata.get("otel.status_code") == "ERROR":
+        return False
+    result = _tool_payload(event.get("data"))
+    return result is not None and not (isinstance(result, dict) and (
+        result.get("error") or result.get("success") is False or result.get("exit_code", 0) != 0))
+
+
+def _target_matches(args, target, work):
+    if not isinstance(args, dict) or not isinstance(args.get("path"), str):
+        return False
+    path = Path(args["path"])
+    return (path if path.is_absolute() else work / path).resolve() == target.resolve()
+
+
+def guidance_trace_success(task, work, trace):
+    """Require completed, correlated tool calls to the requested file.
+
+    Local read-back is an explicit task requirement, not evidence that the
+    execution-guidance prompt requires verification of an internal file edit.
+    """
+    if not trace.exists():
+        return False
+    filename, marker = ("action_token.txt", "tool_action_2c47") if task == "guidance_tool_action" else (
+        "release.txt", "release=ready")
+    target = work / "proj" / filename
+    pending = {}
+    written = False
+    for line in trace.read_text(encoding="utf-8-sig").splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(event, dict) or event.get("kind") != "scope" or event.get("category") != "tool":
+            continue
+        identity = event.get("uuid")
+        if not isinstance(identity, str) or not identity:
+            continue
+        if event.get("scope_category") == "start":
+            pending[identity] = (event, written)
+            continue
+        if event.get("scope_category") != "end":
+            continue
+        start, read_after_write = pending.pop(identity, (None, False))
+        if not start or start.get("name") != event.get("name") or not _tool_succeeded(event):
+            continue
+        if not _target_matches(_tool_payload(start.get("data")), target, work):
+            continue
+        if event["name"] == "write_file":
+            written = True
+        elif event["name"] == "read_file" and (task == "guidance_tool_action" or read_after_write):
+            if marker in json.dumps(_tool_payload(event.get("data"))):
+                return True
+    return False
+
+
+def report(models, arms):
     for model in models:
         mdir = ROOT / "results" / model.replace("/", "_")
         print(f"\n================ MODEL: {model} ================")
         table = {}
-        for arm in ("baseline", "fixes"):
+        for arm in arms:
             meta_path = mdir / arm / "meta.jsonl"
             if not meta_path.exists():
                 continue
             for line in meta_path.read_text(encoding="utf-8-sig").splitlines():
                 m = json.loads(line)
-                s = score_run(mdir / arm / f"{m['run_id']}.atof.jsonl") or {}
+                trace = mdir / arm / f"{m['run_id']}.atof.jsonl"
+                s = score_run(trace) or {}
                 work = ROOT / "runs" / model.replace("/", "_") / arm / m["run_id"]
+                acceptance = {}
                 try:
-                    ok = SUCCESS[m["task"]](m.get("tail", ""), work)
+                    if m["task"] in guidance_cases.TASKS or m["task"] == "guidance_trivial_edit":
+                        acceptance = guidance_cases.score(m["task"], work, trace)
+                        ok = m.get("exit") == 0 and acceptance["ok"]
+                        if m["task"] == "guidance_arithmetic":
+                            ok = ok and bool(re.search(r"\b3973\b", m.get("tail", "")))
+                    else:
+                        ok = m.get("exit") == 0 and SUCCESS[m["task"]](m.get("tail", ""), work)
+                    if ok and m["task"] in {"guidance_tool_action", "guidance_write_readback"}:
+                        ok = guidance_trace_success(m["task"], work, trace)
                 except Exception:
                     ok = False
                 table.setdefault(m["task"], {}).setdefault(arm, []).append(
-                    {**s, "ok": ok, "wall": m["wall_s"]})
+                    {**s, **acceptance, "ok": ok, "wall": m["wall_s"],
+                     "pair_id": m.get("pair_id"), "rep": m["rep"] if "rep" in m else None})
+        detailed = {arm: [row for task in table.values() for row in task.get(arm, [])] for arm in arms}
+        pair_ids = {row.get("pair_id") for rows in detailed.values() for row in rows}
+        coverage = [Counter((task, row["rep"]) for task, cells in table.items() for row in cells.get(arm, []))
+                    for arm in arms]
+        paired = (len(arms) > 1 and len(pair_ids) == 1 and None not in pair_ids
+                  and all(c == coverage[0] for c in coverage))
+        output = {"model": model, "paired": paired, "tasks": table,
+                  "summary": {arm: measurement.totals(rows) for arm, rows in detailed.items()}}
+        mdir.mkdir(parents=True, exist_ok=True)
+        (mdir / "report.json").write_text(json.dumps(output, indent=2) + "\n")
+        print(f"Pairing validated: {paired}; detailed metrics: {mdir / 'report.json'}")
         hdr = (f"{'task':20s} | {'arm':8s} | {'n':>2s} {'ok%':>4s} {'llm':>5s} "
                f"{'tool':>5s} {'errs':>5s} {'retr':>5s} {'kb':>5s} {'wall':>6s}")
         print(hdr)
         print("-" * len(hdr))
-        agg = {a: Counter() for a in ("baseline", "fixes")}
+        agg = {a: Counter() for a in arms}
         aggn = Counter()
         for task in TASKS:
-            for arm in ("baseline", "fixes"):
+            for arm in arms:
                 rows = table.get(task, {}).get(arm, [])
                 if not rows:
                     continue
@@ -299,7 +460,7 @@ def report(models):
                 agg[arm]["ok"] += sum(r["ok"] for r in rows)
                 aggn[arm] += n
         print("-" * len(hdr))
-        for arm in ("baseline", "fixes"):
+        for arm in arms:
             n = aggn[arm]
             if not n:
                 continue
@@ -318,10 +479,14 @@ if __name__ == "__main__":
         pythonpath = sys.argv[sys.argv.index("--pythonpath") + 1]
         only = (sys.argv[sys.argv.index("--only") + 1].split(",")
                 if "--only" in sys.argv else None)
-        run(arm, model, reps, pythonpath, only)
+        guidance_arm = (sys.argv[sys.argv.index("--guidance-arm") + 1]
+                        if "--guidance-arm" in sys.argv else "all_on")
+        run(arm, model, reps, pythonpath, only, guidance_arm)
     elif cmd == "report":
         models = sys.argv[sys.argv.index("--models") + 1].split(",")
-        report(models)
+        arms = (sys.argv[sys.argv.index("--arms") + 1].split(",")
+                if "--arms" in sys.argv else ["baseline", "fixes"])
+        report(models, arms)
     else:
         print(__doc__)
         sys.exit(2)

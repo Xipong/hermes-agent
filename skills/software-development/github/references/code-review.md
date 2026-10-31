@@ -391,7 +391,7 @@ Go through each category: Correctness, Security, Code Quality, Testing, Performa
 
 ### Step 7: Post the review to GitHub
 
-Collect your findings and submit them as a formal review with inline comments.
+Collect your findings. Submit a formal review with inline comments only when publication is covered by the request or standing authorization; otherwise return the review to the user.
 
 **With gh:**
 ```bash
@@ -424,9 +424,9 @@ curl -s -X POST \
   }"
 ```
 
-### Step 8: Also post a summary comment
+### Step 8: Include a concise summary
 
-In addition to inline comments, leave a top-level summary so the PR author gets the full picture at a glance. Use the review output format from `references/review-output-template.md`.
+Include the verdict, material findings, and verification limits in the review body. A separate top-level comment is useful only when it adds information or the user requests one; avoid duplicate notifications. `references/review-output-template.md` provides an optional format.
 
 **With gh:**
 ```bash

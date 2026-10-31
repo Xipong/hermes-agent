@@ -114,7 +114,7 @@ Identify what can be shown rather than told:
 
 ## Output Format
 
-Save analysis results to `analysis.md`:
+When a separate analysis record is useful, save it as `analysis.md` using this template. For a simple brief, carry the relevant findings directly into the generation prompt:
 
 ```yaml
 ---

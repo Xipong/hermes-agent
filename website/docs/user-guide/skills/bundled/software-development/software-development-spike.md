@@ -31,7 +31,7 @@ The following is the complete skill definition that Hermes loads when this skill
 
 # Spike
 
-Use this skill when the user wants to **feel out an idea** before committing to a real build — validating feasibility, comparing approaches, or surfacing unknowns that no amount of research will answer. Spikes are disposable by design. Throw them away once they've paid their debt.
+Use this skill when the user wants to **feel out an idea** before committing to a real build — validating feasibility, comparing approaches, or surfacing unknowns that no amount of research will answer. Spikes are exploratory, not production commitments. Retain the useful result and evidence; remove owned disposable output when no longer needed, without discarding user work or a requested prototype.
 
 Load this when the user says things like "let me try this", "I want to see if X works", "spike this out", "before I commit to Y", "quick prototype of Z", "is this even possible?", or "compare A vs B".
 
@@ -47,7 +47,7 @@ If `gsd-spike` shows up as a sibling skill (installed via `npx get-shit-done-cc 
 
 ## Core method
 
-Regardless of scale, every spike follows this loop:
+Use the parts of this loop needed to answer the feasibility question:
 
 ```
 decompose  →  research  →  build  →  verdict
@@ -57,7 +57,7 @@ decompose  →  research  →  build  →  verdict
 
 ### 1. Decompose
 
-Break the user's idea into **2-5 independent feasibility questions**. Each question is one spike. Present them as a table with Given/When/Then framing:
+Identify the smallest observable feasibility question. Split independent uncertainties when useful; a single question is enough. For multiple spikes, a table like this can clarify scope:
 
 | # | Spike | Validates (Given/When/Then) | Risk |
 |---|-------|----------------------------|------|
@@ -74,11 +74,11 @@ Break the user's idea into **2-5 independent feasibility questions**. Each quest
 
 **Order by risk.** The spike most likely to kill the idea runs first. No point prototyping the easy parts if the hard part doesn't work.
 
-**Skip decomposition** only if the user already knows exactly what they want to spike and says so. Then take their idea as a single spike.
+Avoid decomposition that adds no information to a clear, bounded question.
 
 ### 2. Align (for multi-spike ideas)
 
-Present the spike table. Ask: "Build all in this order, or adjust?" Let the user drop, reorder, or re-frame before you write any code.
+Proceed with bounded experiments within the requested scope. Ask when choosing among spikes would materially change cost, scope, or an unresolved user preference; a multi-spike table alone does not require approval.
 
 ### 3. Research (per spike, before building)
 
@@ -128,9 +128,9 @@ spikes/
 3. A small web server with one endpoint
 4. A unit test that exercises the question with recognizable assertions
 
-**Depth over speed.** Never declare "it works" after one happy-path run. Test edge cases. Follow surprising findings. The verdict is only trustworthy when the investigation was honest.
+Match evidence to the question: one run can establish a narrow feasibility result, while reliability or boundary claims need relevant edge cases. Follow surprises that affect the verdict and state what remains untested.
 
-**Avoid** unless the spike specifically requires it: complex package management, build tools/bundlers, Docker, env files, config systems. Hardcode everything — it's a spike.
+Avoid setup that does not help answer the question; reuse existing environments and tools. Inline harmless experiment constants where convenient, but keep credentials out of source and preserve real configuration or isolation requirements.
 
 **Building one spike** — a typical tool sequence:
 
@@ -142,7 +142,7 @@ terminal("cd spikes/001-websocket-streaming && python main.py")
 # Observe output, iterate.
 ```
 
-**Parallel comparison spikes (002a / 002b) — delegate.** When two approaches can run in parallel and both need real engineering (not 10-line prototypes), fan out with `delegate_task`:
+**Parallel comparison spikes (002a / 002b).** When independent approaches justify the overhead, `delegate_task` can run them in separate workdirs:
 
 ```
 delegate_task(tasks=[
@@ -179,7 +179,7 @@ Each spike's `README.md` closes with:
 
 ## Comparison spikes
 
-When two approaches answer the same question (002a / 002b), build them **back to back**, then do a head-to-head comparison at the end:
+When two approaches answer the same question (002a / 002b), compare them against the same inputs and criteria, whether run serially or in parallel:
 
 ```markdown
 ## Head-to-head: pdfjs vs camelot
@@ -207,7 +207,7 @@ Propose 2-4 candidates as Given/When/Then. Let the user pick.
 
 ## Output
 
-- Create `spikes/` (or `.planning/spikes/` if the user is using GSD conventions) in the repo root
+- Use an owned experiment location consistent with workspace rules; `spikes/` or `.planning/spikes/` are options when appropriate
 - One dir per spike: `NNN-descriptive-name/`
 - `README.md` per spike captures question, approach, results, verdict
 - Keep the code throwaway — a spike that takes 2 days to "clean up for production" was a bad spike

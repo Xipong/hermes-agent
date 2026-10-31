@@ -69,5 +69,7 @@ Supporting assets: `scripts/gh-env.sh` + `scripts/git-credential-token.py`
 ## Verification
 
 - The workflow's own reference file defines done for that task.
-- Cross-cutting: every claim about remote state (CI, merge, release,
-  issue state) is backed by a fresh `gh` read, never memory.
+- Cross-cutting: claims about remote state (CI, merge, release, issue state)
+  need current provider evidence for the exact target/revision. An authoritative
+  committed response is sufficient for the fields it establishes; otherwise
+  use a targeted `gh` read, and wait for asynchronous operations to finish.

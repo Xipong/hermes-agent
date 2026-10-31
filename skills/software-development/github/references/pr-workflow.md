@@ -1,6 +1,6 @@
 # GitHub Pull Request Workflow
 
-Complete guide for managing the PR lifecycle. Each section shows the `gh` way first, then the `git` + `curl` fallback for machines without `gh`.
+Use the sections needed for the requested PR operation; opening a PR does not itself authorize merging, publishing a release, or deleting remote branches. Existing authorization for those effects is sufficient. Preserve local work and follow repository gates. Each section shows the `gh` way first, then the `git` + `curl` fallback for machines without `gh`.
 
 ## Prerequisites
 
@@ -257,9 +257,9 @@ When asked to auto-fix CI, follow this loop:
 1. Check CI status → identify failures
 2. Read failure logs → understand the error
 3. Use `read_file` + `patch`/`write_file` → fix the code
-4. `git add . && git commit -m "fix: ..." && git push`
+4. Stage only the intended files, commit, and push within authorization
 5. Wait for CI → re-check status
-6. Repeat if still failing (up to 3 attempts, then ask the user)
+6. Continue while failures yield actionable evidence within scope and budget; stop for an external blocker, repeated no-progress result, or a decision requiring the user
 
 ## 6. Merging
 

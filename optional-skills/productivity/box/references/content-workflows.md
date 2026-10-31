@@ -50,7 +50,7 @@ box files:move <FILE_ID> <NEW_PARENT_ID> --json --fields id,name,parent
 box folders:move <FOLDER_ID> <NEW_PARENT_ID> --json --fields id,name,parent
 ```
 
-Read back the item or its parent after every write. Moving a folder moves its contents; confirm broad moves before executing them.
+Use an authoritative committed response when it establishes the requested ID, values and location; otherwise retrieve the exact item or parent to close the gap. Moving a folder moves its contents: establish that broad scope is authorized before executing it.
 
 ## File descriptions
 

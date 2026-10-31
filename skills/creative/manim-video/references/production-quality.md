@@ -2,12 +2,12 @@
 
 Standards and checks for ensuring animation output is publication-ready.
 
-## Pre-Code Checklist
+## Planning checks
 
-Before writing any Manim code:
+For new sequences, establish the teaching objective and visual beats; reuse the established direction for repairs. Record a scene list when sequencing needs it, and a narration script when voiceover is requested.
 
-- [ ] Narration script written with visual beats marked
-- [ ] Scene list with purpose, duration, and layout for each
+- [ ] Visual beats and narration timing aligned, if narrated
+- [ ] Purpose, duration and layout clear for the scenes being authored
 - [ ] Color palette defined with meaning assignments (`PRIMARY` = main concept, etc.)
 - [ ] `MONO = "Menlo"` set as the font constant
 - [ ] Target resolution and aspect ratio decided

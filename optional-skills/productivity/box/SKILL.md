@@ -41,7 +41,7 @@ Start normal CLI work with the official Box CLI OAuth app. It covers ordinary co
 When a user selects an authentication path or asks Hermes to connect Box, perform the setup through `terminal`; do not turn the next response into instructions for the user to copy. Take the next safe action yourself, and pause only for an approval, browser sign-in, administrator action, or secret that Hermes cannot safely supply.
 
 - If `box` is missing, ask for any terminal approval required to install `@box/cli` under the current Hermes home at `tools/box-cli`; then verify it with the shell-appropriate command in [CLI guide](references/cli-guide.md). Do not attempt a global npm install, use `sudo`, change npm's global prefix, or change `PATH`.
-- Before OAuth, ask: **“Is Hermes running on the same computer as the browser you will use to authorize Box, or on a remote host such as a VPS, container, or cloud VM?”** Use normal `box login` only for the same-computer path. Use `box login --code` only for the remote/headless path. Do not infer runtime topology from the operating system alone; read [OAuth setup](references/oauth-setup.md) after the user answers.
+- Before OAuth, establish whether Hermes and the authorization browser are on the same computer from the current context; ask that question only if topology is unknown. Use normal `box login` only for the same-computer path. Use `box login --code` only for the remote/headless path. Do not infer runtime topology from the operating system alone; read [OAuth setup](references/oauth-setup.md) after the user answers.
 - Before starting browser authorization, state that Hermes will act as the Box account signed in there. If the user wants narrower access, they can authorize an account that is invited only to the required files, folders, or Hubs. Do not make that account an administrator to unlock an exceptional operation.
 - If a custom OAuth Platform App is necessary, use the CLI's interactive Platform App flow. Ask the user to enter its client secret only in the local CLI prompt; never request it in chat, write it to Hermes configuration, or commit it.
 - If an install, browser authorization, environment switch, or permission change needs approval, request that approval and resume the setup after it is granted. Do not replace the action with a command list.
@@ -59,7 +59,7 @@ Examples labeled `bash` use POSIX continuation syntax. In PowerShell, run the Bo
 
 When the Box CLI lacks a dedicated subcommand, use `box request` for the matching REST endpoint and continue the ordinary operation. Do not ask the user to choose merely because the implementation uses REST; it is the same Box task and preserves the configured CLI identity. Read [REST API fallback](references/rest-api.md) when the endpoint needs a request body or custom header.
 
-Ask before a delete, a collaboration/shared-link or permission change, an identity change, a broad or costly batch mutation, or when the target or scope is ambiguous. Otherwise perform the requested operation and verify it.
+Use the user's existing authorization for the named operation and targets. Clarify ambiguous scope and obtain authorization for additional deletion, access/identity changes or broad/costly mutations not covered by the request. Otherwise perform the requested operation and establish its result.
 
 ## Choose the right path
 
@@ -88,7 +88,7 @@ Use existing Box metadata or metadata queries for deterministic lookups. Otherwi
 
 For Q&A over more than 25 files or a reusable curated knowledge base, prefer Box AI for Hubs. Discover an existing accessible Hub first; only create or populate one after the user approves the shared-resource change. If no Hub is available and the user does not want one created, narrow a one-off request with search or metadata. Do not use a Hub for metadata extraction or text generation. Read [Box Hubs](references/hubs.md).
 
-When the user asks to extract metadata from a Box file, treat it as a request to persist the result unless they ask for a preview. Use structured extraction with inline fields when the desired schema is known and freeform extraction when the fields are exploratory. Reuse a compatible existing enterprise template when one represents every requested field. Otherwise store flat scalar results in the built-in `global.properties` metadata instance, or upload a JSON sidecar beside the source file when the result contains nested objects, tables, or values that must retain their types. Read every write back and compare it with the intended result. Never silently substitute a file description, attach a partial or unrelated template, truncate fields, or discard fields.
+When the user asks to extract metadata from a Box file, treat it as a request to persist the result unless they ask for a preview. Use structured extraction with inline fields when the desired schema is known and freeform extraction when the fields are exploratory. Reuse a compatible existing enterprise template when one represents every requested field. Otherwise store flat scalar results in the built-in `global.properties` metadata instance, or upload a JSON sidecar beside the source file when the result contains nested objects, tables, or values that must retain their types. Compare the intended values with an authoritative committed response; retrieve the exact record when that response leaves a relevant field or completion status unverified. Never silently substitute a file description, attach a partial or unrelated template, truncate fields, or discard fields.
 
 Do not create or change metadata templates. Box does not permit creation of global templates, and enterprise-template administration is outside Hermes' normal OAuth content workflow. If the user needs reusable typed enterprise metadata and no compatible template exists, explain that a Box Admin or authorized Co-Admin must create it separately, leave existing structured metadata unchanged, and report the persisted `global.properties` instance or JSON sidecar instead. Read [Search and AI](references/search-and-ai.md) for the complete extraction and writeback workflow.
 
@@ -97,9 +97,9 @@ Before the first Box AI request, state that Box AI must be enabled, consumes AI 
 ## Operate safely
 
 - Prefer IDs to paths and verify the current actor before diagnosing a missing file.
-- Use `--json` and `--fields` to keep output small. For mutations, inventory first, confirm ambiguous or large scope, then read back the result.
+- Use `--json` and `--fields` to keep output small. For mutations, identify the affected targets and resolve ambiguity or unapproved scale; establish the relevant postconditions from a committed response or targeted follow-up.
 - Run ordered CLI mutations serially so progress and recovery are unambiguous. Use documented bulk input support or bounded SDK concurrency for scalable work.
-- Do not create a shared link merely to provide navigation. Shared links change access and require explicit confirmation.
+- Do not create a shared link merely to provide navigation. Shared links change access and require authorization; reuse it when the user already specified the intended sharing scope.
 - Do not put secrets in chat, command output, source control, or logs.
 
 ## Report results
@@ -114,4 +114,4 @@ For large batches, link the source and destination folders plus exceptions inste
 
 ## Verify
 
-After any write, fetch the file or folder with the same actor or list its parent and confirm the returned ID and name. For a metadata write, retrieve the metadata instance and compare every returned field with the intended value; an HTTP success alone is not verification. Report missing, normalized, or rejected values. For a disposable setup check, create a smoke folder, verify it, then delete it only if the user authorized cleanup.
+Verify the requested postconditions. An authoritative synchronous response with the committed ID, intended values and revision/identifier can suffice. If it lacks relevant fields, is ambiguous or only acknowledges a job, retrieve the exact item/metadata instance with the same actor or await completion and inspect its result. A generic HTTP success alone is not verification. Report missing, normalized, or rejected values. For a disposable setup check, create a smoke folder, verify it, then delete it only if the user authorized cleanup.
