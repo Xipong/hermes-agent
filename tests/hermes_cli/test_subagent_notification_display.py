@@ -45,7 +45,7 @@ def test_completion_display_keeps_payload_separate_across_surfaces(monkeypatch, 
         queued_message = cli.chat.call_args.args[0]
         assert queued_message == payload
         cli.conversation_history = []
-        cli.agent = SimpleNamespace(run_conversation=Mock(return_value={}))
+        cli.agent = SimpleNamespace(run_conversation=Mock(return_value={}), _current_turn_id="display-turn")
         cli._flush_credit_notices = lambda: None
         cli._chat_stage_user_message(cli.agent, queued_message)
         from cli import _ChatTurn
