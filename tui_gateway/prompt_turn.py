@@ -1001,6 +1001,8 @@ def _complete_turn_payload(session: dict, st: _TurnRun, status_note: str | None,
         st.terminal_callback({
             "status": {"interrupted": "cancelled", "error": "failed"}.get(status, "settled"),
             "text": raw if isinstance(raw, str) else str(raw),
+            "turn_id": result.get("turn_id"),
+            "input_delivery": result.get("input_delivery"),
             **({"error": str(error_value or raw)} if status == "error" else {})})
         st.receipt_committed = True
     if st.receipt_committed:

@@ -62,7 +62,8 @@ def test_cli_batch_settles_only_after_actual_canonical_turn(tmp_path, monkeypatc
         def run(text):
             calls.append(text)
             assert all(not delivered(registry, e) for e in events)
-            cli._last_turn_result = ({"messages": [{"role": "user", "content": str(text), "_db_persisted": True}]}
+            cli._last_turn_result = ({"turn_id": "current", "input_delivery": {"turn_id": "current",
+                                         "content": str(text), "display_kind": "process_complete"}}
                                      if accepted else {"messages": [], "failed": True})
         cli._run_process_notification(notice, run)
         assert len(calls) == 1

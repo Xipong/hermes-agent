@@ -248,7 +248,7 @@ def recover_empty_response(
             agent, finish_reason=finish_reason, response=response,
             observed_generation=bool(agent._extract_reasoning(assistant_message)),
         )
-        _turn_exit_reason = "empty_response_exhausted"
+        _turn_exit_reason = "notification_empty_response"
         final_response = _terminal_empty(agent, assistant_message, finish_reason, messages, notification=True)
         return _verdict("break")
 

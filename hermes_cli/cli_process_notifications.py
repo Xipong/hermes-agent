@@ -107,10 +107,8 @@ class CLIProcessNotificationsMixin:
             self._last_turn_result = None
             result = run(current_notice)
             turn = self._last_turn_result or {}
-            committed = not (turn.get("failed") or turn.get("interrupted")) and any(
-                row.get("role") == "user" and row.get("content") == text
-                and (row.get("_db_persisted") or row.get("_row_id"))
-                for row in turn.get("messages", []))
+            from agent.notification_delivery import notification_input_committed
+            committed = notification_input_committed(turn, text, notice.display_kind)
             return result
         finally:
             if committed:

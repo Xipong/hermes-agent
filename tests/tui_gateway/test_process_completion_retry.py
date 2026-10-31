@@ -43,7 +43,8 @@ def test_batch_retry_keeps_order_and_only_acknowledges_accepted_turn(tmp_path, m
         accepted = []
         def accept(*args, **kwargs):
             accepted.append(args[3])
-            kwargs["terminal_callback"]({"status": "settled", "text": "handled"})
+            kwargs["terminal_callback"]({"status": "settled", "text": "handled", "turn_id": "current",
+                "input_delivery": {"turn_id": "current", "content": args[3], "display_kind": "process_complete"}})
             return True
         monkeypatch.setattr(server, "_notif_submit", accept)
         retry = [registry.completion_queue.get_nowait() for _ in range(2)]
@@ -79,7 +80,8 @@ def test_async_admission_is_not_a_delivery_receipt(tmp_path, monkeypatch):
         session["running"] = False
         server._notif_dispatch_completions("sid", session, notifications, registry, None)
         assert not delivered(registry, event)
-        callbacks[-1]({"status": "settled", "text": "handled"})
+        callbacks[-1]({"status": "settled", "text": "handled", "turn_id": "current",
+            "input_delivery": {"turn_id": "current", "content": notifications[0][1], "display_kind": "process_complete"}})
         assert delivered(registry, event)
         assert registry.completion_queue.empty()
     finally:

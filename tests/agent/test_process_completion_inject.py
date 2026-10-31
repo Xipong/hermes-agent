@@ -151,7 +151,8 @@ def _fallback(monkeypatch, registry, events, submit):
     def deliver(*args, **kwargs):
         accepted = submit(*args, **kwargs)
         if accepted and kwargs.get("terminal_callback"):
-            kwargs["terminal_callback"]({"status": "settled", "text": "handled"})
+            kwargs["terminal_callback"]({"status": "settled", "text": "handled", "turn_id": "current",
+                "input_delivery": {"turn_id": "current", "content": args[3], "display_kind": "process_complete"}})
         return accepted
     monkeypatch.setattr(server, "_notif_submit", deliver)
     session = {"history_lock": threading.RLock()}

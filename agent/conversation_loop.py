@@ -1820,6 +1820,7 @@ def run_conversation(
 
     # Steer / redirect / interrupt set this mid-turn; the result reports whether the turn ran untouched.
     agent._turn_user_intervened = False
+    agent._notification_turn_input = None
     # Images attached natively to this user turn stay visible to vision_analyze for the turn, so
     # it does not embed the same pixels a second time into the same request (#76411).
     with native_turn_images(user_message):
@@ -1848,6 +1849,9 @@ def run_conversation(
     if isinstance(result, dict):
         result["user_intervened"] = bool(getattr(agent, "_turn_user_intervened", False))
     _close_durable_failed_turn(agent, result)
+    from agent.notification_delivery import export_notification_input_delivery
+    export_notification_input_delivery(agent, result)
+    agent._notification_turn_input = None
     return result
 
 

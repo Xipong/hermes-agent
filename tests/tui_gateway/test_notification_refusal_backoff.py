@@ -70,7 +70,8 @@ def test_canonical_busy_notification_backs_off_without_consuming_work(monkeypatc
         dispatch()
         if kind == "completion":
             assert not completed, "turn admission is not a process delivery receipt"
-            accepted[0]["terminal_callback"]({"status": "settled"})
+            accepted[0]["terminal_callback"]({"status": "settled", "turn_id": "current",
+                "input_delivery": {"turn_id": "current", "content": "finished", "display_kind": "process_complete"}})
         assert len(completed) == 1
         assert registry.completion_queue.empty()
         assert not waits

@@ -65,7 +65,7 @@ async def test_completion_no_news_and_failure_outcomes_reach_egress(loop, family
         else:
             assert not silent and shaped
         if not reply.choices[0].message.content:
-            assert result["turn_exit_reason"] == "empty_response_exhausted"
+            assert result["turn_exit_reason"] == "notification_empty_response"
             assert "background notification" in shaped.lower()
             assert "retained" in shaped.lower()
             assert "Send `continue`" not in shaped

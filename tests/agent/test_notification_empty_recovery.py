@@ -50,8 +50,11 @@ def test_notification_empty_is_failure_without_paid_recovery(loop, kind, reasoni
     result = agent.run_conversation("Important result to retain", persist_user_display_kind=kind)
 
     assert agent.client.chat.completions.create.call_count == 1
-    assert result["turn_exit_reason"] == "empty_response_exhausted"
+    assert result["turn_exit_reason"] == "notification_empty_response"
     assert result["final_response"] and result["final_response"] != "NO_REPLY"
+    assert result["failed"] is True and result["completed"] is False
+    assert result["error"] == result["final_response"]
+    assert result["failure_reason"] == "empty_response"
     agent._try_activate_fallback.assert_not_called()
     assert agent._empty_content_retries == 0
     assert agent._thinking_prefill_retries == 0
@@ -75,7 +78,7 @@ def test_transport_retry_is_not_an_empty_reply_retry(loop):
     ]
     result = agent.run_conversation("Retain after transient network failure", persist_user_display_kind="internal_notification")
     assert agent.client.chat.completions.create.call_count == 2
-    assert result["turn_exit_reason"] == "empty_response_exhausted"
+    assert result["turn_exit_reason"] == "notification_empty_response"
     assert agent._empty_content_retries == 0
     assert any(m.get("content") == "Retain after transient network failure" for m in result["messages"])
 

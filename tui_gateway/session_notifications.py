@@ -721,9 +721,11 @@ def _notif_restore_completions(registry, notifications, deferred):
         requeue_front(registry, retry)
 
 
-def _notif_process_completion_receipt(registry, claimed):
+def _notif_process_completion_receipt(registry, claimed, text):
     """Settle claims from the receiver's terminal callback, never thread admission."""
     from tools.async_delegation import complete_event_delivery, release_event_delivery
+    from agent.notification_delivery import notification_input_committed
+    from tools.process_registry_notifications import PROCESS_COMPLETE_DISPLAY_KIND
     once = threading.Lock()
     settled = False
 
@@ -733,7 +735,7 @@ def _notif_process_completion_receipt(registry, claimed):
             if settled:
                 return
             settled = True
-        if payload.get("status") == "settled":
+        if notification_input_committed(payload, text, PROCESS_COMPLETE_DISPLAY_KIND):
             for event, _text, claim in claimed:
                 complete_event_delivery(event, claim)
         else:
@@ -783,7 +785,7 @@ def _notif_dispatch_completions(sid, session, notifications, registry, deferred)
             if not _notif_submit(f"__notif__{int(time.time() * 1000)}", sid, session, text,
                                  "completion batch dispatch failed", display_kind=PROCESS_COMPLETE_DISPLAY_KIND,
                                  report_ownership_refusal=False,
-                                 terminal_callback=_notif_process_completion_receipt(registry, claimed),
+                                 terminal_callback=_notif_process_completion_receipt(registry, claimed, text),
                                  display_metadata={"display_text": batch.display_text(registry)}):
                 for event, _text, claim in claimed:
                     _notif_defer_event(event, claim,
