@@ -864,11 +864,15 @@ def _merge_gateway_notes(
     ephemeral system prompt stays byte-stable: the gateway's staged notes, plugin go-live notices no
     tool result carried, then the surface-switch correction. Multimodal (list) content can't take the
     string sidecar — append a durable text part instead."""
+    from agent.notification_policy import NOTIFICATION_REPLY_CONTRACT, is_notification_message
+
+    current = messages[current_turn_user_idx] if 0 <= current_turn_user_idx < len(messages) else None
     forward_lsp_verdicts(agent)  # late LSP verdicts on last turn's edits ride the plugin-notice queue
     _turn_notes = "\n\n".join(
         part for part in (consume_gateway_turn_context_notes(agent), pop_plugin_notices(agent),
                           consume_surface_switch_note(agent),
-                          consume_skills_index_note(agent)) if part
+                          consume_skills_index_note(agent),
+                          NOTIFICATION_REPLY_CONTRACT if is_notification_message(current) else "") if part
     )
     if not _turn_notes:
         return plugin_user_context
