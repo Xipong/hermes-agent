@@ -81,12 +81,13 @@ def test_surface_control_latch_blocks_carrier_before_poller_start(tmp_path, monk
     from tui_gateway import server
     from agent.tool_executor import _flush_session_db_after_tool_progress
     agent, registry = _rig(tmp_path, monkeypatch)
-    session = {"agent": agent, "running": True, "session_key": "owner-a", "history_lock": threading.RLock()}
+    session = {"agent": agent, "running": True, "session_key": "owner-a", "history_lock": threading.Lock()}
     if control != "clarify":
         session[control] = "human input" if control == "queued_prompt" else True
     requests = [{"id": "pending-clarify", "method": "clarify"}] if control == "clarify" else []
     monkeypatch.setattr(server, "_sessions", {"sid": session})
-    monkeypatch.setattr(server, "_open_requests", lambda sid: requests)
+    from tui_gateway import server_requests
+    monkeypatch.setattr(server_requests, "open_requests", lambda sid: requests)
     agent._process_completion_boundary_allowed = lambda: server._notif_bound_process_boundary_allowed("sid")
     try:
         _complete(registry, "proc_human_priority")

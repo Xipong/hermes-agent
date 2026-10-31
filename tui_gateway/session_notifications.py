@@ -847,10 +847,14 @@ def _notif_drain_ready(sid, session, registry, *, shutdown=False, snapshot=None)
 
 
 def _notif_process_boundary_allowed(sid, session):
+    from tui_gateway import server_requests
+
     with session["history_lock"]:
+        # _open_requests also takes history_lock for the compute-host mirror.
         return bool(session.get("running") and not session.get("_turn_cancel_requested")
                     and not session.get("_finalized") and not session.get("queued_prompt")
-                    and not (sid and _open_requests(sid)))
+                    and not (sid and (server_requests.open_requests(sid)
+                                      or isinstance(session.get("_compute_host_open_request"), dict))))
 
 
 def _notif_bound_process_boundary_allowed(sid):
