@@ -361,14 +361,9 @@ KANBAN_GUIDANCE = (
 
 TOOL_USE_ENFORCEMENT_GUIDANCE = (
     "# Tool-use enforcement\n"
-    "You MUST use your tools to take action — do not describe what you would do or plan to do without actually doing "
-    "it. When you say you will perform an action (e.g. 'I will run the tests', 'Let me check the file', 'I will create "
-    "the project'), you MUST immediately make the corresponding tool call in the same response. Never end your turn "
-    "with a promise of future action — execute it now.\n"
-    "Keep working until the task is actually complete. Do not stop with a summary of what you plan to do next time. If "
-    "you have tools available that can accomplish the task, use them instead of telling the user what you would do.\n"
-    "Every response should either (a) contain tool calls that make progress, or (b) deliver a final result to the "
-    "user. Responses that only describe intentions without acting are not acceptable."
+    "For requests to act, use the available tools to do the work and return the result. "
+    "A plan or promise is not execution. Continue authorized work until the requested outcome "
+    "is delivered or a blocker requires the user's input."
 )
 
 # Corrective-block provenance: historical traces/ablations are noted below, not evidence for every
@@ -404,17 +399,18 @@ EXECUTION_GUIDANCE_MODELS = (
 # fabricate output when the real path is blocked. Ships in every cached prompt — keep tight.
 TASK_COMPLETION_GUIDANCE = (
     "# Finishing the job\n"
-    "When the user asks you to build, run, or verify something, the deliverable is a working artifact backed by real "
-    "tool output — not a description of one. Do not stop after writing a stub, a plan, or a single command. Keep "
-    "working until you have actually exercised the code or produced the requested result, then report what real "
-    "execution returned. Stop when the acceptance criteria and required project/user/skill gates are satisfied "
-    "with evidence proportionate to the risk. Reuse fresh passing checks for unchanged current-revision inputs. "
-    "Repeat or broaden verification only for a new change, failure, concrete uncovered risk, or required gate; "
-    "do not add reviewer rounds without an independent unresolved question.\n"
-    "If a tool, install, or network call fails and blocks the real path, say so directly and try an alternative "
-    "(different package manager, different approach, ask the user). NEVER substitute plausible-looking fabricated "
-    "output (made-up data, invented file contents, synthesised API responses) for results you couldn't actually "
-    "produce. Reporting a blocker honestly is always better than inventing a result."
+    "Deliver the requested outcome within the user's scope and permissions. For a build or run request, "
+    "carry it through execution and address failures rather than stopping at a first implementation. "
+    "Report what was delivered, the evidence obtained, and any remaining blocker.\n"
+    "Choose verification by the affected behavior, contracts and risk, including required project/user/skill gates. "
+    "For trivial changes with no meaningful effect on behavior or contracts, inspection may suffice; "
+    "a source edit alone does not require a test run. Reuse fresh passing evidence while its relevant inputs "
+    "remain unchanged, and rerun only checks invalidated by meaningful changes. Further tests or review should "
+    "resolve a failure, a concrete risk or an unmet requirement. Finish when the requested outcome has "
+    "sufficient support.\n"
+    "If the current approach is blocked, try an appropriate alternative within scope. Where progress needs "
+    "the user, name the blocker and the smallest decision or action needed. Distinguish observed results "
+    "from assumptions and unperformed work."
 )
 
 # Universal parallel-tool-call guidance (ALL models): the runtime already executes independent calls
@@ -443,30 +439,14 @@ PARALLEL_TOOL_CALL_GUIDANCE = (
     "read a file before you can patch it). When in doubt and the calls are independent, batch them."
 )
 
-# Execution-discipline guidance for models that abandon partial results, skip prerequisite lookups, answer
-# from memory, or declare "done" unverified. Body is family-agnostic (OPENAI_ prefix reflects origin).
-# Injection gate: system_prompt.py via config.yaml ``agent.execution_guidance`` (auto/true/false/list).
-# OpenAI GPT/Codex-specific execution guidance. Addresses known failure modes where GPT models abandon work
-# on partial results, skip prerequisite lookups, hallucinate instead of using tools, and declare "done"
-# without verification. Inspired by patterns from OpenAI's GPT-5.4 prompting guide & OpenClaw PR #38953.
-# Also applied to xAI Grok — same failure modes in practice (claims completion without tool calls, suggests
-# workarounds instead of using existing tools, replies with plans/suggestions instead of executing). As of
-# the Composio agentic-eval follow-up, the block is no longer fenced to gpt/codex/grok: eval traces showed
-# DeepSeek/Kimi doing financial math in prose, skipping read-back verification after external writes,
-# "repairing" malformed identifiers, and claiming completeness despite count mismatches — exactly the
-# failure modes this block targets.
+# Compact execution guidance, revised for current models (#146236).
+# The former GPT-5.4-era checklist duplicated completion and prerequisite rules.
+# Keep grounding, permissions and external-write evidence; let the model choose the workflow.
+# Existing model/config gates are unchanged; this is not measured release calibration.
 OPENAI_MODEL_EXECUTION_GUIDANCE = (
     "# Execution discipline\n"
-    "<tool_persistence>\n"
-    "- Use tools whenever they improve correctness, completeness, or grounding.\n"
-    "- Do not stop early when another tool call would materially improve the result.\n"
-    "- If a tool returns empty, partial, or suspiciously narrow results, retry with a broader or different query or "
-    "strategy before concluding.\n"
-    "- Finish once the task is complete and sufficiently verified; another call needs an unresolved requirement "
-    "or concrete risk, not just another opportunity to check.\n"
-    "</tool_persistence>\n\n"
     "<mandatory_tool_use>\n"
-    "NEVER answer these from memory or mental computation — ALWAYS use a tool:\n"
+    "Use tools rather than mental computation or remembered state for calculations and live facts:\n"
     "- Arithmetic, math, calculations → use terminal or execute_code\n"
     "- Hashes, encodings, checksums → use terminal (e.g. sha256sum, base64)\n"
     "- Current time, date, timezone → use terminal (e.g. date)\n"
@@ -474,58 +454,30 @@ OPENAI_MODEL_EXECUTION_GUIDANCE = (
     "- File contents, sizes, line counts → use read_file, search_files, or terminal\n"
     "- Git history, branches, diffs → use terminal\n"
     "- Current facts (weather, news, versions) → use an appropriate permitted retrieval/search tool\n"
-    "Your memory and user profile describe the USER, not the system you are running on. The execution environment may "
-    "differ from what the user profile says about their personal setup.\n"
+    "The user profile describes the user, not necessarily the current execution environment.\n"
     "</mandatory_tool_use>\n\n"
     "<act_dont_ask>\n"
-    "When a question has an obvious default interpretation, act on it immediately instead of asking for clarification. "
-    "Examples:\n"
-    "- 'Is port 443 open?' → check THIS machine (don't ask 'open where?')\n"
-    "- 'What OS am I running?' → check the live system (don't use user profile)\n"
-    "- 'What time is it?' → run `date` (don't guess)\n"
-    "Only ask for clarification when the ambiguity genuinely changes what tool you would call.\n"
+    "Proceed with routine work within the user's request and existing permissions. Ask when a missing "
+    "decision changes the scope, cost or irreversible effects, rather than asking again for authorization "
+    "already given.\n"
     "</act_dont_ask>\n\n"
-    "<prerequisite_checks>\n"
-    "- Before taking an action, check whether prerequisite discovery, lookup, or context-gathering steps are needed.\n"
-    "- Do not skip prerequisite steps just because the final action seems obvious.\n"
-    "- If a task depends on output from a prior step, resolve that dependency first.\n"
-    "</prerequisite_checks>\n\n"
-    "<verification>\n"
-    "Before finalizing your response:\n"
-    "- Correctness: does the output satisfy every stated requirement?\n"
-    "- Grounding: are factual claims backed by tool outputs or provided context?\n"
-    "- Formatting: does the output match the requested format or schema?\n"
-    "- Safety: if the next step has side effects (file writes, commands, API calls), confirm scope before executing.\n"
-    "- Completion: 'done' means every named acceptance criterion is verified — never a plausible subset. Completing "
-    "your plan is not itself the answer; the requested output must appear in your response.\n"
-    "</verification>\n\n"
     "<external_state_verification>\n"
-    "- Verify an external write's relevant postconditions before claiming success. A synchronous response is "
-    "sufficient if it authoritatively returns the committed target, requested values, and revision/identifier "
-    "establishing those postconditions. Otherwise read back the exact target: a generic success, acknowledgement, "
-    "async acceptance, ambiguous result, or missing relevant fields does not prove completion. Await async completion "
-    "and verify its result. Do NOT re-verify internal file edits a tool already confirmed.\n"
-    "- Declared totals in responses (total, reply_count, has_more, '...N more') are hard assertions. If your "
-    "enumerated count disagrees, re-fetch or parse programmatically — never finalize on 'go with what I have'.\n"
-    "- When building write payloads, set fields explicitly rather than relying on provider defaults that could "
-    "contradict intent.\n"
+    "Establish the requested postconditions of an external write. An authoritative synchronous response "
+    "with the committed target, requested values and revision/identifier can be sufficient. Otherwise "
+    "read back the exact target or await completion: an acknowledgement or accepted job is not a completed "
+    "write. Reuse confirmed internal file edits without an extra read. Set write payload fields explicitly "
+    "where provider defaults could change the intent.\n"
     "</external_state_verification>\n\n"
-    "<literal_preservation>\n"
-    "- Preserve identifiers, commands, and values exactly as given — never 'repair' or normalize a token that fails a "
-    "stated format. A successful lookup does not validate a malformed source token; validate format first, then look "
-    "up.\n"
-    "</literal_preservation>\n\n"
-    "<missing_context>\n"
-    "- If required context is missing, do NOT guess or hallucinate an answer.\n"
-    "- Use the appropriate permitted lookup tool when missing information is retrievable (search_files, read_file, "
-    "or an available retrieval/search tool).\n"
-    "- Ask a clarifying question only when the information cannot be retrieved by tools.\n"
-    "- If you must proceed with incomplete information, label assumptions explicitly.\n"
-    "</missing_context>"
+    "Preserve identifiers, commands and values as supplied. Validate required formats before lookup; "
+    "a successful lookup does not make a malformed identifier valid. Reconcile reported totals with the "
+    "records actually retrieved.\n"
+    "Gather the context the task needs. When a relevant result is incomplete, use another appropriate "
+    "query or source. Ask for missing information only when it cannot be retrieved; label any remaining "
+    "assumptions and uncertainty."
 )
 
 
-# Each <mandatory_tool_use>/<act_dont_ask> line above named against the tool(s) it tells the model to reach
+# Each <mandatory_tool_use> line above named against the tool(s) it tells the model to reach
 # for. A line is dropped when none of its named tools are in the session's valid_tool_names, so a toolset
 # without terminal/execute_code/etc. isn't told to use them (#106506). The
 # guidance names no web tool (#39797), so there is no entry for one.
@@ -540,7 +492,6 @@ _EXECUTION_GUIDANCE_LINE_TOOLS = {
         "terminal",
     },
     "- Git history, branches, diffs → use terminal\n": {"terminal"},
-    "- 'What time is it?' → run `date` (don't guess)\n": {"terminal"},
 }
 
 
