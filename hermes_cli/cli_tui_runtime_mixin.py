@@ -159,7 +159,8 @@ class CLITuiRuntimeMixin:
         self._turn_summary_begin()
         self._app.invalidate()
         try:
-            self.chat(notification_preview or user_input, images=submit_images or None, voice_input=is_voice_input)
+            self._run_process_notification(notification_preview or user_input,
+                lambda text: self.chat(text, images=submit_images or None, voice_input=is_voice_input))
         finally:
             self._tui_after_turn()
 

@@ -41,6 +41,8 @@ class CLIProcessNotificationsMixin:
             # notification turn itself; this viewer only paints it (IPS-086).
             queue_admitted_turn(self, store)
             return
+        if getattr(self, "_last_turn_interrupted", False):
+            return  # Stop holds automatic wakes until a genuine user turn clears the latch.
         from tools.process_registry import process_registry
         from tools.async_delegation import claim_event_delivery, complete_event_delivery
         from tools.process_registry_notifications import (
@@ -50,7 +52,12 @@ class CLIProcessNotificationsMixin:
         claimed = []
         for event, text in process_registry.drain_notifications(
             session_key=getattr(self, "session_id", "") or "", owns_event=self._owns_process_notification,
+            skip_poll_observed=False,
         ):
+            if event.get("type", "completion") == "completion":
+                # Keep identity in the queued batch; enqueueing is not a model-delivery receipt.
+                claimed.append((event, text))
+                continue
             claim = claim_event_delivery(event, consumer)
             if claim is None:
                 continue
@@ -73,6 +80,45 @@ class CLIProcessNotificationsMixin:
                     pending = TimelineNotification(text, text, "internal_notification", "diagnostic")
             self._pending_input.put(pending)
 
+    def _run_process_notification(self, notice, run):
+        """Keep process identities until the receiving turn confirms its canonical input."""
+        batch = getattr(notice, "process_batch", None)
+        if batch is None:
+            return run(notice)
+        from tools.process_registry import process_registry
+        from tools import process_completion_delivery as delivery
+        from tools.process_registry_notifications import ProcessNotificationBatch, TimelineNotification
+
+        if getattr(self, "_last_turn_interrupted", False):
+            delivery.requeue_front(process_registry, [event for event, _ in batch._live(process_registry)])
+            return None
+        claims = []
+        committed = False
+        try:
+            for event, text in batch._live(process_registry):
+                token = delivery.claim(process_registry, event, "cli-notification-turn")
+                if token is not None:
+                    claims.append((event, text, token))
+            current = ProcessNotificationBatch(tuple((e, text) for e, text, _ in claims))
+            text = current.render(process_registry)
+            if text is None:
+                return None
+            current_notice = TimelineNotification(text, current.display_text(process_registry), notice.display_kind)
+            self._last_turn_result = None
+            result = run(current_notice)
+            turn = self._last_turn_result or {}
+            from agent.notification_delivery import notification_input_committed
+            committed = notification_input_committed(turn, text, notice.display_kind)
+            return result
+        finally:
+            if committed:
+                for event, _text, token in claims:
+                    delivery.acknowledge(process_registry, event, token)
+            else:
+                for event, _text, token in claims:
+                    delivery.release(process_registry, event, token)
+                delivery.requeue_front(process_registry, [event for event, _text, _ in claims])
+
     def _tui_unwrap_input(self, user_input):
         """Unwrap ``_VoiceInputMessage`` / ``_SeededQueryMessage`` -> ``(text_or_tuple, is_voice_input, is_seeded_query)``."""
         from cli import _VoiceInputMessage, _SeededQueryMessage
@@ -80,9 +126,12 @@ class CLIProcessNotificationsMixin:
         from tools.process_registry_notifications import (
             PROCESS_COMPLETE_DISPLAY_KIND, ProcessNotificationBatch, TimelineNotification)
         if isinstance(user_input, ProcessNotificationBatch):
-            rendered = user_input.render(process_registry)
+            batch = user_input
+            rendered = batch.render(process_registry)
             user_input = rendered and TimelineNotification(
-                rendered, user_input.display_text(process_registry), PROCESS_COMPLETE_DISPLAY_KIND)
+                rendered, batch.display_text(process_registry), PROCESS_COMPLETE_DISPLAY_KIND)
+            if user_input:
+                user_input.process_batch = batch
         # Voice-transcribed messages arrive wrapped in a sentinel so only genuine STT output gets the voice
         # prefix (#65827).
         is_voice_input = isinstance(user_input, _VoiceInputMessage)

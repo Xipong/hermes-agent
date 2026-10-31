@@ -16,18 +16,11 @@ from .method_ctx import HandlerRegistry, bind_module
 _registry = HandlerRegistry()
 
 
-def _bot_mode_delivery_text(response: Any, *, successful: bool) -> Any:
-    """Return the text Bot Mode may render or relay after a completed turn.
+def _turn_allows_silence(session: dict, display_kind: str | None) -> bool:
+    """Use this turn's runtime type, never a previous notification or user-authored text."""
+    from agent.notification_policy import NOTIFICATION_DISPLAY_KINDS
 
-    The gateway owns the canonical marker set.  Keep the row and completion
-    event intact, but make a successful bare marker invisible at every Bot
-    Mode delivery boundary.  Failed turns intentionally fail open so their
-    diagnostic text is never swallowed.
-    """
-    from gateway.response_filters import is_intentional_silence_response, strip_trailing_silence_marker
-    if not successful:
-        return response
-    return "" if is_intentional_silence_response(response) else strip_trailing_silence_marker(response)
+    return display_kind in NOTIFICATION_DISPLAY_KINDS or _is_bot_mode_session(session)
 
 
 def _is_bot_mode_session(session: dict) -> bool:
@@ -458,6 +451,13 @@ def _run_post_turn_followups(
                 return  # the user pressed Stop; the goal resumes after their next prompt
             session["running"] = True
         _dispatch_followup_turn(rid, sid, session, goal_followup, "goal continuation dispatch")
+    # The matching live poller owns notification draining, including its shutdown pass.
+    # Keep post-turn as a fallback, not a competing consumer of the next ready snapshot.
+    # A stale stop token alone is not proof that the poller can still deliver the backlog.
+    notif_stop = session.get("_notif_stop")
+    if notif_stop is not None and any(
+            stop is notif_stop and thread.is_alive() for stop, thread in _notification_pollers):
+        return
     # Safety net for completion events that arrived mid-turn.  Ownership is positive-proof
     # and compression-chain aware (same fail-closed gate as the poller): session B must
     # not consume session A's event.  Unclaimable events are requeued for the poller.
@@ -465,21 +465,33 @@ def _run_post_turn_followups(
         from tools.process_registry import process_registry
         # _release_turn_scopes / _post_turn_housekeeping have released the worker's runtime scopes. Queue ownership,
         # notification policy and nested dispatch still belong to this session.
-        from tools.process_registry_awaiting import drained_for
+        from tools.process_registry_awaiting import release as release_in_flight, take_ready
         from tools.process_registry_notifications import format_process_notification, should_surface_notification
         key = session.get("session_key", "")
         owns = lambda e: process_registry._owns_event(
             e, key, lambda evt: _session_owns_notification_event(sid, session, evt), e.get("type") == "async_delegation")
         # Every dequeued event's owner — this session's and any other session's — stays held until the foreign events
         # are requeued and ours are routed, so the reapers never see an owner whose notice is in nobody's hands.
-        with _session_profile_runtime_scope(session), drained_for(process_registry, owns) as mine:
-            deferred = []
-            _notif_handle_ready(
-                sid, session, [evt for evt in mine if should_surface_notification(evt)],
-                session.setdefault("_notification_emitted", set()), process_registry,
-                format_process_notification, deferred, owned=True)
-            for event in deferred:
-                process_registry.completion_queue.put(event)
+        snapshot = []
+        with _session_profile_runtime_scope(session):
+            process_registry.restore_completions()
+            try:
+                with process_registry.completion_routing_lock:
+                    snapshot = take_ready(process_registry.completion_queue, 0)
+                    mine = [evt for evt in snapshot if owns(evt)]
+                    for evt in snapshot:
+                        if not any(evt is accepted for accepted in mine):
+                            process_registry.completion_queue.put(evt)
+                deferred = []
+                _notif_handle_ready(
+                    sid, session, [evt for evt in mine if should_surface_notification(evt)],
+                    session.setdefault("_notification_emitted", set()), process_registry,
+                    format_process_notification, deferred, owned=True)
+                with process_registry.completion_routing_lock:
+                    for event in deferred:
+                        process_registry.completion_queue.put(event)
+            finally:
+                release_in_flight(snapshot)
     except Exception as _drain_exc:
         _hook_failure("completion queue drain", _drain_exc)
 
@@ -505,6 +517,7 @@ class _TurnRun:
     error_retained: bool = False
     error_detail: str = ""
     prompt_text: str = ""
+    display_kind: str | None = None
     marker_key: str = ""
     receipt_attempted: bool = False
 
@@ -746,13 +759,14 @@ def _invoke_agent(
     """Wire the streaming callbacks and run the conversation into ``st.result``.
     ``text`` is the turn's raw submit, matched against the row staged by prompt.submit."""
     agent = st.agent
+    st.display_kind = display_kind
     st.compression_count = getattr(getattr(agent, "context_compressor", None), "compression_count", None)
-    # Bot Chat mirrors gateway.stream_consumer: deltas are withheld while the reply could still
+    # Bot Chat and typed notifications mirror gateway.stream_consumer: hold deltas while a reply could
     # be a bare silence marker ("NO"->"NO_REPLY") or its last line a closing one
     # ("Paris.\n\nNO"), so a marker is never shown or spoken (the client keeps streamed text
     # when message.complete is "").
     from gateway.response_filters import SilenceMarkerStreamHold
-    hold = SilenceMarkerStreamHold() if _is_bot_mode_session(session) else None
+    hold = SilenceMarkerStreamHold() if _turn_allows_silence(session, display_kind) else None
 
     def _stream(delta):
         if getattr(agent, "_mute_notification_reply", False):
@@ -776,8 +790,17 @@ def _invoke_agent(
     # Interim assistant text (commentary beside tool calls, pre-nudge final answer) is sealed
     # by the desktop as its own segment instead of being lost to message.complete.
     def _interim_assistant_cb(text: str, *, already_streamed: bool = False) -> None:
+        nonlocal hold
         if getattr(agent, "_mute_notification_reply", False):
             return
+        if hold is not None:
+            from agent.notification_policy import silence_delivery_text
+            if rest := hold.finish():
+                _emit_delta(rest)
+            hold = SilenceMarkerStreamHold()
+            text = silence_delivery_text(text, successful=True)
+            if not text:
+                return
         _emit("message.interim", sid, {"text": text, "already_streamed": already_streamed})
     agent.interim_assistant_callback = (
         _interim_assistant_cb if _load_interim_assistant_messages() else None)
@@ -924,8 +947,9 @@ def _complete_turn_payload(session: dict, st: _TurnRun, status_note: str | None,
     # The receipt verifies the stored row's body, which keeps the model's text as written;
     # only the delivered copy drops a silence marker.
     receipt = _persisted_turn_receipt(st, raw, status)
-    if _is_bot_mode_session(session):
-        raw = _bot_mode_delivery_text(raw, successful=status == "complete")
+    if _turn_allows_silence(session, getattr(st, "display_kind", None)):
+        from agent.notification_policy import silence_delivery_text
+        raw = silence_delivery_text(raw, successful=status == "complete")
     payload = {"text": raw, "usage": _get_usage(agent), "status": status}
     if receipt:
         payload["persisted_turn"] = receipt
@@ -982,6 +1006,8 @@ def _complete_turn_payload(session: dict, st: _TurnRun, status_note: str | None,
         st.terminal_callback({
             "status": {"interrupted": "cancelled", "error": "failed"}.get(status, "settled"),
             "text": raw if isinstance(raw, str) else str(raw),
+            "turn_id": result.get("turn_id"),
+            "input_delivery": result.get("input_delivery"),
             **({"error": str(error_value or raw)} if status == "error" else {})})
         st.receipt_committed = True
     if st.receipt_committed:

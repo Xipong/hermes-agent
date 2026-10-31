@@ -117,6 +117,8 @@ class ExitFailure(NamedTuple):
 # (exit-reason prefix, failure_reason, retryable, fails_turn). Prefix match: several reasons
 # carry a parenthesised detail (``local_processing_error(...)``).
 _EXIT_REASON_FAILURES: tuple[tuple[str, str, bool, bool], ...] = (
+    # Typed automation retained its input but produced no summary; not inferred silence.
+    ("notification_empty_response", "empty_response", False, True),
     # Advisory: the reasoning-only text may literally be the answer, and cron stays silent.
     ("empty_response_exhausted", "empty_response", True, False),
     ("all_retries_exhausted_no_response", FailoverReason.server_error.value, True, True),

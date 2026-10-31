@@ -4,7 +4,11 @@ Runs when the model returned no visible text after ``<think>`` blocks. Ladder or
 load-bearing: partial-stream recovery → reuse prior turn content (housekeeping tools only)
 → one post-tool-call nudge → thinking-only prefill continuation (×2) → empty-response
 retries (budgeted, deterministic-empty short-circuit) → fallback provider → terminal
-``(empty)`` sentinel. Nothing here imports ``agent.conversation_loop`` at module level.
+``(empty)`` sentinel. Typed notification turns reaching this ladder retain partial/
+housekeeping replies but have zero additional empty-reply recovery calls across any tail;
+blanks remain failures, not implicit silence. Provider transport retries and provider-native
+incomplete-response continuation remain independent. Nothing here imports
+``agent.conversation_loop`` at module level.
 """
 
 from __future__ import annotations
@@ -17,12 +21,21 @@ from typing import Any, Dict, List, Optional
 from agent import empty_response_guard as _empty_guard
 from agent.message_metadata import append_message
 from agent.message_sanitization import _sanitize_surrogates
+from agent.notification_policy import is_notification_message
 from agent.turn_context_compaction import _refund_api_call
 from agent.turn_recovery import interruptible_backoff_sleep
 
 logger = logging.getLogger("agent.conversation_loop")
 
 _INLINE_THINK_RE = re.compile(r'<think>|<thinking>|<reasoning>', re.IGNORECASE)
+
+
+def _is_notification_turn(messages: list[dict[str, Any]]) -> bool:
+    """A later human steer overrides the notification's recovery policy."""
+    for message in reversed(messages):
+        if message.get("role") == "user":
+            return is_notification_message(message)
+    return False
 
 
 @dataclass
@@ -95,7 +108,9 @@ def _retry_empty(
     return "continue", None, deterministic
 
 
-def _terminal_empty(agent: Any, assistant_message: Any, finish_reason: str, messages: Any) -> str:
+def _terminal_empty(
+    agent: Any, assistant_message: Any, finish_reason: str, messages: Any, *, notification: bool = False,
+) -> str:
     """Retries and fallback exhausted: persist the ``(empty)`` sentinel row and return the
     delivery text. Reasoning is never copied into the delivery text here — the persisted row
     keeps the sentinel so later "continue" turns don't replay it and loop on empties."""
@@ -112,6 +127,13 @@ def _terminal_empty(agent: Any, assistant_message: Any, finish_reason: str, mess
     assistant_msg["content"] = "(empty)"
     assistant_msg["_empty_terminal_sentinel"] = True
     append_message(messages, assistant_msg)
+
+    if notification:
+        logger.warning("Notification has no visible model reply; retaining result without empty-reply retries")
+        return (
+            "⚠️ Background notification received, but the model produced no visible summary. "
+            "The result is retained in the conversation; this does not confirm the background work succeeded."
+        )
 
     if not reasoning_text:
         logger.warning(
@@ -213,6 +235,21 @@ def recover_empty_response(
         agent._emit_diagnostic_status("↻ Empty response after tool calls — using earlier content as final answer")
         agent._empty_content_retries = 0
         final_response = final
+        return _verdict("break")
+
+    # Notification tails have a cumulative EMPTY-reply recovery budget of zero:
+    # every event still gets its initial request, but a blank/reasoning-only answer
+    # cannot trigger nudges, prefills or provider hops that re-bill the same context.
+    # This is failure, NOT inferred NO_REPLY. Keep the payload and failure outcome
+    # durable so a later useful event or human request can still inspect the result.
+    # Transport retry accounting is owned by the request layer and is untouched.
+    if _is_notification_turn(messages):
+        _empty_guard.record_empty_attempt(
+            agent, finish_reason=finish_reason, response=response,
+            observed_generation=bool(agent._extract_reasoning(assistant_message)),
+        )
+        _turn_exit_reason = "notification_empty_response"
+        final_response = _terminal_empty(agent, assistant_message, finish_reason, messages, notification=True)
         return _verdict("break")
 
     # Post-tool-call empty (no prior content, or only mid-task narration): nudge once.

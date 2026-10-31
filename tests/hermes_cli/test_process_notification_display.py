@@ -14,7 +14,8 @@ from tui_gateway import server
 def _registry(events):
     return SimpleNamespace(
         drain_notifications=lambda **kw: [(e, format_process_notification(e)) for e in events],
-        completion_queue=queue.Queue(), is_completion_consumed=lambda sid: False)
+        completion_queue=queue.Queue(), completion_routing_lock=threading.RLock(),
+        is_completion_consumed=lambda sid: False)
 
 def _event(sid, exit_code, command="cd /tmp && bash long-build.sh"):
     return {"type": "completion", "session_id": sid, "session_key": "display-session", "command": command,
@@ -22,9 +23,8 @@ def _event(sid, exit_code, command="cd /tmp && bash long-build.sh"):
 
 @pytest.mark.parametrize("mode,expect_injected", [("off", False), ("concise", True), ("all", True)])
 def test_drain_honors_background_process_notifications_off(monkeypatch, mode, expect_injected):
-    """``off`` consumes completion events without injecting a REPL input (no spurious post-Ctrl+C
-    turn, #123114); every other documented mode keeps injecting, and the durable claim/ack chain
-    runs in all modes so an ``off`` session never leaves pending rows to replay on restart."""
+    """``off`` suppresses the wake; visible modes retain identity until the turn delivers it.
+    Neither queueing nor policy suppression is an acknowledgement of model delivery."""
     events = [_event("proc_off", 0)]
     cli = HermesCLI.__new__(HermesCLI)
     cli.session_id = "display-session"
@@ -35,7 +35,7 @@ def test_drain_honors_background_process_notifications_off(monkeypatch, mode, ex
     monkeypatch.setattr("tools.async_delegation.complete_event_delivery", lambda *a: acked.append(a))
     monkeypatch.setattr("cli.CLI_CONFIG", {"display": {"background_process_notifications": mode}})
     cli._drain_process_notifications("cli-post-turn")
-    assert acked, "events must still be claimed and acknowledged under every mode"
+    assert not acked, "queueing a process batch is not actual model delivery"
     assert cli._pending_input.empty() is (not expect_injected)
     if expect_injected:
         assert cli._pending_input.get_nowait() is not None

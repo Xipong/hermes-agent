@@ -42,7 +42,7 @@ def test_canonical_busy_notification_backs_off_without_consuming_work(monkeypatc
                 server._notif_dispatch_completions("ui", session, [(event, "finished")], registry, None)
             else:
                 assert server._notif_claim_turn(session)
-                server._notif_dispatch_event("ui", session, event, "finished")
+                server._notif_dispatch_event("ui", session, event, "finished", "")
 
         dispatch()
         assert session["running"] is False
@@ -65,8 +65,13 @@ def test_canonical_busy_notification_backs_off_without_consuming_work(monkeypatc
 
         # A later accepted notification settles once and never takes the refusal delay.
         waits.clear()
-        monkeypatch.setattr(server, "_run_prompt_submit", lambda *a, **k: True)
+        accepted = []
+        monkeypatch.setattr(server, "_run_prompt_submit", lambda *a, **k: accepted.append(k) or True)
         dispatch()
+        if kind == "completion":
+            assert not completed, "turn admission is not a process delivery receipt"
+            accepted[0]["terminal_callback"]({"status": "settled", "turn_id": "current",
+                "input_delivery": {"turn_id": "current", "content": "finished", "display_kind": "process_complete"}})
         assert len(completed) == 1
         assert registry.completion_queue.empty()
         assert not waits

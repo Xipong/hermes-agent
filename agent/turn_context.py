@@ -709,6 +709,9 @@ def _stage_turn_user_message(
     # recovery dedups via ``has_platform_message_id`` against this row.
     if persist_user_platform_id is not None:
         user_msg["platform_message_id"] = persist_user_platform_id
+    from agent.notification_policy import is_notification_message
+    if is_notification_message(user_msg):
+        agent._notification_turn_input = (agent._current_turn_id, user_msg)
     return user_msg, pending_cli_message
 
 
@@ -864,11 +867,15 @@ def _merge_gateway_notes(
     ephemeral system prompt stays byte-stable: the gateway's staged notes, plugin go-live notices no
     tool result carried, then the surface-switch correction. Multimodal (list) content can't take the
     string sidecar — append a durable text part instead."""
+    from agent.notification_policy import NOTIFICATION_REPLY_CONTRACT, is_notification_message
+
+    current = messages[current_turn_user_idx] if 0 <= current_turn_user_idx < len(messages) else None
     forward_lsp_verdicts(agent)  # late LSP verdicts on last turn's edits ride the plugin-notice queue
     _turn_notes = "\n\n".join(
         part for part in (consume_gateway_turn_context_notes(agent), pop_plugin_notices(agent),
                           consume_surface_switch_note(agent),
-                          consume_skills_index_note(agent)) if part
+                          consume_skills_index_note(agent),
+                          NOTIFICATION_REPLY_CONTRACT if is_notification_message(current) else "") if part
     )
     if not _turn_notes:
         return plugin_user_context

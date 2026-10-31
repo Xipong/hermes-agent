@@ -19,7 +19,8 @@ def test_cli_completion_drain_uses_visible_session_identity(monkeypatch):
     calls = []
 
     class FakeRegistry:
-        def drain_notifications(self, *, session_key="", owns_event=None):
+        def drain_notifications(self, *, session_key="", owns_event=None, skip_poll_observed=True):
+            assert skip_poll_observed is False
             calls.append((session_key, owns_event(event)))
             return [(event, "completion payload")]
 
@@ -45,6 +46,17 @@ def test_cli_completion_drain_uses_visible_session_identity(monkeypatch):
     assert cli._pending_input.get_nowait() == "completion payload"
     assert claimed == [(event, "cli-idle")]
     assert completed == [(event, "claim-token")]
+
+    # Same-turn inject uses a display-only progress event instead of putting a
+    # second synthetic completion message into _pending_input.
+    rendered = []
+    monkeypatch.setattr("cli._cprint", rendered.append)
+    cli._invalidate = lambda *args, **kwargs: None
+    cli._on_tool_progress("delegation.injected", task_count=1, unit_count=1)
+    cli._on_tool_progress("delegation.injected", task_count=3, unit_count=2)
+    assert any("Background agent finished" in line and "injected into current turn" in line for line in rendered)
+    assert any("3 background agents finished" in line and "injected into current turn" in line for line in rendered)
+    assert cli._pending_input.empty()
 
 
 def test_cli_completion_ownership_rejects_foreign_session():

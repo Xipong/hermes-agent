@@ -1697,6 +1697,9 @@ def _run_conversation_turn(
     from agent.voice_turn_route import begin_voice_turn_route
     _ctx.active_system_prompt = begin_voice_turn_route(agent, _ctx.messages, _ctx.active_system_prompt)
 
+    # Bind detached results to this foreground turn, never a later conversation turn.
+    agent._active_turn_id = _ctx.turn_id
+
     # Per-turn agent state (the gateway caches agents across turns, so none of this may
     # leak into the next message): interim-commentary dedup spans the whole turn but not
     # the next; a SessionDB append failure (and its classified cause) halts only this turn;
@@ -1817,6 +1820,7 @@ def run_conversation(
 
     # Steer / redirect / interrupt set this mid-turn; the result reports whether the turn ran untouched.
     agent._turn_user_intervened = False
+    agent._notification_turn_input = None
     # Images attached natively to this user turn stay visible to vision_analyze for the turn, so
     # it does not embed the same pixels a second time into the same request (#76411).
     with native_turn_images(user_message):
@@ -1845,6 +1849,9 @@ def run_conversation(
     if isinstance(result, dict):
         result["user_intervened"] = bool(getattr(agent, "_turn_user_intervened", False))
     _close_durable_failed_turn(agent, result)
+    from agent.notification_delivery import export_notification_input_delivery
+    export_notification_input_delivery(agent, result)
+    agent._notification_turn_input = None
     return result
 
 
