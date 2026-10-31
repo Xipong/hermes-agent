@@ -298,10 +298,11 @@ def _history_to_messages(history: list[dict], *, profile_home=None, image_urls: 
     """``image_urls=False`` is the ``inline_images=false`` projection (#116511): image parts render ``[image]``
     so a remote client's history read stays kilobytes instead of re-transmitting every stored attachment."""
     from agent.history_commentary import project_history_commentary
+    from agent.notification_policy import project_notification_silence
 
     messages = []
     tool_call_args = {}
-    for m in history:
+    for m in project_notification_silence(history):
         if not isinstance(m, dict):
             continue
         m = project_compaction_message_for_display(m)
@@ -318,7 +319,7 @@ def _history_to_messages(history: list[dict], *, profile_home=None, image_urls: 
             continue
         content_text = _user_image_display_text(m.get("content")) if role == "user" else None
         if content_text is None:
-            content_text = _coerce_message_text(m.get("content"), image_urls=image_urls)
+            content_text = _coerce_message_text(m.get("display_content", m.get("content")), image_urls=image_urls)
         if _is_display_hidden_marker(role, content_text):
             continue
         if role == "user":

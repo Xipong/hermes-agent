@@ -684,6 +684,7 @@ def _project_for_display(messages: list, *, home=None, inline_images: bool = Tru
     from agent.context_compressor import is_compaction_summary_message
     from agent.conversation_compression import _extract_steer_text_from_message
     from agent.history_commentary import project_history_commentary
+    from agent.notification_policy import project_notification_silence
     from agent.prompt_builder import STEER_DISPLAY_KIND
     from agent.turn_failure_copy import untyped_failed_turn_display_kind
 
@@ -733,7 +734,7 @@ def _project_for_display(messages: list, *, home=None, inline_images: bool = Tru
             projected["display_content"] = display_view.get("content")
             projected.pop("display_kind", None)
         projected_messages.append(projected)
-    return project_history_commentary(projected_messages, home=home)
+    return project_history_commentary(project_notification_silence(projected_messages), home=home)
 
 
 @manage_router.get("/api/sessions/{session_id}/messages")

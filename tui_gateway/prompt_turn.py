@@ -16,18 +16,11 @@ from .method_ctx import HandlerRegistry, bind_module
 _registry = HandlerRegistry()
 
 
-def _bot_mode_delivery_text(response: Any, *, successful: bool) -> Any:
-    """Return the text Bot Mode may render or relay after a completed turn.
+def _turn_allows_silence(session: dict, display_kind: str | None) -> bool:
+    """Use this turn's runtime type, never a previous notification or user-authored text."""
+    from agent.notification_policy import NOTIFICATION_DISPLAY_KINDS
 
-    The gateway owns the canonical marker set.  Keep the row and completion
-    event intact, but make a successful bare marker invisible at every Bot
-    Mode delivery boundary.  Failed turns intentionally fail open so their
-    diagnostic text is never swallowed.
-    """
-    from gateway.response_filters import is_intentional_silence_response, strip_trailing_silence_marker
-    if not successful:
-        return response
-    return "" if is_intentional_silence_response(response) else strip_trailing_silence_marker(response)
+    return display_kind in NOTIFICATION_DISPLAY_KINDS or _is_bot_mode_session(session)
 
 
 def _is_bot_mode_session(session: dict) -> bool:
@@ -524,6 +517,7 @@ class _TurnRun:
     error_retained: bool = False
     error_detail: str = ""
     prompt_text: str = ""
+    display_kind: str | None = None
     marker_key: str = ""
     receipt_attempted: bool = False
 
@@ -765,13 +759,14 @@ def _invoke_agent(
     """Wire the streaming callbacks and run the conversation into ``st.result``.
     ``text`` is the turn's raw submit, matched against the row staged by prompt.submit."""
     agent = st.agent
+    st.display_kind = display_kind
     st.compression_count = getattr(getattr(agent, "context_compressor", None), "compression_count", None)
-    # Bot Chat mirrors gateway.stream_consumer: deltas are withheld while the reply could still
+    # Bot Chat and typed notifications mirror gateway.stream_consumer: hold deltas while a reply could
     # be a bare silence marker ("NO"->"NO_REPLY") or its last line a closing one
     # ("Paris.\n\nNO"), so a marker is never shown or spoken (the client keeps streamed text
     # when message.complete is "").
     from gateway.response_filters import SilenceMarkerStreamHold
-    hold = SilenceMarkerStreamHold() if _is_bot_mode_session(session) else None
+    hold = SilenceMarkerStreamHold() if _turn_allows_silence(session, display_kind) else None
 
     def _stream(delta):
         if getattr(agent, "_mute_notification_reply", False):
@@ -795,8 +790,17 @@ def _invoke_agent(
     # Interim assistant text (commentary beside tool calls, pre-nudge final answer) is sealed
     # by the desktop as its own segment instead of being lost to message.complete.
     def _interim_assistant_cb(text: str, *, already_streamed: bool = False) -> None:
+        nonlocal hold
         if getattr(agent, "_mute_notification_reply", False):
             return
+        if hold is not None:
+            from agent.notification_policy import silence_delivery_text
+            if rest := hold.finish():
+                _emit_delta(rest)
+            hold = SilenceMarkerStreamHold()
+            text = silence_delivery_text(text, successful=True)
+            if not text:
+                return
         _emit("message.interim", sid, {"text": text, "already_streamed": already_streamed})
     agent.interim_assistant_callback = (
         _interim_assistant_cb if _load_interim_assistant_messages() else None)
@@ -943,8 +947,9 @@ def _complete_turn_payload(session: dict, st: _TurnRun, status_note: str | None,
     # The receipt verifies the stored row's body, which keeps the model's text as written;
     # only the delivered copy drops a silence marker.
     receipt = _persisted_turn_receipt(st, raw, status)
-    if _is_bot_mode_session(session):
-        raw = _bot_mode_delivery_text(raw, successful=status == "complete")
+    if _turn_allows_silence(session, getattr(st, "display_kind", None)):
+        from agent.notification_policy import silence_delivery_text
+        raw = silence_delivery_text(raw, successful=status == "complete")
     payload = {"text": raw, "usage": _get_usage(agent), "status": status}
     if receipt:
         payload["persisted_turn"] = receipt
