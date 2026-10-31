@@ -59,11 +59,11 @@ For each actionable obligation create outcome, owner if explicit, due date if ex
 
 ### 6. Review before external writes
 
-Present structured facts, high-risk clauses, low-confidence fields, and proposed tasks for approval. Drafting is not creating: writing to any external tracker requires the user's explicit scope. Recommend professional review for legal, medical, tax, or safety-critical interpretation. Done when approved fields/actions are unambiguous.
+Present structured facts, high-risk clauses, low-confidence fields, and proposed tasks. A request to extract actions does not authorize publishing them; a request or standing policy to create tasks in a named tracker can supply that scope without a second approval. Ask about consequential ambiguity or effects beyond it. Recommend professional review for legal, medical, tax, or safety-critical interpretation.
 
 ### 7. Create and verify records
 
-Use the user's approved destination — `notion`, a calendar, a spreadsheet via `xlsx`, or another task tracker. Attach document/page provenance and avoid copying unnecessary sensitive text. Read records back from the provider and verify owner/date/link. If a write times out ambiguously, search for the expected record before retrying. Done when every approved action is verified.
+Use the user's approved destination — `notion`, a calendar, a spreadsheet via `xlsx`, or another task tracker. Attach document/page provenance and avoid copying unnecessary sensitive text. Verify owner/date/link from an authoritative committed response; read back the record when that response is incomplete or ambiguous. If a write times out ambiguously, search for the expected record before retrying. Done when every approved action is verified.
 
 ## Pitfalls
 
@@ -77,5 +77,5 @@ Use the user's approved destination — `notion`, a calendar, a spreadsheet via 
 
 - [ ] Every surfaced fact or action traces to a file + page/section citation.
 - [ ] Modality ("may"/"should"/"must") and OCR uncertainty preserved in the output.
-- [ ] No external write happened without explicit approval, and every approved write was read back.
+- [ ] External writes stayed within user authorization, and committed record evidence supports the reported fields.
 - [ ] The final response separates extracted facts, proposed tasks, assumptions, and blockers.

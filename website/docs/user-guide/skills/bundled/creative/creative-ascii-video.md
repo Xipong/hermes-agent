@@ -42,15 +42,15 @@ Production pipeline for ASCII art video — any format. Converts video/audio/ima
 
 This is visual art. ASCII characters are the medium; cinema is the standard.
 
-**Before writing a single line of code**, articulate the creative concept. What is the mood? What visual story does this tell? What makes THIS project different from every other ASCII video? The user's prompt is a starting point — interpret it with creative ambition, not literal transcription.
+Establish the mood, visual story and distinguishing treatment from the brief. A direct conversion or focused repair can reuse the source's direction; a new multi-scene piece benefits from a concise concept outline.
 
-**First-render excellence is non-negotiable.** The output must be visually striking without requiring revision rounds. If something looks generic, flat, or like "AI-generated ASCII art," it is wrong — rethink the creative concept before shipping.
+**Deliver visually striking ASCII video.** Inspect actual frames and playback, and refine generic or unfinished results before shipping. Technical encoding success alone does not establish visual quality.
 
 **Go beyond the reference vocabulary.** The effect catalogs, shader presets, and palette libraries in the references are a starting vocabulary. For every project, combine, modify, and invent new patterns. The catalog is a palette of paints — you write the painting.
 
 **Be proactively creative.** Extend the skill's vocabulary when the project calls for it. If the references don't have what the vision demands, build it. Include at least one visual moment the user didn't ask for but will appreciate — a transition, an effect, a color choice that elevates the whole piece.
 
-**Cohesive aesthetic over technical correctness.** All scenes in a video must feel connected by a unifying visual language — shared color temperature, related character palettes, consistent motion vocabulary. A technically correct video where every scene uses a random different effect is an aesthetic failure.
+**Cohesive aesthetic alongside technical correctness.** All scenes in a video must feel connected by a unifying visual language — shared color temperature, related character palettes, consistent motion vocabulary. A technically correct video where every scene uses a random different effect is an aesthetic failure.
 
 **Dense, layered, considered.** Every frame should reward viewing. Never flat black backgrounds. Always multi-grid composition. Always per-scene variation. Always intentional color.
 
@@ -136,7 +136,7 @@ Don't just pick from the catalog. The catalog is vocabulary — you write the po
 
 ### Step 1: Creative Vision
 
-Before any code, articulate the creative concept:
+Use these questions when the creative direction needs development; reuse decisions already established by the brief or source:
 
 - **Mood/atmosphere**: What should the viewer feel? Energetic, meditative, chaotic, elegant, ominous?
 - **Visual story**: What happens over the duration? Build tension? Transform? Dissolve?
@@ -241,7 +241,7 @@ For segmented videos (quotes, scenes, chapters), render each as a separate clip 
 
 ## Creative Divergence (use only when user requests experimental/creative/unique output)
 
-If the user asks for creative, experimental, surprising, or unconventional output, select the strategy that best fits and reason through its steps BEFORE generating code.
+For creative, experimental, surprising, or unconventional output, these strategies can help develop an unresolved concept; they are not required brainstorming stages.
 
 - **Forced Connections** — when the user wants cross-domain inspiration ("make it look organic," "industrial aesthetic")
 - **Conceptual Blending** — when the user names two things to combine ("ocean meets music," "space + calligraphy")

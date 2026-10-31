@@ -38,11 +38,11 @@ Use when users request: animated explanations, math animations, concept visualiz
 
 This is educational cinema. Every frame teaches. Every animation reveals structure.
 
-**Before writing a single line of code**, articulate the narrative arc. What misconception does this correct? What is the "aha moment"? What visual story takes the viewer from confusion to understanding? The user's prompt is a starting point — interpret it with pedagogical ambition.
+Identify the narrative arc: the misconception, the "aha moment", and the visual path from confusion to understanding. For a focused animation, a few visual beats are enough; use a written scene plan when sequencing or collaboration needs it. Interpret the prompt with pedagogical ambition.
 
 **Geometry before algebra.** Show the shape first, the equation second. Visual memory encodes faster than symbolic memory. When the viewer sees the geometric pattern before the formula, the equation feels earned.
 
-**First-render excellence is non-negotiable.** The output must be visually clear and aesthetically cohesive without revision rounds. If something looks cluttered, poorly timed, or like "AI-generated slides," it is wrong.
+**Deliver visually clear, cohesive animation.** Inspect the rendered result and correct clutter or poor timing before delivery. A successful render alone does not establish educational or aesthetic quality.
 
 **Opacity layering directs attention.** Never show everything at full brightness. Primary elements at 1.0, contextual elements at 0.4, structural elements (axes, grids) at 0.15. The brain processes visual salience in layers.
 
@@ -83,18 +83,18 @@ Single Python script per project. No browser, no Node.js, no GPU required.
 PLAN --> CODE --> RENDER --> STITCH --> AUDIO (optional) --> REVIEW
 ```
 
-1. **PLAN** — Write `plan.md` with narrative arc, scene list, visual elements, color palette, voiceover script
+1. **PLAN** — Identify the narrative arc, scenes, visual elements and palette; use `plan.md` for substantial multi-scene work or a requested planning deliverable. Write voiceover only when narration is part of the brief
 2. **CODE** — Write `script.py` with one class per scene, each independently renderable
 3. **RENDER** — `manim -ql script.py Scene1 Scene2 ...` for draft, `-qh` for production
 4. **STITCH** — ffmpeg concat of scene clips into `final.mp4`
 5. **AUDIO** (optional) — Add voiceover and/or background music via ffmpeg. See `references/rendering.md`
-6. **REVIEW** — Render preview stills, verify against plan, adjust
+6. **REVIEW** — Inspect rendered frames and playback against the brief and visual story; adjust observed defects
 
 ## Project Structure
 
 ```
 project-name/
-  plan.md                # Narrative arc, scene breakdown
+  plan.md                # Optional narrative/scene plan for substantial work
   script.py              # All scenes in one file
   concat.txt             # ffmpeg scene list
   final.mp4              # Stitched output
@@ -158,9 +158,9 @@ Never use identical config for all scenes. For each scene:
 
 ## Workflow
 
-### Step 1: Plan (plan.md)
+### Step 1: Establish the visual story
 
-Before any code, write `plan.md`. See `references/scene-planning.md` for the comprehensive template.
+Choose the teaching objective and visual beats. For substantial multi-scene work, `references/scene-planning.md` provides a planning template; a separate `plan.md` is not needed for a bounded animation or repair.
 
 ### Step 2: Code (script.py)
 
@@ -272,7 +272,7 @@ Always iterate at `-ql`. Only render `-qh` for final output.
 
 ## Creative Divergence (use only when user requests experimental/creative/unique output)
 
-If the user asks for creative, experimental, or unconventional explanatory approaches, select a strategy and reason through it BEFORE designing the animation.
+For creative, experimental, or unconventional explanations, these strategies can help find a visual approach when the direction is not already clear.
 
 - **SCAMPER** — when the user wants a fresh take on a standard explanation
 - **Assumption Reversal** — when the user wants to challenge how something is typically taught

@@ -187,7 +187,7 @@ When proceeding with assumptions, label only the important ones.
 
 The single highest-leverage anti-slop rule. Most AI design slop is **compositional, not cosmetic** — the model reaches for a centered hero + three equal-weight feature cards for *every* surface, then decorates. Recoloring or restyling that layout never fixes it, because the layout was wrong before a single color was chosen.
 
-Before you write any colors, type scale, or components, **commit out loud to exactly one surface archetype.** This conditions generation on a high-level plan first, which collapses the entropy of what gets produced — the same reason a chain-of-thought step improves reasoning.
+Choose a composition that serves the user's primary task. The surface archetypes below help distinguish an operational screen from a marketing page; use them to guide layout, not as a required spoken declaration.
 
 The seven surfaces:
 
@@ -201,7 +201,7 @@ The seven surfaces:
 
 Rules:
 
-- State the surface in one line before designing (e.g. "This is a **Monitor** surface, so density and glanceability beat a hero").
+- Let the primary task determine density and hierarchy (e.g. a **Monitor** surface prioritizes glanceability over a hero).
 - A dashboard is a Monitor surface, not a Decide surface — do not give it a centered hero and three feature cards.
 - If a screen genuinely spans two surfaces, name the **primary** one and treat the other as secondary; do not average them into mush.
 - The hero-plus-three-cards composition is correct for **Decide/Learn only**. Reaching for it anywhere else is the #1 tell.
@@ -220,9 +220,8 @@ This one constraint eliminates more generic-looking UI than any aesthetic rule b
    - Read supplied docs, screenshots, repo files, or design assets.
    - Identify the visual vocabulary before writing code.
 
-3. **Commit to a surface** (see "Surface-First")
-   - Name the one surface archetype before any visual tokens.
-   - This conditions the composition; everything below inherits from it.
+3. **Choose a composition** (see "Surface-First")
+   - Match layout and hierarchy to the primary task and existing context.
 
 4. **Define the design system for this artifact**
    - colors
@@ -251,7 +250,7 @@ This one constraint eliminates more generic-looking UI than any aesthetic rule b
    - Run any available syntax/static checks.
    - If browser tools are available, open the file and check console errors.
    - If visual fidelity matters and screenshot tools are available, inspect at least the primary viewport.
-   - Run the slop self-audit (see "Slop Diagnostic") and repair only what it flags.
+   - Inspect for generic composition and unnecessary decoration (see "Slop Diagnostic"), alongside the brief's other requirements.
 
 8. **Report briefly**
    - exact file path
@@ -369,7 +368,7 @@ If the prototype is meant to model a product flow, design the flow, not just the
 
 ## Variation Rules
 
-When exploring, default to at least three options:
+Produce alternatives when requested or when a concrete design decision benefits from comparison; choose the number needed for that decision. Useful directions include:
 
 1. **Conservative** — closest to existing patterns / lowest risk
 2. **Strong-fit** — best interpretation of the brief
@@ -451,34 +450,24 @@ Avoid common AI design sludge:
 
 Minimal is not automatically good. Dense is not automatically cluttered. Choose intentionally.
 
-## Slop Diagnostic: Score Before You Fix
+## Slop Diagnostic
 
-AI design slop has a tiny, predictable failure distribution — designers asked to label AI UIs collapse the "this is AI" signal down to about ten tells. Before polishing or repairing an artifact, run this as an explicit self-audit and write a short report. **Diagnose first, treat second** — auditing and fixing in one breath fails, because the model's prior outweighs the instruction and it repeats the mistake (recolors when it needed re-layout, polishes type on a composition problem).
+Inspect the rendered artifact for generic patterns that conflict with the brief. Diagnose whether the problem is composition, typography, color or unnecessary decoration before choosing a repair.
 
-The ten tells (presence of each = one point of slop; lower is better):
+Common tells:
 
 1. **Tech gradient** — blue/violet/indigo glossy gradient on everything.
-2. **Generic tech hue** — the default accent is indigo/violet (not chosen for the brand, just the model's favorite).
+2. **Generic tech hue** — indigo/violet chosen by default rather than for the brand.
 3. **Feature-tile grid** — icon + heading + sentence × 3, all equal weight, nothing prioritized.
-4. **Accent rail** — a colored left strip on cards: decoration pretending to be organization.
-5. **Unearned blur** — glassmorphism with no real depth/elevation system behind it.
-6. **Monument stat** — oversized numbers filling space that should carry product story.
-7. **Icon topper** — a rounded-square icon centered above every heading (Tailwind-template filler).
-8. **Center stack** — everything centered because no real composition was committed to.
-9. **Default type** — Inter (or system-ui) used by default rather than chosen.
-10. **Wrong surface** — the composition doesn't match the surface (e.g. a hero on a Monitor surface). This is the root cause behind most of the others.
+4. **Accent rail** — a colored left strip pretending to organize cards.
+5. **Unearned blur** — glassmorphism without a useful depth/elevation system.
+6. **Monument stat** — oversized numbers filling space instead of carrying product story.
+7. **Icon topper** — a rounded-square icon centered above every heading.
+8. **Center stack** — everything centered without a considered composition.
+9. **Default type** — Inter or system-ui used without considering context.
+10. **Wrong surface** — composition mismatched to the task, such as a hero on an operational dashboard.
 
-How to run it:
-
-- Score the artifact out of 10 (10 = maximum slop). State the score and list which tells fired, in one short report.
-- Treat the report as **context, not a to-do list** — it tells you *where* to spend repair effort, it does not dictate edits.
-- Then repair, matched to the diagnosis:
-  - tells 3, 8, 10 → **re-layout / re-compose** (revisit the surface choice — do not recolor).
-  - tells 1, 2, 9 → **recolor / re-typeset** (palette and type are genuinely the problem here).
-  - tells 4, 5, 6, 7 → **remove the decoration**; replace it with real hierarchy (scale, weight, spacing).
-- Re-score after repairing. Do not declare done while compositional tells (3, 8, 10) are still firing — those are causes, the rest are usually symptoms.
-
-The point of separating diagnosis from treatment: let the audit complain first, then fix only what it complained about, in the register the complaint calls for.
+These are diagnostic clues, not an automatic score or ban on a suitable design choice. Re-compose for hierarchy/task mismatches; recolor or re-typeset for actual palette/type problems; remove decoration that does not help. Inspect the affected result after repair. A separate audit report and scoring round are unnecessary unless requested.
 
 ## Typography
 

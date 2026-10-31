@@ -47,11 +47,11 @@ Most paper explainers fit this structure (scale times proportionally for longer 
 - Geometric/visual intuition → if the paper has math, show what it MEANS
 - Before/after comparison → the most compelling evidence
 
-## Pre-code workflow
+## Plan the explanation
 
-### Gate 1: Narration script
+### Narration or visual outline
 
-Write the full narration before any code. Every sentence maps to a visual beat. If you can't write the narration, you don't understand the paper well enough to animate it.
+Identify the paper's core insight and supporting evidence. For narrated explainers, map narration to visual beats before locking timing; for silent explainers, use captions and a visual outline. Draft enough to resolve the current sequencing questions rather than blocking a useful visual prototype on a full script.
 
 ```markdown
 ## Hook (30s)
@@ -64,9 +64,9 @@ one with 70 billion — if you train it on the right data?"
 But Chinchilla showed us that most models are undertrained..."
 ```
 
-### Gate 2: Scene list
+### Scene list
 
-After the narration, break it into scenes. Each scene is one Manim class.
+Group the explanation into scenes. Each scene is one Manim class.
 
 ```markdown
 Scene 1: Hook — surprising stat with animated counter
@@ -77,7 +77,7 @@ Scene 5: Results — before/after comparison with animated bars
 Scene 6: Closing — implications text
 ```
 
-### Gate 3: Style constants
+### Style constants
 
 Before coding scenes, define the visual language:
 

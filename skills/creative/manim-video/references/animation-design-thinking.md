@@ -1,6 +1,6 @@
 # Animation Design Thinking
 
-How to decide WHAT to animate and HOW to structure it — before writing any code.
+How to decide WHAT to animate and HOW to structure it.
 
 ## Should I animate this?
 
@@ -23,9 +23,9 @@ Not everything benefits from animation. Motion adds cognitive load. Bad animatio
 
 ## Decomposing a concept into animation
 
-### Step 1: Write the narration first
+### Step 1: Establish the explanation
 
-Before any code, write what the narrator would say. This determines:
+For narrated videos, map the voiceover to visual beats before locking timing. For silent animation, use the teaching objective, captions and visual sequence instead of writing an unused narration script. This establishes:
 - **Order** — what concept comes first
 - **Duration** — how long each idea gets
 - **Visuals** — what the viewer must SEE when they HEAR each sentence

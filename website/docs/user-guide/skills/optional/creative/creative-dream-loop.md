@@ -33,10 +33,11 @@ The following is the complete skill definition that Hermes loads when this skill
 
 An autonomous process for building extremely impressive visuals, especially 3D
 scenes (games, apps, usually browser three.js/WebGL): generate photorealistic
-concept art of the ideal result, build it, screenshot the live build, have a
-judge score screenshot vs concept against a gated ladder, and iterate until
-convergence. Goal: the most visually stunning result at an acceptable frame
-rate for the target platform (e.g. 60 fps browser, 120 fps modern mobile).
+concept art of the ideal result, build it, compare a screenshot of the live
+build with the concept, and refine concrete visual gaps within the task's
+budget. Use the assessment ladder when scoring helps prioritize those gaps.
+Goal: the most visually stunning result at an acceptable frame rate for the
+target platform (e.g. 60 fps browser, 120 fps modern mobile).
 
 This skill does NOT cover general web-app functionality, 2D UI design, or
 non-visual quality — only the visual-fidelity loop.
@@ -50,18 +51,20 @@ non-visual quality — only the visual-fidelity loop.
 
 ## Prerequisites
 
-- **Concept art**: the `image_generate` tool. If unavailable, stop and ask the
-  user for a concept image (or an image-generation API to connect to).
+- **Concept art**: use a supplied or established target image, or generate one
+  with `image_generate`. If no target can be obtained, ask for a concept image
+  rather than claiming a concept-matching result.
 - **Screenshots**: `browser_exec` — serve the build locally
   (`python3 -m http.server` for static builds), then `new_tab(url)`,
   `wait_for_load()`, `capture_screenshot()`.
-- **Judging**: `vision_analyze` (see Judge section for the one-image-per-call
-  workaround).
+- **Visual comparison**: `vision_analyze` (see Assessment for the
+  one-image-per-call workaround).
 - **Optional**: Blender for asset modeling — see the `blender-3d-automation`
   skill. `delegate_task` for parallel asset work and fresh-context judging.
 
-If you don't have the tools needed for the full loop, flag that to the user
-early and stop.
+If a required capability is unavailable, state the blocked deliverable and
+what can still be verified. Do not claim visual matching from source or
+technical checks alone.
 
 ## Quick Reference
 
@@ -72,9 +75,9 @@ early and stop.
 | 3. Budget | Record time budget & start time (if given) | notes |
 | 4. Build | Implement the concept as well as possible in one go | source, plans |
 | 5. Screenshot | Capture live build at concept resolution | `round-N.png` |
-| 6. Self-check | Rigorous side-by-side audit before judging | assessment log |
-| 7. Judge | Ladder-scored comparison, actionable directives | verdict log |
-| 8. Iterate/Exit | Address directives or exit per criteria | — |
+| 6. Assess | Compare live screenshot with concept; identify concrete gaps | findings |
+| 7. Optional second opinion | Resolve a specific uncertainty or requested independent review | review evidence |
+| 8. Refine/Exit | Address material gaps within budget, or deliver per criteria | — |
 
 ## Procedure
 
@@ -115,20 +118,21 @@ noisy/grainy look. Review the image with `vision_analyze`; if it hits a
 failure mode, pass it back to `image_generate` in edit mode and ask it to fix
 the issue. Save it as `.dream-loop/concept.png`.
 
-If you generated the art (the user didn't supply it), pause and confirm it
-matches the user's vision before starting the build loop.
+Check generated art against the brief before building. Ask for confirmation
+when the user reserved that decision or the image introduces a material
+unresolved art-direction choice; otherwise proceed with the stated direction.
 
 ### 3. Time budget
 
-If the user gives a time budget, record the start time and check the clock
-between rounds. Don't degrade visual fidelity to hit the budget — strive for
-the absolute best result, and don't rush work to the judge. Parallelize or
-distribute work (e.g. `delegate_task` for independent assets) to hit the
-time goal, but no shortcuts: it's better to hit the time limit with
-meaningful, beautiful progress than with something broadly complete but ugly.
+If the user gives a time or cost budget, record it and check remaining budget
+between rounds. Prioritize the largest visible gaps and preserve accepted work;
+stop at the limit with the best verified result and disclose unfinished parts.
+Parallel work is useful for independent assets, not a requirement.
 
-If no time budget is given, run until an exit criterion — but warn upfront
-that this may consume a lot of tokens.
+Without an explicit budget, work toward the requested fidelity and performance,
+not indefinite score optimization. Another round needs a concrete unresolved
+requirement and a plausible improvement; discuss a material scope or cost
+expansion before undertaking it.
 
 ### 4. Build loop
 
@@ -157,37 +161,36 @@ the scene to settle, `capture_screenshot()`. Target the same resolution and
 aspect ratio as the concept art so the comparison is fair. Save as
 `.dream-loop/round-N.png`.
 
-### 6. Self-check before judging
+### 6. Compare the live result
 
-Each time, review the candidate screenshot yourself before submitting. Do not
-submit half-baked work. Compare screenshot and concept side by side and log an
-honest assessment of judge-readiness; only submit if confident you've
-significantly improved the score. Be rigorous and audit every pixel: big stuff
-(missing/incorrect objects, wrong scale, perspective, positioning) and small
-stuff (rendering glitches, flat untextured surfaces, ugly lighting, poor
-contrast, washed-out or oversaturated color, speckles, ugly shadows). Scan
-surface by surface, object by object, and list findings.
+Inspect the candidate screenshot beside the concept. Identify missing or
+incorrect objects, scale, perspective, positioning, materials, lighting,
+contrast, color and rendering artifacts. Prioritize the gaps visible at the
+intended viewing size. Keep concise findings for the changes that matter;
+a second audit log before assessment is not required.
 
-### 7. Judge
+### 7. Assessment
 
-Judging should ideally be done by a fresh subagent with a clean context each
-round (`delegate_task`), to keep it objective and cheap. Give the judge the
-latest screenshot, the concept, and (from round 2 on) the previous round's
-screenshot and verdict.
+Self-assessment is sufficient for routine refinement. Use a fresh reviewer
+when an independent review is requested or a specific uncertainty warrants
+it, not automatically each round. Supply the concept and current screenshot;
+add previous evidence when needed to check a claimed improvement.
 
-Mechanics: `vision_analyze` takes one image per call. Either have the judge
-make sequential calls (concept, then screenshot, then compare from memory of
-its own descriptions), or — better — stitch a labeled side-by-side composite
+Mechanics: `vision_analyze` takes one image per call. Make sequential calls
+for the concept and screenshot, or stitch a labeled side-by-side composite
 with ImageMagick (`convert concept.png shot.png +append compare.png`) or PIL
 and analyze that single image.
 
-Judge prompt:
+Optional scored assessment:
 
-> You are an art director reviewing a real-time render against its concept
-> art. Compare the screenshot to the concept and score it 0-10 using this
-> ladder. The ladder is gated: a frame cannot score above a tier's cap until
-> every requirement of the tiers below it is fully met. Be strict about the
-> gates.
+Use this ladder when a score helps prioritize fidelity work or the user asks
+for scored comparison. Scores describe visual evidence; they do not replace
+performance measurements or technical acceptance. If using the ladder, retain
+its gated meaning:
+
+> Compare the screenshot to the concept and score it 0-10. A frame cannot
+> score above a tier's cap until every requirement of the tiers below it is
+> fully met.
 >
 > - **Tier 1, shape (0-3):** camera, framing, composition, and the position
 >   and rough scale of every major object match the concept. Layout, not
@@ -212,52 +215,28 @@ Judge prompt:
 > - **Tier 5, indistinguishable (9-10):** holds up side by side and zoomed
 >   in. Nitpick every pixel.
 >
-> If a previous verdict and screenshot are provided: you are one reviewer in
-> a sequence, not the first. Maintain consistency. First mark each previous
-> directive LANDED, PARTIAL, or NOT DONE against the new screenshot; carry
-> forward anything PARTIAL or NOT DONE. Don't reverse a prior directive
-> unless the result is clearly worse — and if you do, say so and why.
->
-> Output format:
-> 1. Score on the first line; "Tier N" (highest fully-passed gate) on the
->    second.
-> 1b. If given a previous verdict: the LANDED / PARTIAL / NOT DONE list.
-> 2. "Blocking:" the specific failures of the *next* tier's gate. The builder
->    must clear these before anything else counts. Name the element and the
->    change, with magnitudes: "Rocks: replace the stacked ovoid boulders with
->    one continuous fractured slab; cracks 2-5cm wide, dark interiors, add
->    surface texture so they don't look flat/plastic" — not "the rocks look
->    artificial".
-> 3. Then at most 4 further directives from higher tiers, same style, ordered
->    by points recoverable.
->
-> No non-actionable feedback ("this looks synthetic") — name the specific
-> causes. Every directive must be actionable this round. Don't round up: if a
-> gate isn't fully passed, the cap holds.
+Report the concrete visual gaps and the changes likely to address them,
+ordered by impact. Identify elements and magnitudes where observable rather
+than saying only "looks synthetic". For a comparison, check the earlier
+findings against current evidence rather than carrying directives forward
+as obligations. State uncertainty when the screenshot cannot resolve a claim.
 
-### 8. Exit criteria
+### 8. Refine or deliver
 
-- **Score >= 8 and target FPS acceptable**: done. Show the user the latest
-  screenshot; ask if they want more iterations.
-- **Score >= 8 but FPS unacceptable**: optimize — lossless wins first, then
-  minimal-visual-impact ones. Re-judge afterwards to confirm no regression.
-- **Stall approaching** (best score hasn't improved a full point in 2 rounds,
-  or the judge named the same gap 3 times): stop incremental tweaks. Step
-  back and ask what about the *approach* is capping the score. Make one big
-  structural change in a round: swap asset strategy (sculpt in Blender, pull
-  real models/textures/HDRIs if allowed), rewrite the lighting model, rebuild
-  the composition, change the camera. Self-check carefully — big changes
-  break things. Only repeat parameter tuning if you can articulate why it
-  would work this time.
-- **Stalled** (already tried a big structural change, score flat 3 rounds,
-  judge is nitpicking or demanding intractable things like raytracing on a
-  GPU-less machine): stop, tell the user why you're blocked, give options.
-- **Otherwise**: address all or most heavy-hitting gaps this round, not just
-  the top one — rounds are expensive. Prioritize gaps that move the needle
-  most (lighting, textures, mesh detail). Only revert if the score dropped a
-  full point or more; small dips are judge noise, and reverting a whole round
-  throws out good changes with bad. If one change clearly regressed, undo
-  just that change. Loop.
+Deliver when the requested visual fidelity is supported by the actual
+screenshots, the target FPS is measured and acceptable, and relevant technical
+checks pass. An optional score alone is not acceptance.
+
+If FPS is unacceptable, optimize low-impact costs first, then inspect the
+affected visual result and measure again. If visual gaps remain, address the
+largest actionable causes rather than adjusting parameters without a reason.
+When repeated local changes do not help, reconsider asset strategy, lighting,
+composition or camera within the authorized scope; do not trigger an expensive
+rebuild merely because a score stayed flat.
+
+Stop at the user budget or a concrete blocker. Preserve improvements, explain
+the remaining gap and offer options. Revert demonstrated regressions selectively
+rather than using a score delta as the sole reason to keep or discard a round.
 
 ## Follow-up loops
 
@@ -266,18 +245,18 @@ refinements), don't create new concept art in a vacuum — it may diverge from
 what exists. Instead capture a live screenshot of the current product and
 prompt `image_generate` to render the best possible version of it (current
 screenshot → AAA-graphics version of the same shot), then use that as the
-target. Multiple screens can run parallel judge loops if asked, at higher
+target. Multiple screens can be refined in parallel if asked, at higher
 token cost.
 
 ## Pitfalls
 
 - Overbaked or oversimplified concept art (see failure modes) — fix the
   concept before building against it.
-- Submitting half-baked screenshots to the judge; the self-check gate exists
-  for a reason.
+- Treating a reviewer score or technical pass as proof of a good live result.
 - Screenshot at a different resolution/aspect than the concept — unfair
   comparison, noisy verdicts.
-- Tunnel-visioning on incremental tweaks when the judge says you're off base.
+- Tunnel-visioning on incremental tweaks when evidence points to a wrong
+  asset, composition or lighting approach.
 - Judging both images in one `vision_analyze` call — it takes one image;
   composite them first.
 - Screenshotting before the scene loads/settles — add a wait after
@@ -285,12 +264,13 @@ token cost.
 
 ## Verification
 
-- `.dream-loop/concept.png` exists and passed the failure-mode review (and
-  user confirmation, if generated).
-- Each round has a screenshot, a logged self-assessment, and a judge verdict
-  with score + tier + directives.
-- Exit only via an explicit exit criterion; final screenshot shown to the
-  user with the final score and FPS measurement.
+- The target concept exists and is consistent with the brief; requested
+  user approvals were respected.
+- The delivered build has current live screenshots inspected against that
+  target and an FPS measurement at the intended settings.
+- Show the final screenshot and deliver the working build/source, measured
+  performance, relevant technical check results and remaining limitations.
+  Distinguish visual acceptance from functionality or runtime checks not run.
 
 ---
 Adapted from [dream-loop](https://github.com/achimala/dream-loop) by Anshu

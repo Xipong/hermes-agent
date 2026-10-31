@@ -106,9 +106,7 @@ All helpers live in the skill's `scripts/` directory. Run them with the
    `scripts/docx_template.py` with a JSON object of values. Use
    `--strict` to fail when tokens remain unfilled; the JSON output lists
    `filled` counts and `unfilled_tokens` either way.
-7. **Verify** (always): re-read the output with `--text` or
-   `--structure`, and run `docx_validate.py` on anything you produced
-   via revision/comment surgery.
+7. **Verify the affected result.** Use `--text` or `--structure` when needed to establish the requested content or layout structure. Revision/comment surgery still warrants `docx_validate.py` because it changes package relationships.
 
 ## Pitfalls
 
@@ -151,8 +149,7 @@ All helpers live in the skill's `scripts/` directory. Run them with the
 
 ## Verification
 
-- After create/edit/template, run `docx_read.py out.docx --text` and
-  check the expected strings appear (and old strings are gone).
+- Select a content or structure read that establishes the requested result when the write response does not already prove it; a minor edit does not require a whole-document reread. For new or substantive documents, inspect the relevant text and structure.
 - After accept/reject, `docx_revisions.py list` should return `[]` (or
   only the ids you intentionally left); after comment surgery,
   `docx_comments.py list` should reflect the change and `--text` output

@@ -88,9 +88,9 @@ wiki/
 cross-referenced by the agent.
 **Layer 3 — The Schema:** `SCHEMA.md` defines structure, conventions, and tag taxonomy.
 
-## Resuming an Existing Wiki (CRITICAL — do this every session)
+## Orient to the Requested Wiki Task
 
-When the user has an existing wiki, **always orient yourself before doing anything**:
+Use the current schema and relevant pages for the task. Read the index when it helps locate material and recent logs when continuity or prior work matters. Reuse context already loaded; a direct lookup does not require rereading the whole orientation stack. Useful entry points:
 
 ① **Read `SCHEMA.md`** — understand the domain, conventions, and tag taxonomy.
 ② **Read `index.md`** — learn what pages exist and their summaries.
@@ -104,14 +104,13 @@ read_file "$WIKI/index.md"
 read_file "$WIKI/log.md" offset=<last 30 lines>
 ```
 
-Only after orientation should you ingest, query, or lint. This prevents:
+Choose those reads to prevent:
 - Creating duplicate pages for entities that already exist
 - Missing cross-references to existing content
 - Contradicting the schema's conventions
 - Repeating work already logged
 
-For large wikis (100+ pages), also run a quick `search_files` for the topic
-at hand before creating anything new.
+Search for the topic before creating a page when the current index or context does not establish whether it already exists.
 
 ## Initializing a New Wiki
 
@@ -138,10 +137,10 @@ Adapt to the user's domain. The schema constrains agent behavior and ensures con
 ## Conventions
 - File names: lowercase, hyphens, no spaces (e.g., `transformer-architecture.md`)
 - Every wiki page starts with YAML frontmatter (see below)
-- Use `[[wikilinks]]` to link between pages (minimum 2 outbound links per page)
+- Use `[[wikilinks]]` for meaningful relationships to existing pages; include each new page in the index. A link-count quota is not a substitute for relevance.
 - When updating a page, always bump the `updated` date
 - Every new page must be added to `index.md` under the correct section
-- Every action must be appended to `log.md`
+- Record substantive changes and valuable filed queries in `log.md`; routine read-only lookups need no write.
 - **Provenance markers:** On pages that synthesize 3+ sources, append `^[raw/articles/source-file.md]`
   at the end of paragraphs whose claims come from a specific source. This lets a reader trace each
   claim back without re-reading the whole raw file. Optional on single-source pages where the
@@ -287,8 +286,7 @@ When the user provides a source (URL, file, paste), integrate it into the wiki:
      skip if identical, flag drift and update if different. This is cheap enough to
      do on every re-ingest and catches silent source changes.
 
-② **Discuss takeaways** with the user — what's interesting, what matters for
-   the domain. (Skip this in automated/cron contexts — proceed directly.)
+② **Resolve the intended focus** from the request and wiki domain. Discuss takeaways when the user asks to explore or a missing choice changes scope; an already authorized ingest can proceed.
 
 ③ **Check what already exists** — search index.md and use `search_files` to find
    existing pages for mentioned entities/concepts. This is the difference between
@@ -299,8 +297,7 @@ When the user provides a source (URL, file, paste), integrate it into the wiki:
      in SCHEMA.md (2+ source mentions, or central to one source)
    - **Existing pages:** Add new information, update facts, bump `updated` date.
      When new info contradicts existing content, follow the Update Policy.
-   - **Cross-reference:** Every new or updated page must link to at least 2 other
-     pages via `[[wikilinks]]`. Check that existing pages link back.
+   - **Cross-reference:** Link genuinely related existing pages using `[[wikilinks]]`; update relevant backlinks and the index. Follow explicit wiki schema requirements, but do not invent unrelated links to meet a generic quota.
    - **Tags:** Only use tags from the taxonomy in SCHEMA.md
    - **Provenance:** On pages synthesizing 3+ sources, append `^[raw/articles/source.md]`
      markers to paragraphs whose claims trace to a specific source.
@@ -316,8 +313,7 @@ When the user provides a source (URL, file, paste), integrate it into the wiki:
 
 ⑥ **Report what changed** — list every file created or updated to the user.
 
-A single source can trigger updates across 5-15 wiki pages. This is normal
-and desired — it's the compounding effect.
+Update the pages needed by the source and the requested scope; more pages are not inherently a better ingest.
 
 ### 2. Query
 
@@ -332,7 +328,7 @@ When the user asks a question about the wiki's domain:
 ⑤ **File valuable answers back** — if the answer is a substantial comparison,
    deep dive, or novel synthesis, create a page in `queries/` or `comparisons/`.
    Don't file trivial lookups — only answers that would be painful to re-derive.
-⑥ **Update log.md** with the query and whether it was filed.
+⑥ **Update log.md** when filing a valuable result or when the wiki's explicit logging policy requires it; ordinary read-only answers need no mutation.
 
 ### 3. Lint
 
@@ -496,21 +492,17 @@ vault in Obsidian on your laptop/phone — changes appear within seconds.
 ## Pitfalls
 
 - **Never modify files in `raw/`** — sources are immutable. Corrections go in wiki pages.
-- **Always orient first** — read SCHEMA + index + recent log before any operation in a new session.
-  Skipping this causes duplicates and missed cross-references.
-- **Always update index.md and log.md** — skipping this makes the wiki degrade. These are the
-  navigational backbone.
+- **Use relevant context** — consult the current schema and sources needed for the task; use index/log continuity when it prevents duplicate or conflicting work.
+- **Maintain navigation after changes** — index new/removed pages and log substantive edits or filed results; keep routine read-only queries read-only.
 - **Don't create pages for passing mentions** — follow the Page Thresholds in SCHEMA.md. A name
   appearing once in a footnote doesn't warrant an entity page.
-- **Don't create pages without cross-references** — isolated pages are invisible. Every page must
-  link to at least 2 other pages.
+- **Keep pages discoverable** — index them and add meaningful relationships where they exist, rather than forcing a minimum number of links.
 - **Frontmatter is required** — it enables search, filtering, and staleness detection.
 - **Tags must come from the taxonomy** — freeform tags decay into noise. Add new tags to SCHEMA.md
   first, then use them.
 - **Keep pages scannable** — a wiki page should be readable in 30 seconds. Split pages over
   200 lines. Move detailed analysis to dedicated deep-dive pages.
-- **Ask before mass-updating** — if an ingest would touch 10+ existing pages, confirm
-  the scope with the user first.
+- **Respect batch scope** — an authorized bulk ingest can update its related pages. Clarify ambiguous scope, destructive reorganization or a material expansion beyond the request, not a fixed page-count threshold.
 - **Rotate the log** — when log.md exceeds 500 entries, rename it `log-YYYY.md` and start fresh.
   The agent should check log size during lint.
 - **Handle contradictions explicitly** — don't silently overwrite. Note both claims with dates,

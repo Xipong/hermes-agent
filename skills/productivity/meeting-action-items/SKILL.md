@@ -64,11 +64,11 @@ Load the user's tracker connector (`notion`, `github-issues`, or whichever syste
 
 ### 5. Prepare the follow-up package
 
-Draft concise minutes with decisions, action table, unresolved questions, and next checkpoint. Prepare proposed tickets/tasks and a follow-up email/chat message, but do not publish yet — drafting is not sending. Done when the user can approve each external effect individually.
+Draft concise minutes with decisions, action table, unresolved questions, and next checkpoint. Prepare tickets/tasks and a follow-up email/chat message as requested. Drafting is not sending; publish only effects covered by the request or standing authorization. Ask about unresolved recipients, conflicting commitments, or additional effects rather than requiring approval for each routine tracker update.
 
 ### 6. Apply approved changes and verify
 
-Create/update only approved records, attaching meeting provenance. Read back assignees, dates, status, and links from the provider. For ambiguous timeouts, search for the provenance marker before retrying — a blind retry duplicates records. Done when each approved item has a verified destination result.
+Create/update authorized records, attaching meeting provenance. Verify assignees, dates, status, and links from an authoritative committed response; read back the relevant record if that evidence is incomplete or ambiguous. For ambiguous timeouts, search for the provenance marker before retrying — a blind retry duplicates records. Done when each approved item has a verified destination result.
 
 ## Pitfalls
 
@@ -83,5 +83,5 @@ Create/update only approved records, attaching meeting provenance. Read back ass
 - [ ] Every decision and action traces to a quote, timestamp, or note reference.
 - [ ] No owner or due date was invented; unresolved values are visible.
 - [ ] Existing records were searched before any create; creates vs updates distinguished.
-- [ ] No ticket, task, or message was published without explicit approval.
-- [ ] Every approved write was read back from the provider.
+- [ ] Published tickets, tasks, and messages stayed within user authorization.
+- [ ] Committed record evidence supports the reported changes.

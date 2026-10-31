@@ -41,7 +41,7 @@ box hubs:create "Policy knowledge base" --description "Approved policy reference
 box hubs:get <HUB_ID> --json
 ```
 
-Adding an item curates a reference; it does not move the underlying file or folder. A clearly requested small addition may proceed without a redundant prompt. Confirm before bulk additions or removals, then verify every returned result and read back the Hub items. The API can return partial success for multi-item changes, so do not treat a successful request alone as proof that every item was added.
+Adding an item curates a reference; it does not move the underlying file or folder. A clearly requested small addition may proceed without a redundant prompt. Resolve unapproved or ambiguous bulk scope, then inspect each returned result; retrieve Hub items when the response does not establish the requested membership changes. The API can return partial success for multi-item changes, so do not treat a successful request alone as proof that every item was added.
 
 ```bash
 box hubs:items:manage <HUB_ID> \

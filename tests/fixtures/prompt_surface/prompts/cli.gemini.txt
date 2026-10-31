@@ -85,11 +85,11 @@ Before replying, scan the skills below. If a skill matches or is even partially 
     - codebase-inspection: Inspect codebases w/ pygount: LOC, languages, ratios.
     - dogfood: Exploratory QA of web apps: find bugs, evidence, reports.
     - github: GitHub via gh CLI: PRs, issues, reviews, repos, auth.
-    - requesting-code-review: Pre-commit review: security scan, quality gates, auto-fix.
-    - simplify-code: Parallel 4-agent cleanup of recent code changes.
+    - requesting-code-review: Use when reviewing changes and their relevant evidence.
+    - simplify-code: Use when simplifying code without changing its intent.
     - spike: Throwaway experiments to validate an idea before build.
-    - systematic-debugging: 4-phase root cause debugging: understand bugs before fixing.
-    - test-driven-development: TDD: enforce RED-GREEN-REFACTOR, tests before code.
+    - systematic-debugging: Use when diagnosing a failure and repairing its cause.
+    - test-driven-development: Use when tests clarify a change or prevent a regression.
   - blocked-page-recovery: Use when a fetch fails: 403/429, paywall, WAF, bot wall.
 </available_skills>
 

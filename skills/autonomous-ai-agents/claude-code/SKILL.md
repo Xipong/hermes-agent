@@ -87,7 +87,7 @@ Claude Code presents up to two confirmation dialogs on first launch. You MUST ha
 ❯ 1. Yes, I trust this folder    ← DEFAULT (just press Enter)
   2. No, exit
 ```
-**Handling:** `tmux send-keys -t <session> Enter` — default selection is correct.
+**Handling:** Inspect the directory and trust prompt. If it matches the authorized workspace, accept with `tmux send-keys -t <session> Enter`; otherwise stop and resolve the mismatch.
 
 ### Dialog 2: Individual Permission Prompts (normal flow)
 
@@ -100,15 +100,17 @@ terminal(command="tmux send-keys -t <session> Enter")
 ```
 Never send a blind `Enter` on a timer to approve prompts you have not read — that is the bypass flag with extra steps.
 
-A narrower opt-in than the full bypass is `--permission-mode acceptEdits`: file edits in the working directory are accepted, shell and other tool calls still prompt. Use it only in a dedicated worktree after reviewing the task.
+A narrower opt-in than the full bypass is `--permission-mode acceptEdits`: file edits in the working directory are accepted, shell and other tool calls still prompt. Use it for authorized workspace edits; a separate worktree is useful when concurrent work or isolation warrants it.
 
 ### Robust Dialog Handling Pattern
 ```
 # Default launch — keep permission prompts enabled
 terminal(command="tmux send-keys -t claude-work 'claude \"your task\"' Enter")
 
-# Handle trust dialog (Enter for default "Yes")
-terminal(command="sleep 4 && tmux send-keys -t claude-work Enter")
+# Inspect the startup state, then answer a trust dialog only for the authorized workspace
+terminal(command="sleep 4 && tmux capture-pane -t claude-work -p -S -30")
+# If the displayed trust prompt matches that workspace:
+terminal(command="tmux send-keys -t claude-work Enter")
 
 # Now wait for Claude to work
 terminal(command="sleep 15 && tmux capture-pane -t claude-work -p -S -60")
@@ -486,7 +488,9 @@ terminal(command="cd /path/to/repo && git diff main...feature-branch | claude -p
 ```
 terminal(command="tmux new-session -d -s review -x 140 -y 40")
 terminal(command="tmux send-keys -t review 'cd /path/to/repo && claude -w pr-review' Enter")
-terminal(command="sleep 5 && tmux send-keys -t review Enter")  # Trust dialog
+terminal(command="sleep 5 && tmux capture-pane -t review -p -S -30")
+# Accept only if the displayed trust prompt matches the authorized workspace
+terminal(command="tmux send-keys -t review Enter")
 terminal(command="sleep 2 && tmux send-keys -t review 'Review all changes vs main. Check for bugs, security issues, race conditions, and missing tests.' Enter")
 terminal(command="sleep 30 && tmux capture-pane -t review -p -S -60")
 ```
@@ -695,10 +699,7 @@ Look for these indicators:
 - `ctrl+o to expand` = tool output was truncated (can be expanded interactively)
 
 ### Context Window Health
-Use `/context` in interactive mode to see a colored grid of context usage. Key thresholds:
-- **< 70%** — Normal operation, full precision
-- **70-85%** — Precision starts dropping, consider `/compact`
-- **> 85%** — Hallucination risk spikes significantly, use `/compact` or `/clear`
+Use `/context` to inspect usage when a session grows long. Compact when the remaining context is insufficient for the next step or relevant details are getting lost; preserve the task, decisions, and verification state. A usage percentage alone is not a reason to abort or clear useful context.
 
 ## Environment Variables
 
@@ -738,7 +739,7 @@ Use `/context` in interactive mode to see a colored grid of context usage. Key t
 9. **Background tmux sessions persist** — always clean up with `tmux kill-session -t <name>` when done.
 10. **Slash commands (like `/commit`) only work in interactive mode** — in `-p` mode, describe the task in natural language instead.
 11. **`--bare` skips OAuth** — requires `ANTHROPIC_API_KEY` env var or an `apiKeyHelper` in settings.
-12. **Context degradation is real** — AI output quality measurably degrades above 70% context window usage. Monitor with `/context` and proactively `/compact`.
+12. **Manage long-session context** — use `/context` and `/compact` as needed; keep the task and evidence available rather than applying a fixed percentage cutoff.
 
 ## Rules for Hermes Agents
 

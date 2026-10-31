@@ -70,21 +70,9 @@ A requested-changes transition returns the task to its original implementer. Whe
 
 ## Review Lenses
 
-Vary how you look at the work on each round instead of repeating the same inspection. Decorrelated lenses catch different defect classes: a cold read of the artifact surfaces design and correctness problems that the implementer's narrative would have framed away, execution surfaces claims that do not reproduce, and a strict contract audit surfaces quiet scope drift. Repeating the round-1 lens on round 3 mostly re-finds what round 1 already found.
+Choose lenses for the unresolved risks: artifact inspection for correctness and design, execution for behavior claims, and a contract audit for acceptance or scope drift. On re-review, check the requested corrections and affected previously passing behavior. Reuse sufficient current-revision evidence for unchanged inputs; a new round alone does not require new tests or a different lens.
 
-Determine the current round from the history the task record already gives you: count the `changes_requested` entries in the "Prior attempts on this task" section of your worker context (also visible as prior runs in `kanban_show`). The current review round is that count plus one. Round 1 therefore shows zero `changes_requested` attempts; round 2 shows one; and so on.
-
-| Round | Lens | How to apply it |
-|---|---|---|
-| 1 | Artifact | Read the diff or deliverable cold, before the implementer's summary. Form an independent judgment, then compare it against the handoff narrative and investigate every mismatch. |
-| 2 | Execution | Check out the work and actually run it via `terminal`: build, test, and exercise the reported behavior yourself. Verify each handoff claim empirically instead of re-reading the artifact. |
-| 3+ | Contract | Re-read the ORIGINAL task body and acceptance criteria, then audit the deliverable strictly against them. Also verify that every item from every prior `kanban_request_changes` round actually landed. |
-
-The baseline duties in the Procedure section still apply on every round; the lens sets which inspection you lead with and weight most heavily.
-
-### Lens variation for ad-hoc review fan-outs
-
-The same principle applies outside the Kanban review lane. When spawning multiple parallel reviewers via `delegate_task`, give each reviewer a different lens — one diff-only brief, one full-context brief, one checkout-and-run brief — rather than identical briefs. Identical briefs produce correlated verdicts and duplicate findings; varied briefs cover more defect classes for the same review spend.
+If independent reviewers are warranted, give them distinct questions rather than duplicate briefs. This skill does not require a reviewer headcount or extra review rounds.
 
 ## Procedure
 
@@ -107,7 +95,7 @@ Map every acceptance criterion to concrete implementation or output evidence. No
 For code work:
 
 1. Use `read_file` and `search_files` to inspect the changed paths and their callers.
-2. Use `terminal` to inspect the diff and run the project's existing focused tests, lint, type checks, or build commands.
+2. Inspect the diff and existing verification evidence. Use `terminal` for focused tests, lint, type checks, or builds when needed to resolve an uncovered risk or satisfy a project gate.
 3. Exercise the reported failure path and at least one ordinary control path when practical.
 4. Check error handling, edge cases, concurrency boundaries, data preservation, security boundaries, and cross-platform behavior relevant to the change.
 5. Confirm that tests assert behavior rather than merely snapshotting source text or constants.
@@ -187,8 +175,8 @@ Before submitting the verdict, confirm:
 - [ ] `kanban_show` was read for the current task and run.
 - [ ] Every acceptance criterion was mapped to evidence.
 - [ ] The actual deliverable was inspected.
-- [ ] Relevant focused checks were run or an explicit reason was recorded when execution was impossible.
-- [ ] Prior requested changes were re-tested on re-review.
+- [ ] Relevant verification is supported by sufficient current evidence; missing execution and its impact are stated.
+- [ ] Prior requested changes and their affected behavior were verified on re-review.
 - [ ] Unrelated regressions and scope changes were considered.
 - [ ] The verdict uses exactly one terminal action.
 - [ ] The summary contains concrete, non-secret evidence.
